@@ -406,8 +406,11 @@ class AltiumBridge:
             
             logger.info(f"Running command: {command}")
             
-            # Start the process
-            process = subprocess.Popen(command, shell=True)
+            # Start the process. Altium must not inherit this server's stdio:
+            # they are the MCP transport, and a child holding them keeps the
+            # pipes open after the server exits.
+            process = subprocess.Popen(command, shell=True, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Don't wait for completion - Altium will run the script and generate the response
             logger.info(f"Launched Altium with script, process ID: {process.pid}")
@@ -1216,7 +1219,8 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
     cmd = (f'"{altium_bridge.config.altium_exe_path}" -RScriptingSystem:RunScript('
            f'ProjectName="{SANDBOX_PRJ}"^|ProcName="Sandbox>Run")')
-    subprocess.Popen(cmd, shell=True)
+    subprocess.Popen(cmd, shell=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     start = time.time()
     dialogs = 0
