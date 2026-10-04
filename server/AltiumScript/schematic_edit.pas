@@ -1111,6 +1111,51 @@ end;
 // compile_project: compile, then report violations and (optionally) every pin's net
 // ---------------------------------------------------------------------------
 
+// open_project: open a project of any kind (.PrjPcb, .PrjMbd, ...) and list
+// its logical documents, so a project written by a tool can be checked
+// through Altium's own loader.
+function OpenProjectReport(ProjectPath: String; OutPath: String): String;
+var
+    Prj   : IProject;
+    Doc   : IDocument;
+    Docs, Props, OutList : TStringList;
+    i : Integer;
+begin
+    if not FileExists(ProjectPath) then
+    begin
+        Result := 'ERROR: project file not found: ' + ProjectPath;
+        Exit;
+    end;
+    Prj := GetWorkspace.DM_GetProjectFromPath(ProjectPath);
+    if Prj = nil then Prj := GetWorkspace.DM_OpenProject(ProjectPath, True);
+    if Prj = nil then
+    begin
+        Result := 'ERROR: cannot open project ' + ProjectPath;
+        Exit;
+    end;
+    Prj.DM_SetAsCurrentProject;
+    Docs := TStringList.Create;
+    for i := 0 to Prj.DM_LogicalDocumentCount - 1 do
+    begin
+        Doc := Prj.DM_LogicalDocuments(i);
+        Docs.Add('{"kind": ' + JSONStr(Doc.DM_DocumentKind) + ', "path": ' + JSONStr(Doc.DM_FullPath) +
+                 ', "exists": ' + JSONBool(FileExists(Doc.DM_FullPath)) + '}');
+    end;
+    Props := TStringList.Create;
+    AddJSONBoolean(Props, 'success', True);
+    AddJSONProperty(Props, 'project', Prj.DM_ProjectFileName);
+    AddJSONProperty(Props, 'kind', ExtractFileExt(Prj.DM_ProjectFullPath));
+    AddJSONInteger(Props, 'logical_documents', Prj.DM_LogicalDocumentCount);
+    Props.Add(BuildJSONArray(Docs, 'documents', 1));
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
+    Result := '{"success": true, "documents": ' + IntToStr(Docs.Count) + ', "file": ' + JSONStr(OutPath) + '}';
+    OutList.Free;
+    Props.Free;
+    Docs.Free;
+end;
+
 function CompileProjectReport(ProjectPath: String; OutPath: String; IncludePins: Boolean): String;
 var
     Prj   : IProject;

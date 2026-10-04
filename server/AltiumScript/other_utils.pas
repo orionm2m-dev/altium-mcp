@@ -162,6 +162,7 @@ begin
        (CommandName = 'edit_schematic_sheet') or
        (CommandName = 'get_schematic_sheet') or
        (CommandName = 'compile_project') or
+       (CommandName = 'open_project') or
        (CommandName = 'save_documents') then
     begin
         Result := True;

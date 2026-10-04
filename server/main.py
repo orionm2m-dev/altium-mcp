@@ -1617,6 +1617,8 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
 SHEET_SPEC = EXCHANGE_DIR / "sheet_edit_spec.txt"
 SHEET_OBJECTS = EXCHANGE_DIR / "sheet_objects.json"
 COMPILE_REPORT = EXCHANGE_DIR / "compile_report.json"
+PROJECT_REPORT = EXCHANGE_DIR / "project_report.json"
+MULTIBOARD_TEMPLATE = Path(__file__).resolve().parent / "resources" / "multiboard_schematic"
 PIN_MAP = EXCHANGE_DIR / "pin_map.txt"
 # The bridge reads spec files as ANSI text, so they are written in the
 # Windows code page of this machine - that is what keeps non-ASCII labels
@@ -2085,6 +2087,171 @@ async def compile_project(ctx: Context, project_path: str, include_pins: bool = 
     except ValueError as e:
         return json.dumps({"success": False, "error": f"compile report is not valid JSON: {e}"})
     return json.dumps(data, indent=1, ensure_ascii=False)
+
+
+@mcp.tool()
+async def open_project(ctx: Context, project_path: str) -> str:
+    """
+    Open a project of any kind (.PrjPcb, .PrjMbd, ...) in Altium and list its
+    logical documents with their kinds and whether each file exists.
+
+    Use it to check a project that a tool wrote, or to bring a project into
+    the workspace before sheet tools work on its documents.
+
+    Args:
+        project_path (str): Full path of the project file.
+
+    Returns:
+        str: JSON with project, kind, logical_documents and documents[].
+    """
+    logger.info(f"open_project {project_path}")
+    if PROJECT_REPORT.exists():
+        PROJECT_REPORT.unlink()
+    response = await altium_bridge.execute_command("open_project", {"project_path": project_path})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    if not PROJECT_REPORT.is_file():
+        return json.dumps({"success": False, "error": "project report was not written", "result": response.get("result")})
+    try:
+        data = json.loads(PROJECT_REPORT.read_text(encoding=SPEC_ENCODING, errors="replace"))
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"project report is not valid JSON: {e}"})
+    return json.dumps(data, indent=1, ensure_ascii=False)
+
+
+def _project_ini(document_paths: list) -> str:
+    """Minimal project file: the keys the hierarchy depends on plus the document
+    list. Altium fills in the rest when it saves the project."""
+    lines = ["[Design]", "Version=1.0", "HierarchyMode=0", "AllowPortNetNames=0",
+             "AllowSheetEntryNetNames=1", "NetlistSinglePinNets=1", ""]
+    for n, path in enumerate(document_paths, 1):
+        lines += [f"[Document{n}]", f"DocumentPath={path}", ""]
+    return "\r\n".join(lines)
+
+
+def _relative_windows_path(path: str, base_dir: str) -> str:
+    try:
+        return os.path.relpath(path, base_dir).replace("/", "\\")
+    except ValueError:  # different drive or share
+        return path
+
+
+@mcp.tool()
+async def create_multiboard_project(ctx: Context, project_path: str, modules: list,
+                                    schematic_path: str = "", documents: list = None,
+                                    sheet_size: str = "A3") -> str:
+    """
+    Create a Multi-board Design project (.PrjMbd) with a Multi-board Schematic
+    (.MbsDoc) whose modules reference child PCB projects.
+
+    The schematic editor has no scripting interface, so the files are written
+    directly: the project is an INI file, the schematic a ZIP of JSON files
+    built from the template of an empty document saved by Altium Designer 26.
+    Each module gets its designator, title and source project; what Altium
+    does on its own afterwards stays in the GUI: Design » Import From Child
+    Projects (brings in the connectors - components with a parameter
+    System = Connector - as module entries) and the connections between
+    modules. Open the result with open_project to let Altium validate it.
+
+    Args:
+        project_path (str): Full path of the .PrjMbd to create (must not exist).
+        modules (list): [{"designator": "M1", "title": "Sensor board",
+            "project": "<full path .PrjPcb>", "board": "<full path .PcbDoc>",
+            "x", "y", "width", "height"}] - board is optional; the rectangle is
+            in page units (1/96 in) with the origin at the top-left corner and
+            defaults to a row of 240 x 160 boxes.
+        schematic_path (str): Full path of the .MbsDoc; default: next to the
+            project with the project's name.
+        documents (list): Further files to list in the project (full paths),
+            e.g. an overview schematic or an OutJob.
+        sheet_size (str): "A4", "A3" or "A2" (landscape).
+
+    Returns:
+        str: JSON with the files written and the modules placed.
+    """
+    import uuid
+    import zipfile
+    from datetime import datetime, timezone
+
+    sizes = {"A4": (1122.52, 793.70), "A3": (1587.40, 1122.52), "A2": (2245.04, 1587.40)}
+    if sheet_size not in sizes:
+        return json.dumps({"success": False, "error": f"sheet_size must be one of {sorted(sizes)}"})
+    project = Path(project_path)
+    if project.exists():
+        return json.dumps({"success": False, "error": f"project already exists: {project_path}"})
+    schematic = Path(schematic_path) if schematic_path else project.with_suffix(".MbsDoc")
+    if schematic.exists():
+        return json.dumps({"success": False, "error": f"schematic already exists: {schematic}"})
+    for m in modules:
+        for key in ("designator", "title", "project"):
+            if key not in m:
+                return json.dumps({"success": False, "error": f"module missing '{key}': {m}"})
+        if not Path(m["project"]).is_file():
+            return json.dumps({"success": False, "error": f"child project not found: {m['project']}"})
+
+    base = str(project.parent)
+    next_id = [1000]
+
+    def new_id():
+        next_id[0] += 1
+        return next_id[0]
+
+    logical_modules, items = [], []
+    for n, m in enumerate(modules):
+        mod_id, par_id = new_id(), new_id()
+        logical_modules.append({
+            "designator": m["designator"], "title": m["title"],
+            "source": {"sourceProject": _relative_windows_path(m["project"], base),
+                       "boardFileName": _relative_windows_path(m["board"], base) if m.get("board") else ""},
+            "functionalBlocks": [], "components": [], "entries": [], "entryPinMap": {"map": []},
+            "parameters": [{"name": "SourceId", "value": Path(m["project"]).name, "id": par_id}],
+            "id": mod_id})
+        rect = {"x": float(m.get("x", 120 + n * 360)), "y": float(m.get("y", 200)),
+                "width": float(m.get("width", 240)), "height": float(m.get("height", 160))}
+        item_id = new_id()
+        items.append({"$type": "__drawingModule", "logicalObjectId": mod_id, "rect": rect,
+                      "lineStyleId": 1, "fillStyleId": 1, "anchor": 5, "selectable": True, "id": item_id})
+        items.append({"$type": "__drawingLinkedProperty", "offset": {"y": 1.92}, "color": {"a": 255, "b": 128},
+                      "directValue": m["designator"], "propertyValuePath": "LogicalObject.Designator",
+                      "fontStyleId": 1, "autoposition": True, "isVisible": True, "anchor": 5,
+                      "parentId": item_id, "selectable": True, "id": new_id()})
+        items.append({"$type": "__drawingLinkedProperty", "offset": {"y": -16.1}, "color": {"a": 255, "b": 128},
+                      "directName": "Title", "directValue": m["title"], "propertyValuePath": "LogicalObject.Title",
+                      "fontStyleId": 1, "autoposition": True, "isVisible": True, "anchorType": 6, "group": 2,
+                      "order": 1, "anchor": 5, "parentId": item_id, "selectable": True, "id": new_id()})
+
+    styles = json.loads((MULTIBOARD_TEMPLATE / "styles.json").read_text(encoding="utf-8"))
+    styles["lineStyles"] = [{"thickness": 1.889763779527559, "color": {"a": 255, "r": 112, "g": 48, "b": 160},
+                             "thicknessPresetId": 2, "dashPatternPresetId": 0, "id": 1}]
+    styles["fillStyles"] = [{"a": 255, "r": 146, "g": 205, "b": 220, "id": 1}]
+    width, height = sizes[sheet_size]
+    page = {"size": {"width": width, "height": height},
+            "margin": {"top": 10.0, "left": 10.0, "right": 10.0, "bottom": 10.0},
+            "sheetSizingMode": 1, "standardSizeName": sheet_size, "horizontalZoneCount": 5,
+            "verticalZoneCount": 4, "showZones": True, "items": items, "id": 1}
+    logical = {"uniqueId": str(uuid.uuid4()), "modules": logical_modules, "powerPorts": [], "connections": [],
+               "conflicts": [], "placeableComponents": [], "virtualModules": [], "parameters": []}
+    core = {"version": 1, "modified": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f0Z")}
+
+    project.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(schematic, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("styles.json", json.dumps(styles, indent=2))
+        z.writestr("core.json", json.dumps(core, indent=2))
+        for name in ("parameters.json", "options.json", "defaults.json"):
+            z.writestr(name, (MULTIBOARD_TEMPLATE / name).read_text(encoding="utf-8"))
+        z.writestr("logical.json", json.dumps(logical, indent=2))
+        z.writestr("Pages/page_1.json", json.dumps(page, indent=2))
+
+    doc_paths = [_relative_windows_path(str(schematic), base)]
+    doc_paths += [_relative_windows_path(m["project"], base) for m in modules]
+    doc_paths += [_relative_windows_path(d, base) for d in (documents or [])]
+    project.write_text("\ufeff" + _project_ini(doc_paths), encoding="utf-8", newline="")
+    return json.dumps({"success": True, "project": str(project), "schematic": str(schematic),
+                       "documents": doc_paths, "modules": [m["designator"] for m in modules],
+                       "next_steps": ["open_project to let Altium load it",
+                                      "Design > Import From Child Projects in the schematic (GUI, ECO dialog)",
+                                      "Place > Direct Connection between the connector entries (GUI)"]},
+                      indent=1, ensure_ascii=False)
 
 
 @mcp.tool()

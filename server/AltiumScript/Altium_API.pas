@@ -1147,6 +1147,8 @@ begin
                                            ParamValueOf('include_pins') = 'true');
         'save_documents':
             Result := ExecuteSaveDocuments(RequestData);
+        'open_project':
+            Result := OpenProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'project_report.json');
     else
         LogScriptError('Error: Unknown command: ' + CommandName);
     end;
