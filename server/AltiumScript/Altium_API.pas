@@ -830,10 +830,8 @@ end;
 
 // Function to execute get output job containers
 // Scalar parameter from the parsed request ("name": value); '' when absent.
-// json.dump escapes every backslash, so a Windows path arrives with each
-// backslash doubled; collapse the pairs (and unescape quotes) or FileExists
-// fails on the doubled path. DelphiScript strings do not escape backslashes,
-// so '\\' below is two characters and '\' is one.
+// TrimJSON strips the quotes and collapses the doubled backslashes of a
+// Windows path.
 function ParamValueOf(Name: String): String;
 var
     i : Integer;
@@ -842,8 +840,6 @@ begin
     for i := 0 to RequestData.Count - 1 do
         if Pos('"' + Name + '"', RequestData[i]) > 0 then
             Result := TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i])));
-    Result := StringReplace(Result, '\\', '\', REPLACEALL);
-    Result := StringReplace(Result, '\"', '"', REPLACEALL);
 end;
 
 // get_output_job_containers: {"outjob_path": "..."} (optional)

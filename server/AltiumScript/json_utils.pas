@@ -17,6 +17,10 @@ begin
   Result := InputStr;
   Result := RemoveChar(Result, '"');
   Result := RemoveChar(Result, ',');
+  // json.dump doubles every backslash; collapse the pairs so a Windows path
+  // comes back usable. DelphiScript strings do not escape backslashes: '\\'
+  // is two characters and '\' is one.
+  Result := StringReplace(Result, '\\', '\', REPLACEALL);
   // Trim whitespace
   Result := Trim(Result);
 end;
