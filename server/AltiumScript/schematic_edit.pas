@@ -173,7 +173,7 @@ end;
 // project is loaded again.
 procedure EditSaveProject;
 var
-    Path : String;
+    ProjectPath : String;
 begin
     if EditProject = nil then
     begin
@@ -181,7 +181,7 @@ begin
         Exit;
     end;
     EditSaveSheet;
-    Path := EditProject.DM_ProjectFullPath;
+    ProjectPath := EditProject.DM_ProjectFullPath;
     EditProject.DM_SetAsCurrentProject;
     ResetParameters;
     AddStringParameter('ObjectKind', 'Project');
@@ -191,9 +191,9 @@ begin
     ResetParameters;
     AddStringParameter('ObjectKind', 'ProjectAndDocuments');
     RunProcess('WorkspaceManager:CloseObject');
-    EditProject := GetWorkspace.DM_OpenProject(Path, True);
+    EditProject := GetWorkspace.DM_OpenProject(ProjectPath, True);
     if EditProject = nil then
-        EditWarn('SAVEPROJECT: project did not reopen: ' + Path)
+        EditWarn('SAVEPROJECT: project did not reopen: ' + ProjectPath)
     else
         EditProject.DM_SetAsCurrentProject;
 end;
