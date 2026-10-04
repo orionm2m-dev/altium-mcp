@@ -3115,22 +3115,23 @@ async def get_pcb_layer_stackup(ctx: Context) -> str:
     return json.dumps(stackup_data, indent=2)
 
 @mcp.tool()
-async def get_output_job_containers(ctx: Context) -> str:
+async def get_output_job_containers(ctx: Context, outjob_path: str = "") -> str:
     """
     Get all available output job containers from a specified OutJob file
     
     Args:
-        outjob_path (str): Path to the OutJob file (optional, will use first open OutJob if not provided)
+        outjob_path (str): Full path of the .OutJob. Optional: without it the
+            first OutJob of any open project is used, which is ambiguous when
+            several projects are open.
     
     Returns:
         str: JSON array with all output job containers and their properties
     """
-    logger.info("Getting output job containers from the first open OutJob")
-    
-    # Execute the command in Altium to get output job containers
+    logger.info(f"Getting output job containers from {outjob_path or 'the first open OutJob'}")
+
     response = await altium_bridge.execute_command(
-        "get_output_job_containers", 
-        {}  # No parameters needed - will use first open OutJob
+        "get_output_job_containers",
+        {"outjob_path": outjob_path} if outjob_path else {}
     )
     
     # Check for success
@@ -3150,24 +3151,26 @@ async def get_output_job_containers(ctx: Context) -> str:
     return containers_data  # Already in JSON format
 
 @mcp.tool()
-async def run_output_jobs(ctx: Context, container_names: list) -> str:
+async def run_output_jobs(ctx: Context, container_names: list, outjob_path: str = "") -> str:
     """
     Run specified output job containers
     
     Args:
         container_names (list): List of container names to run
+        outjob_path (str): Full path of the .OutJob. Optional: without it the
+            first OutJob of any open project is used, which is ambiguous when
+            several projects are open.
     
     Returns:
         str: JSON object with results of running the output jobs
     """
-    logger.info(f"Running output jobs")
+    logger.info(f"Running output jobs from {outjob_path or 'the first open OutJob'}")
     logger.info(f"Containers to run: {container_names}")
-    
-    # Execute the command in Altium to run output jobs
-    response = await altium_bridge.execute_command(
-        "run_output_jobs", 
-        {"container_names": container_names}
-    )
+
+    params = {"container_names": container_names}
+    if outjob_path:
+        params["outjob_path"] = outjob_path
+    response = await altium_bridge.execute_command("run_output_jobs", params)
     
     # Check for success
     if not response.get("success", False):

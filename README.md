@@ -118,8 +118,8 @@ When launching claude for the first time, the server will automatically try to l
 The server provides several tools to interact with Altium Designer:
 
 ### Output Jobs
-- `get_output_job_containers`: Using currently open .OutJob file, reads all available output containers
-- `run_output_jobs`: Pass a list of output job container names from the currently open .OutJob to run any number of them. `.OutJob` must be the currently focused document.
+- `get_output_job_containers`: Reads all available output containers of an .OutJob file - the one named by `outjob_path`, or the first OutJob of any open project when the path is omitted.
+- `run_output_jobs`: Pass a list of output job container names to run any number of them; `outjob_path` names the .OutJob (it is opened and focused as needed), otherwise the first OutJob of any open project is used.
 
 ### Component Information
 - `get_all_designators`: Get a list of all component designators in the current board

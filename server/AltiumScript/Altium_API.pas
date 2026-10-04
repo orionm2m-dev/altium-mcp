@@ -829,29 +829,27 @@ begin
 end;
 
 // Function to execute get output job containers
-function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
+// Scalar parameter from the parsed request ("name": value); '' when absent.
+// json.dump escapes every backslash, so a Windows path arrives with each
+// backslash doubled; collapse the pairs (and unescape quotes) or FileExists
+// fails on the doubled path. DelphiScript strings do not escape backslashes,
+// so '\\' below is two characters and '\' is one.
+function ParamValueOf(Name: String): String;
 var
-    ParamValue: String;
-    i: Integer;
-    OutJobPath: String;
+    i : Integer;
 begin
-    OutJobPath := '';
-    
-    // Parse parameters from the request
+    Result := '';
     for i := 0 to RequestData.Count - 1 do
-    begin
-        if (Pos('"outjob_path"', RequestData[i]) > 0) then
-        begin
-            // Found the outjob_path parameter
-            ParamValue := Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i]));
-            ParamValue := TrimJSON(ParamValue);
-            OutJobPath := ParamValue;
-            break;
-        end;
-    end;
-    
-    // Call the appropriate function
-    Result := GetOutputJobContainers(ROOT_DIR);
+        if Pos('"' + Name + '"', RequestData[i]) > 0 then
+            Result := TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i])));
+    Result := StringReplace(Result, '\\', '\', REPLACEALL);
+    Result := StringReplace(Result, '\"', '"', REPLACEALL);
+end;
+
+// get_output_job_containers: {"outjob_path": "..."} (optional)
+function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
+begin
+    Result := GetOutputJobContainers(ROOT_DIR, ParamValueOf('outjob_path'));
 end;
 
 // Function to execute run output jobs
@@ -890,7 +888,7 @@ begin
         
         if ContainersList.Count > 0 then
         begin
-            Result := RunOutputJobs(ContainersList, ROOT_DIR);
+            Result := RunOutputJobs(ContainersList, ROOT_DIR, ParamValueOf('outjob_path'));
         end
         else
         begin
@@ -1012,22 +1010,6 @@ begin
 end;
 
 // Function to execute a command with parameters
-// Scalar parameter from the parsed request ("name": value); '' when absent.
-// json.dump escapes every backslash, so a Windows path arrives with each
-// backslash doubled; collapse the pairs (and unescape quotes) or FileExists
-// fails on the doubled path. DelphiScript strings do not escape backslashes,
-// so '\\' below is two characters and '\' is one.
-function ParamValueOf(Name: String): String;
-var
-    i : Integer;
-begin
-    Result := '';
-    for i := 0 to RequestData.Count - 1 do
-        if Pos('"' + Name + '"', RequestData[i]) > 0 then
-            Result := TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i])));
-    Result := StringReplace(Result, '\\', '\', REPLACEALL);
-    Result := StringReplace(Result, '\"', '"', REPLACEALL);
-end;
 
 // save_documents: {"paths": ["...", "..."]}
 function ExecuteSaveDocuments(RequestData: TStringList): String;

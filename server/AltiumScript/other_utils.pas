@@ -527,9 +527,10 @@ begin
 end;
 
 // Get all available output job containers from the first open OutJob
-function GetOutputJobContainers(ROOT_DIR: String): String;
+// OutJobPath names the job file; '' falls back to the first OutJob of any
+// open project, which is ambiguous as soon as two projects are open.
+function GetOutputJobContainers(ROOT_DIR: String; OutJobPath: String): String;
 var
-    OutJobPath: String;
     IniFile: TIniFile;
     ContainerName, ContainerAction: String;
     G, J: Integer;
@@ -539,16 +540,17 @@ var
     ContainerProps: TStringList;
     OutputLines: TStringList;
 begin
-    // Get the path of the first open OutJob
-    OutJobPath := GetOpenOutputJob();
+    if OutJobPath = '' then OutJobPath := GetOpenOutputJob();
 
-    // Exit if no open OutJob was found
-    if OutJobPath = '' then
+    if (OutJobPath = '') or not FileExists(OutJobPath) then
     begin
         ResultProps := TStringList.Create;
         try
             AddJSONBoolean(ResultProps, 'success', False);
-            AddJSONProperty(ResultProps, 'error', 'No open OutJob document found');
+            if OutJobPath = '' then
+                AddJSONProperty(ResultProps, 'error', 'No open OutJob document found')
+            else
+                AddJSONProperty(ResultProps, 'error', 'OutJob file not found: ' + OutJobPath);
             Result := BuildJSONObject(ResultProps);
         finally
             ResultProps.Free;
@@ -639,9 +641,8 @@ begin
 end;
 
 // Run selected output job containers with simplified logic
-function RunOutputJobs(ContainerNames: TStringList, ROOT_DIR: String): String;
+function RunOutputJobs(ContainerNames: TStringList; ROOT_DIR: String; OutJobPath: String): String;
 var
-    OutJobPath: String;
     IniFile: TIniFile;
     ContainerName, ContainerAction, RelativePath: String;
     G, J: Integer;
@@ -655,16 +656,17 @@ var
     OutJobDoc: IServerDocument;
     OutputLines: TStringList;
 begin
-    // Get the path of the first open OutJob
-    OutJobPath := GetOpenOutputJob();
+    if OutJobPath = '' then OutJobPath := GetOpenOutputJob();
 
-    // Exit if no open OutJob was found
-    if OutJobPath = '' then
+    if (OutJobPath = '') or not FileExists(OutJobPath) then
     begin
         ResultProps := TStringList.Create;
         try
             AddJSONBoolean(ResultProps, 'success', False);
-            AddJSONProperty(ResultProps, 'error', 'No open OutJob document found');
+            if OutJobPath = '' then
+                AddJSONProperty(ResultProps, 'error', 'No open OutJob document found')
+            else
+                AddJSONProperty(ResultProps, 'error', 'OutJob file not found: ' + OutJobPath);
             Result := BuildJSONObject(ResultProps);
         finally
             ResultProps.Free;
