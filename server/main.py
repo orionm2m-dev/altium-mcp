@@ -1114,9 +1114,13 @@ def _dismiss_altium_dialogs():
     """Close Altium modal popups that would otherwise block a script run.
 
     Altium uses two kinds: Win32 task dialogs (#32770) and Delphi TMessageForm
-    error/warning boxes. Returns the text of each dialog closed (title plus
-    its static controls), because a compile error or "another instance is
-    busy" message is the only clue the script run leaves behind.
+    error/warning boxes. Only windows of the Altium process are touched - a
+    dialog box of another application on the same desktop (an Explorer
+    confirmation, a control-panel message) is never the script's problem and
+    must not be answered on the user's behalf. Returns the text of each
+    dialog closed (title plus its static controls), because a compile error
+    or "another instance is busy" message is the only clue the script run
+    leaves behind.
     """
     try:
         import ctypes
@@ -1132,9 +1136,26 @@ def _dismiss_altium_dialogs():
         user32.GetWindowTextW(hwnd, buf, n + 1)
         return buf.value
 
+    def process_id(hwnd):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+
+    altium_pids = set()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def find_altium(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd) and "Altium Designer" in window_text(hwnd):
+            altium_pids.add(process_id(hwnd))
+        return True
+
+    user32.EnumWindows(find_altium, 0)
+    if not altium_pids:
+        return []
+
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def cb(hwnd, lparam):
-        if not user32.IsWindowVisible(hwnd):
+        if not user32.IsWindowVisible(hwnd) or process_id(hwnd) not in altium_pids:
             return True
         cls = ctypes.create_unicode_buffer(64)
         user32.GetClassNameW(hwnd, cls, 64)
