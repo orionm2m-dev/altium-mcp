@@ -41,7 +41,7 @@ end;
 // whose container is the sheet itself (ObjectId 32) belong to the sheet.
 function OwnedBySheet(Obj: ISch_GraphicalObject): Boolean;
 var
-    Owner : ISch_GraphicalObject;
+    Owner : IDispatch;   // the sheet (ISch_Document) or a component - not a graphical object
 begin
     Result := False;
     Owner := Obj.Container;
@@ -69,12 +69,12 @@ begin
     Result := Point(MilsToCoord(XMils), MilsToCoord(YMils));
 end;
 
-function FieldInt(Rec: String; Index: Integer; Default: Integer): Integer;
+function FieldInt(Rec: String; Index: Integer; Fallback: Integer): Integer;
 var
     S : String;
 begin
     S := GetFieldFromPipeString(Rec, Index);
-    if S = '' then Result := Default else Result := StrToInt(S);
+    if S = '' then Result := Fallback else Result := StrToInt(S);
 end;
 
 // Open (or focus) a schematic sheet and make it the edit target.
