@@ -1808,7 +1808,9 @@ async def edit_schematic_text(ctx: Context, sheet_path: str, replace: list = Non
     Change free text (labels/notes) and sheet-symbol names on an EXISTING sheet.
 
     Matching is by exact text. Use get_schematic_sheet first to read the
-    current labels with their coordinates.
+    current labels with their coordinates. Operations apply in the order
+    replace, move, delete, add, rename, so a text added in this call cannot
+    also be deleted by it.
 
     Args:
         sheet_path (str): Full path of the target .SchDoc.
