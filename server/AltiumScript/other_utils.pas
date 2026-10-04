@@ -527,6 +527,29 @@ begin
 end;
 
 // Get all available output job containers from the first open OutJob
+// TIniFile goes through the Windows private-profile API, which cannot read a
+// file on a network share such as \\wsl.localhost. Give it a local copy.
+function OpenOutJobIni(OutJobPath: String; ROOT_DIR: String): TIniFile;
+var
+    Lines : TStringList;
+    LocalPath : String;
+begin
+    if Copy(OutJobPath, 1, 2) <> '\\' then
+    begin
+        Result := TIniFile.Create(OutJobPath);
+        Exit;
+    end;
+    LocalPath := ROOT_DIR + 'outjob_copy.ini';
+    Lines := TStringList.Create;
+    try
+        Lines.LoadFromFile(OutJobPath);
+        Lines.SaveToFile(LocalPath);
+    finally
+        Lines.Free;
+    end;
+    Result := TIniFile.Create(LocalPath);
+end;
+
 // OutJobPath names the job file; '' falls back to the first OutJob of any
 // open project, which is ambiguous as soon as two projects are open.
 function GetOutputJobContainers(ROOT_DIR: String; OutJobPath: String): String;
@@ -567,7 +590,7 @@ begin
         AddJSONProperty(ResultProps, 'outjob_path', OutJobPath);
 
         // Open the OutJob file (it's just an INI file)
-        IniFile := TIniFile.Create(OutJobPath);
+        IniFile := OpenOutJobIni(OutJobPath, ROOT_DIR);
         try
             G := 1; // Group Number
             J := 1; // Job/Container Number
@@ -705,7 +728,7 @@ begin
         end;
 
         // Open the OutJob file (it's just an INI file)
-        IniFile := TIniFile.Create(OutJobPath);
+        IniFile := OpenOutJobIni(OutJobPath, ROOT_DIR);
         try
             // Process each requested container
             for I := 0 to ContainerNames.Count - 1 do

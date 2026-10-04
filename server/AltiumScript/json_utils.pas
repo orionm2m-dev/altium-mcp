@@ -111,10 +111,13 @@ function WriteJSONToFile(JSON: TStringList; FileName: String = ''): String;
 var
     TempFile: String;
 begin
-    // Use provided filename or generate temp filename
+    // A .json name is used as is; anything else is taken as the directory
+    // of a temporary file (the output-job functions pass ROOT_DIR here)
     if Not(AnsiEndsStr('.json', LowerCase(FileName))) then
     begin
-        TempFile := Path + 'temp_json_output.json';
+        if (FileName <> '') and (Copy(FileName, Length(FileName), 1) <> '\') then
+            FileName := FileName + '\';
+        TempFile := FileName + 'temp_json_output.json';
     end
     else
     begin
