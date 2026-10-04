@@ -900,6 +900,12 @@ var
     OutList   : TStringList;
     i, j, k : Integer;
 begin
+    // DM_OpenProject on a missing path silently creates a new empty project.
+    if not FileExists(ProjectPath) then
+    begin
+        Result := 'ERROR: project file not found: ' + ProjectPath;
+        Exit;
+    end;
     Prj := GetWorkspace.DM_GetProjectFromPath(ProjectPath);
     if Prj = nil then Prj := GetWorkspace.DM_OpenProject(ProjectPath, True);
     if Prj = nil then

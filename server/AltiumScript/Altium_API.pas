@@ -1013,8 +1013,10 @@ end;
 
 // Function to execute a command with parameters
 // Scalar parameter from the parsed request ("name": value); '' when absent.
-// json.dump escapes every backslash, so a Windows path arrives as C:\x\y;
-// undo that (and escaped quotes) or FileExists fails on the doubled path.
+// json.dump escapes every backslash, so a Windows path arrives with each
+// backslash doubled; collapse the pairs (and unescape quotes) or FileExists
+// fails on the doubled path. DelphiScript strings do not escape backslashes,
+// so '\\' below is two characters and '\' is one.
 function ParamValueOf(Name: String): String;
 var
     i : Integer;
@@ -1023,7 +1025,7 @@ begin
     for i := 0 to RequestData.Count - 1 do
         if Pos('"' + Name + '"', RequestData[i]) > 0 then
             Result := TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i])));
-    Result := StringReplace(Result, '\', '', REPLACEALL);
+    Result := StringReplace(Result, '\\', '\', REPLACEALL);
     Result := StringReplace(Result, '\"', '"', REPLACEALL);
 end;
 
@@ -1048,7 +1050,7 @@ begin
                 else
                 begin
                     Line := Trim(StringReplace(StringReplace(Line, '"', '', REPLACEALL), ',', '', REPLACEALL));
-                    Line := StringReplace(Line, '\', '', REPLACEALL);
+                    Line := StringReplace(Line, '\\', '\', REPLACEALL);
                     if Line <> '' then Paths.Add(Line);
                 end;
             end;
