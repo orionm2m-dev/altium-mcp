@@ -81,6 +81,13 @@ end;
 function EditOpenSheet(Path: String): Boolean;
 begin
     Result := False;
+    // OpenDocument on a path that does not exist hands back a NEW empty sheet,
+    // and every record that follows would quietly land there.
+    if not FileExists(Path) then
+    begin
+        EditWarn('sheet file not found: ' + Path);
+        Exit;
+    end;
     EditDoc := Client.OpenDocument('SCH', Path);
     if EditDoc = nil then
     begin
@@ -767,10 +774,15 @@ var
     Iter, EntryIter : ISch_Iterator;
     Obj, Entry : ISch_GraphicalObject;
     Comps, Labels, Nets, Ports, Symbols, Wires, Misc, Entries : TStringList;
-    Out, Props : TStringList;
+    OutList, Props : TStringList;
     S : String;
     v : Integer;
 begin
+    if not FileExists(Path) then
+    begin
+        Result := 'ERROR: sheet file not found: ' + Path;
+        Exit;
+    end;
     Doc := Client.OpenDocument('SCH', Path);
     if Doc = nil then
     begin
@@ -861,9 +873,9 @@ begin
     Props.Add(BuildJSONArray(Symbols, 'sheet_symbols', 1));
     Props.Add(BuildJSONArray(Wires, 'wires', 1));
     Props.Add(BuildJSONArray(Misc, 'other', 1));
-    Out := TStringList.Create;
-    Out.Text := BuildJSONObject(Props);
-    Out.SaveToFile(OutPath);
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
 
     Result := '{"success": true, "file": ' + JSONStr(OutPath) +
               ', "components": ' + IntToStr(Comps.Count) + ', "labels": ' + IntToStr(Labels.Count) +
@@ -871,7 +883,7 @@ begin
               ', "sheet_symbols": ' + IntToStr(Symbols.Count) + ', "wires": ' + IntToStr(Wires.Count) +
               ', "other": ' + IntToStr(Misc.Count) + '}';
 
-    Out.Free; Props.Free; Comps.Free; Labels.Free; Nets.Free; Ports.Free; Symbols.Free; Wires.Free; Misc.Free;
+    OutList.Free; Props.Free; Comps.Free; Labels.Free; Nets.Free; Ports.Free; Symbols.Free; Wires.Free; Misc.Free;
 end;
 
 // ---------------------------------------------------------------------------
@@ -882,12 +894,10 @@ function CompileProjectReport(ProjectPath: String; OutPath: String; IncludePins:
 var
     Prj   : IProject;
     Doc   : IDocument;
-    Part  : IPart;
-    Pin   : IPin;
-    Viol  : IViolation;
+    Part, Pin, Viol;          // IPart / IPin / IViolation are not script type names
     Compiled : Boolean;
     Viols, Pins, Props : TStringList;
-    Out   : TStringList;
+    OutList   : TStringList;
     i, j, k : Integer;
 begin
     Prj := GetWorkspace.DM_GetProjectFromPath(ProjectPath);
@@ -932,13 +942,13 @@ begin
     AddJSONInteger(Props, 'violation_count', Prj.DM_ViolationCount);
     Props.Add(BuildJSONArray(Viols, 'violations', 1));
     Props.Add(BuildJSONArray(Pins, 'pins', 1));
-    Out := TStringList.Create;
-    Out.Text := BuildJSONObject(Props);
-    Out.SaveToFile(OutPath);
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
 
     Result := '{"success": true, "compiled": ' + JSONBool(Compiled) + ', "violation_count": ' + IntToStr(Prj.DM_ViolationCount) +
               ', "pins": ' + IntToStr(Pins.Count) + ', "file": ' + JSONStr(OutPath) + '}';
-    Out.Free; Props.Free; Viols.Free; Pins.Free;
+    OutList.Free; Props.Free; Viols.Free; Pins.Free;
 end;
 
 // ---------------------------------------------------------------------------
