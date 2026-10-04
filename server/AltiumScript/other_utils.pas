@@ -782,12 +782,17 @@ begin
                                 end
                                 else if ContainerAction = 'Publish' then
                                 begin
-                                    // Run PublishToPDF with simpler parameters
+                                    // Run PublishToPDF. The job file already holds its
+                                    // output path; passing it again as OutputBasePath
+                                    // makes the publisher write nothing when that path
+                                    // is on a network share, so it is only passed for
+                                    // local paths.
                                     ResetParameters;
                                     AddStringParameter('Action', 'PublishToPDF');
                                     AddStringParameter('OutputMedium', ContainerName);
                                     AddStringParameter('ObjectKind', 'OutputBatch');
-                                    AddStringParameter('OutputBasePath', RelativePath);
+                                    if (RelativePath <> '') and (Copy(RelativePath, 1, 2) <> '\\') then
+                                        AddStringParameter('OutputBasePath', RelativePath);
                                     AddStringParameter('DisableDialog', 'True');
                                     RunProcess('WorkspaceManager:Print');
 
