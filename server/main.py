@@ -21,6 +21,7 @@ import io
 import base64
 import glob
 import re
+import locale
 
 # Configure logging
 logging.basicConfig(
@@ -1570,6 +1571,399 @@ async def build_schematic(ctx: Context, parts: list, wires: list = None,
     result["pin_map_note"] = ("Absolute electrical connection points. Route "
                               "wires from these, not from predicted offsets.")
     return json.dumps(result, indent=2)
+
+# ---------------------------------------------------------------------------
+# Editing existing schematic sheets by data (schematic_edit.pas)
+# ---------------------------------------------------------------------------
+
+SHEET_SPEC = EXCHANGE_DIR / "sheet_edit_spec.txt"
+SHEET_OBJECTS = EXCHANGE_DIR / "sheet_objects.json"
+COMPILE_REPORT = EXCHANGE_DIR / "compile_report.json"
+PIN_MAP = EXCHANGE_DIR / "pin_map.txt"
+# The bridge reads spec files as ANSI text, so they are written in the
+# Windows code page of this machine - that is what keeps non-ASCII labels
+# (Cyrillic notes, degree signs, Greek letters) intact end to end.
+SPEC_ENCODING = locale.getpreferredencoding(False)
+
+
+def _spec_field(value) -> str:
+    """One pipe-delimited field: the separator itself cannot appear in a value."""
+    return str(value).replace("|", "/").replace("\r", " ").replace("\n", " ")
+
+
+def _read_pin_map() -> dict:
+    pin_map = {}
+    if PIN_MAP.is_file():
+        for line in PIN_MAP.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines():
+            f = line.strip().split("|")
+            if len(f) == 5 and f[0] == "PIN":
+                pin_map.setdefault(f[1], {})[f[2]] = [int(f[3]), int(f[4])]
+    return pin_map
+
+
+async def _run_sheet_spec(lines: list) -> str:
+    SHEET_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    if PIN_MAP.exists():
+        PIN_MAP.unlink()
+    response = await altium_bridge.execute_command("edit_schematic_sheet", {})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    result = response.get("result", {})
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            return result
+    pin_map = _read_pin_map()
+    if pin_map:
+        result["pin_map"] = pin_map
+        result["pin_map_note"] = "Absolute connection points (mils) of the placed pins; route wires from these."
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+def _part_records(parts: list) -> list:
+    lines = []
+    for p in parts:
+        for key in ("designator", "symbol", "x", "y"):
+            if key not in p:
+                raise ValueError(f"part missing required key '{key}': {p}")
+        lines.append("PART|{}|{}|{}|{}|{}|{}".format(
+            _spec_field(p["designator"]), _spec_field(p["symbol"]), int(p["x"]), int(p["y"]),
+            int(p.get("orientation", 0)), 1 if p.get("mirror") else 0))
+        if p.get("comment") is not None:
+            lines.append(f"COMMENT|{_spec_field(p['comment'])}")
+        if p.get("comment_hidden"):
+            lines.append("COMMENT_HIDDEN|1")
+        if p.get("description"):
+            lines.append(f"DESCRIPTION|{_spec_field(p['description'])}")
+        if p.get("footprint"):
+            lines.append(f"FOOTPRINT|{_spec_field(p['footprint'])}")
+        for name, val in (p.get("parameters") or {}).items():
+            lines.append(f"PARAM|{_spec_field(name)}|{_spec_field(val)}")
+        if p.get("designator_at"):
+            lines.append("DESIGNATOR_AT|{}|{}".format(int(p["designator_at"][0]), int(p["designator_at"][1])))
+        if p.get("comment_at"):
+            lines.append("COMMENT_AT|{}|{}".format(int(p["comment_at"][0]), int(p["comment_at"][1])))
+    return lines
+
+
+def _wiring_records(wires, junctions, net_labels, power_ports, ports, no_erc, notes) -> list:
+    lines = []
+    for route in (wires or []):
+        if len(route) < 4 or len(route) % 2:
+            raise ValueError(f"wire needs an even count of >=4 coords: {route}")
+        lines.append("WIRE|" + "|".join(str(int(v)) for v in route))
+    for j in (junctions or []):
+        lines.append(f"JUNCTION|{int(j['x'])}|{int(j['y'])}")
+    for n in (net_labels or []):
+        lines.append("NETLABEL|{}|{}|{}|{}".format(int(n["x"]), int(n["y"]), int(n.get("orientation", 0)), _spec_field(n["text"])))
+    for pw in (power_ports or []):
+        lines.append("POWER|{}|{}|{}|{}|{}|{}".format(
+            int(pw["x"]), int(pw["y"]), int(pw.get("orientation", 3)), int(pw.get("style", 5)),
+            _spec_field(pw["text"]), 1 if pw.get("show_net_name") else 0))
+    for pt in (ports or []):
+        lines.append("SPORT|{}|{}|{}|{}|{}|{}".format(
+            int(pt["x"]), int(pt["y"]), _spec_field(pt["name"]), int(pt.get("io_type", 0)),
+            int(pt.get("style", 0)), int(pt.get("width", 1000))))
+    for n in (no_erc or []):
+        lines.append(f"NOERC|{int(n['x'])}|{int(n['y'])}")
+    for nt in (notes or []):
+        rec = "NOTE|{}|{}|{}".format(int(nt["x"]), int(nt["y"]), _spec_field(nt["text"]))
+        if nt.get("font_size"):
+            rec += "|{}|{}".format(int(nt["font_size"]), _spec_field(nt.get("font_name", "Arial")))
+        lines.append(rec)
+    return lines
+
+
+@mcp.tool()
+async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
+    """
+    Apply a pipe-delimited edit spec to one or more EXISTING schematic sheets.
+
+    This is the batch form behind place_schematic_components,
+    add_schematic_wiring, edit_schematic_text, set_component_parameters and
+    delete_schematic_objects; use it directly for a mixed edit in one Altium
+    run. Every touched sheet is saved. Coordinates in mils.
+
+    Records (one per line; a value must not contain '|'):
+        SHEET|<path .SchDoc>            target for the records that follow
+        LIBRARY|<path .SchLib>          symbol source for PART records
+        PART|designator|symbol|x|y|orientation|mirror
+        COMMENT|text  DESCRIPTION|text  FOOTPRINT|model  PARAM|name|value
+        DESIGNATOR_AT|x|y  COMMENT_AT|x|y  COMMENT_HIDDEN|1   (last PART)
+        WIRE|x|y|x|y[|x|y...]  JUNCTION|x|y  NOERC|x|y
+        NETLABEL|x|y|orientation|text
+        POWER|x|y|orientation|style|text|show_net_name
+        SPORT|x|y|name|iotype|style|width
+        NOTE|x|y|text[|font_size[|font_name]]
+        TEXT_REPLACE|old|new  TEXT_MOVE|text|x|y  TEXT_DELETE|text
+        SET_PARAM|designator|name|value  SET_COMMENT|designator|text
+        SET_FOOTPRINT|designator|model
+        DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
+                                                      noerc junction port power)
+        SHEETSYMBOL_RENAME|old|new
+    A library component whose pins do not survive Altium's Replicate is
+    rebuilt from its primitives; the result says so in `warnings`.
+
+    Args:
+        spec_file (str): Path to the spec file (text in the Windows code page).
+
+    Returns:
+        str: JSON with per-record counts, warnings, and the pin map of every
+             placed part (absolute connection points).
+    """
+    logger.info(f"edit_schematic_sheet from {spec_file}")
+    try:
+        text = Path(spec_file).read_text(encoding=SPEC_ENCODING, errors="replace")
+    except OSError as e:
+        return json.dumps({"success": False, "error": f"could not read spec file: {e}"})
+    return await _run_sheet_spec(text.splitlines())
+
+
+@mcp.tool()
+async def place_schematic_components(ctx: Context, sheet_path: str, library_path: str, parts: list) -> str:
+    """
+    Place symbols from a .SchLib onto an EXISTING schematic sheet and save it.
+
+    Unlike build_schematic this does not create a new sheet: it adds parts to
+    the sheet given, so hierarchical designs can be extended sheet by sheet.
+    Read the returned pin_map and route wires from those measured points with
+    add_schematic_wiring - a pin's connection point is PinLength away from
+    Pin.Location, never guess it.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc (opened if needed).
+        library_path (str): Full path of the .SchLib holding the symbols.
+        parts (list): dicts with designator, symbol (LibReference), x, y (mils);
+            optional orientation (0-3), mirror (bool), comment, comment_hidden,
+            description, footprint (PCBLIB model name), parameters {name: value},
+            designator_at [x, y], comment_at [x, y].
+
+    Returns:
+        str: JSON with parts_placed, warnings and pin_map.
+    """
+    logger.info(f"place_schematic_components: {len(parts)} parts on {sheet_path}")
+    try:
+        lines = [f"SHEET|{sheet_path}", f"LIBRARY|{library_path}"] + _part_records(parts)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": str(e)})
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def add_schematic_wiring(ctx: Context, sheet_path: str, wires: list = None, junctions: list = None,
+                               net_labels: list = None, power_ports: list = None, ports: list = None,
+                               no_erc: list = None, notes: list = None) -> str:
+    """
+    Add wires, junctions, net labels, power ports, sheet ports, No-ERC markers
+    and free text to an EXISTING schematic sheet, then save it.
+
+    Conventions that keep the result electrically right (see
+    dev/SCHEMATIC_CONVENTIONS.md): a net label must sit ON a wire to name it;
+    a wire end on a pin's connection point connects, a wire crossing a pin's
+    body does not; junctions only where three or more branches meet.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc.
+        wires (list): each a flat list of alternating x, y in mils.
+        junctions (list): [{"x", "y"}]
+        net_labels (list): [{"x", "y", "text", "orientation"}]
+        power_ports (list): [{"x", "y", "text", "orientation", "style", "show_net_name"}]
+        ports (list): [{"x", "y", "name", "io_type", "style", "width"}]
+        no_erc (list): [{"x", "y"}]
+        notes (list): [{"x", "y", "text", "font_size", "font_name"}]
+
+    Returns:
+        str: JSON with counts per object kind and warnings.
+    """
+    logger.info(f"add_schematic_wiring on {sheet_path}")
+    try:
+        lines = [f"SHEET|{sheet_path}"] + _wiring_records(wires, junctions, net_labels, power_ports, ports, no_erc, notes)
+    except (ValueError, KeyError) as e:
+        return json.dumps({"success": False, "error": str(e)})
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def edit_schematic_text(ctx: Context, sheet_path: str, replace: list = None, move: list = None,
+                              delete: list = None, add: list = None, rename_sheet_symbols: list = None) -> str:
+    """
+    Change free text (labels/notes) and sheet-symbol names on an EXISTING sheet.
+
+    Matching is by exact text. Use get_schematic_sheet first to read the
+    current labels with their coordinates.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc.
+        replace (list): [{"old": "...", "new": "..."}]
+        move (list): [{"text": "...", "x": .., "y": ..}]
+        delete (list): ["text", ...]
+        add (list): [{"x", "y", "text", "font_size", "font_name"}]
+        rename_sheet_symbols (list): [{"old": "...", "new": "..."}]
+
+    Returns:
+        str: JSON with texts_replaced / texts_moved / texts_deleted / notes /
+             sheet_symbols_renamed and warnings for texts not found.
+    """
+    logger.info(f"edit_schematic_text on {sheet_path}")
+    lines = [f"SHEET|{sheet_path}"]
+    for r in (replace or []):
+        lines.append(f"TEXT_REPLACE|{_spec_field(r['old'])}|{_spec_field(r['new'])}")
+    for m in (move or []):
+        lines.append(f"TEXT_MOVE|{_spec_field(m['text'])}|{int(m['x'])}|{int(m['y'])}")
+    for d in (delete or []):
+        lines.append(f"TEXT_DELETE|{_spec_field(d)}")
+    try:
+        lines += _wiring_records(None, None, None, None, None, None, add)
+    except (ValueError, KeyError) as e:
+        return json.dumps({"success": False, "error": str(e)})
+    for r in (rename_sheet_symbols or []):
+        lines.append(f"SHEETSYMBOL_RENAME|{_spec_field(r['old'])}|{_spec_field(r['new'])}")
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def set_component_parameters(ctx: Context, sheet_path: str, components: list) -> str:
+    """
+    Set parameters, comment or footprint model of components already on a sheet.
+
+    Typical use: assembly variants kept as a parameter (e.g. Assembly_Base =
+    FIT / DNP), value changes, adding a footprint link.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc.
+        components (list): [{"designator": "R12", "parameters": {"Assembly_Base": "FIT"},
+                             "comment": "0R", "footprint": "RES_0402"}] - each
+            key other than designator is optional.
+
+    Returns:
+        str: JSON with parts_updated and warnings for designators not found.
+    """
+    logger.info(f"set_component_parameters on {sheet_path}")
+    lines = [f"SHEET|{sheet_path}"]
+    for c in components:
+        d = _spec_field(c["designator"])
+        for name, val in (c.get("parameters") or {}).items():
+            lines.append(f"SET_PARAM|{d}|{_spec_field(name)}|{_spec_field(val)}")
+        if c.get("comment") is not None:
+            lines.append(f"SET_COMMENT|{d}|{_spec_field(c['comment'])}")
+        if c.get("footprint"):
+            lines.append(f"SET_FOOTPRINT|{d}|{_spec_field(c['footprint'])}")
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def delete_schematic_objects(ctx: Context, sheet_path: str, designators: list = None, at: list = None) -> str:
+    """
+    Remove components by designator and other objects by position from a sheet.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc.
+        designators (list): components to remove, e.g. ["TP01", "R99"].
+        at (list): [{"kind": "wire", "x": .., "y": ..}] - kind is one of wire
+            (matched on its first vertex), netlabel, label, noerc, junction,
+            port, power; coordinates in mils as get_schematic_sheet reports them.
+
+    Returns:
+        str: JSON with parts_deleted / objects_deleted and warnings.
+    """
+    logger.info(f"delete_schematic_objects on {sheet_path}")
+    lines = [f"SHEET|{sheet_path}"]
+    for d in (designators or []):
+        lines.append(f"DELETE_PART|{_spec_field(d)}")
+    for a in (at or []):
+        lines.append(f"DELETE_AT|{_spec_field(a['kind'])}|{int(a['x'])}|{int(a['y'])}")
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def get_schematic_sheet(ctx: Context, sheet_path: str) -> str:
+    """
+    Read every object of a schematic sheet: components with parameters,
+    footprint models and pin connection points, labels, net labels, ports,
+    sheet symbols with their entries, wires, junctions, No-ERC and power ports.
+
+    The sheet is opened if it is not already. Coordinates in mils. Large
+    sheets are returned in full; the same JSON is also left in the exchange
+    folder (`file` in the result).
+
+    Args:
+        sheet_path (str): Full path of the .SchDoc.
+
+    Returns:
+        str: JSON object with sheet size and the object arrays.
+    """
+    logger.info(f"get_schematic_sheet {sheet_path}")
+    if SHEET_OBJECTS.exists():
+        SHEET_OBJECTS.unlink()
+    response = await altium_bridge.execute_command("get_schematic_sheet", {"sheet_path": sheet_path})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    if not SHEET_OBJECTS.is_file():
+        return json.dumps({"success": False, "error": "sheet dump file was not written", "result": response.get("result")})
+    try:
+        data = json.loads(SHEET_OBJECTS.read_text(encoding=SPEC_ENCODING, errors="replace"))
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"sheet dump is not valid JSON: {e}"})
+    data["file"] = str(SHEET_OBJECTS)
+    return json.dumps(data, indent=1, ensure_ascii=False)
+
+
+@mcp.tool()
+async def compile_project(ctx: Context, project_path: str, include_pins: bool = False) -> str:
+    """
+    Compile a project and report its violations (ERC) and, optionally, the net
+    of every pin in the flattened design.
+
+    The violation list is Altium's own: level, kind ("Nets with no driving
+    source", ...), detail with the pins involved. include_pins gives the
+    verified netlist - the check that proves a wire or net label actually
+    connected what it was meant to.
+
+    Args:
+        project_path (str): Full path of the .PrjPcb (opened if needed).
+        include_pins (bool): Also list designator / pin / net for every pin.
+
+    Returns:
+        str: JSON with compiled, document counts, violations[] and pins[].
+    """
+    logger.info(f"compile_project {project_path}")
+    if COMPILE_REPORT.exists():
+        COMPILE_REPORT.unlink()
+    response = await altium_bridge.execute_command(
+        "compile_project", {"project_path": project_path, "include_pins": "true" if include_pins else "false"})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    if not COMPILE_REPORT.is_file():
+        return json.dumps({"success": False, "error": "compile report was not written", "result": response.get("result")})
+    try:
+        data = json.loads(COMPILE_REPORT.read_text(encoding=SPEC_ENCODING, errors="replace"))
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"compile report is not valid JSON: {e}"})
+    return json.dumps(data, indent=1, ensure_ascii=False)
+
+
+@mcp.tool()
+async def save_documents(ctx: Context, paths: list) -> str:
+    """
+    Save open Altium documents by path (.SchDoc, .SchLib, .PcbLib, .PcbDoc).
+
+    The library creation tools work on the open library in memory; call this
+    to write the result to disk when the user does not save it in Altium.
+
+    Args:
+        paths (list): Full paths of documents that are open in Altium.
+
+    Returns:
+        str: JSON with saved[] and not_saved[] (not open, or save refused).
+    """
+    logger.info(f"save_documents {paths}")
+    response = await altium_bridge.execute_command("save_documents", {"paths": paths})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    result = response.get("result", {})
+    return json.dumps(result, indent=2, ensure_ascii=False) if not isinstance(result, str) else result
+
 
 @mcp.tool()
 async def create_symbols_batch(ctx: Context, spec_file: str) -> str:

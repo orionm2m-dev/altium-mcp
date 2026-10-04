@@ -158,7 +158,11 @@ begin
        (CommandName = 'create_symbols_batch') or
        (CommandName = 'get_footprint_primitives') or
        (CommandName = 'create_footprints_batch') or
-       (CommandName = 'create_pcb_footprint') then
+       (CommandName = 'create_pcb_footprint') or
+       (CommandName = 'edit_schematic_sheet') or
+       (CommandName = 'get_schematic_sheet') or
+       (CommandName = 'compile_project') or
+       (CommandName = 'save_documents') then
     begin
         Result := True;
         Exit;
