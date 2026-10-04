@@ -707,15 +707,16 @@ begin
         // Add the OutJob path to the result
         AddJSONProperty(ResultProps, 'outjob_path', OutJobPath);
 
-        // Open the OutJob document
+        // Open the OutJob document and make it the active one: the Print
+        // process works on the active document, and Focus alone does not
+        // activate a document that was just opened.
         if not(Client.IsDocumentOpen(OutJobPath)) then
-        begin
-            OutJobDoc := Client.OpenDocument('OUTPUTJOB', OutJobPath);
-            OutJobDoc.Focus();
-        end
+            OutJobDoc := Client.OpenDocument('OUTPUTJOB', OutJobPath)
         else
-        begin
             OutJobDoc := Client.GetDocumentByPath(OutJobPath);
+        if OutJobDoc <> Nil then
+        begin
+            Client.ShowDocument(OutJobDoc);
             OutJobDoc.Focus();
         end;
 
