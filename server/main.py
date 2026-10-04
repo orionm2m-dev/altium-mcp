@@ -1275,6 +1275,42 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
 
 @mcp.tool()
+async def recover_script_executor(ctx: Context, timeout_seconds: int = 60) -> str:
+    """
+    Unwedge Altium's script executor after a script died, then verify.
+
+    A runtime error leaves the failed script paused in Altium's debugger
+    with no dialog, and every later RunScript silently does nothing until
+    the debugger is stopped. This tool dispatches Altium's own Stop
+    Debugging process into the running instance (`X2.EXE -REditScript:Stop`,
+    the same launch channel the other tools use, so no window focus or
+    keystrokes are needed) and then runs a one-line probe through the
+    sandbox. Only a probe that comes back proves the executor is usable
+    again; a wedge is defined by scripts silently doing nothing.
+
+    Args:
+        timeout_seconds (int): How long to wait for the probe (default 60).
+
+    Returns:
+        str: JSON with recovered (bool), the probe result and the steps.
+    """
+    exe = altium_bridge.config.altium_exe_path
+    if not os.path.exists(exe):
+        return json.dumps({"recovered": False, "error": f"Altium executable not found: {exe}"})
+    logger.info("recover_script_executor: dispatching EditScript:Stop")
+    subprocess.Popen(f'"{exe}" -REditScript:Stop', shell=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    await asyncio.sleep(3)
+    probe = await run_altium_script(ctx, "ResultText := '{\"probe\": \"executor ok\"}';",
+                                    timeout_seconds)
+    try:
+        outcome = json.loads(probe)
+    except ValueError:
+        outcome = {"success": False, "raw": probe}
+    return json.dumps({"recovered": bool(outcome.get("success")), "probe": outcome}, indent=2)
+
+
+@mcp.tool()
 async def ensure_altium_script_skill(ctx: Context, install: bool = False) -> str:
     """
     Check whether the "altium-script" skill is installed, and optionally
