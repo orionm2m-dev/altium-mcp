@@ -1092,6 +1092,18 @@ SANDBOX_LOG = EXCHANGE_DIR / "sandbox_log.txt"
 SANDBOX_RESULT = EXCHANGE_DIR / "sandbox_result.json"
 SANDBOX_BEGIN = "// === BEGIN EXPERIMENT"
 SANDBOX_END = "// === END EXPERIMENT"
+SANDBOX_DECL_BEGIN = "// === BEGIN DECLARATIONS"
+SANDBOX_DECL_END = "// === END DECLARATIONS"
+
+
+def _inject_between(src: str, begin: str, end: str, text: str, indent: str) -> str:
+    """Replace the block between two marker lines, keeping both markers."""
+    pre, rest = src.split(begin, 1)
+    marker_line, rest = rest.split("\n", 1)
+    _, post = rest.split(end, 1)
+    body = "\n".join(indent + ln if ln.strip() else ln
+                     for ln in text.strip("\n").splitlines())
+    return pre + begin + marker_line + "\n" + body + "\n" + indent + end + post
 
 
 def _dismiss_altium_dialogs():
@@ -1131,7 +1143,8 @@ def _dismiss_altium_dialogs():
 
 
 @mcp.tool()
-async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120) -> str:
+async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120,
+                            declarations: str = "") -> str:
     """
     Run a DelphiScript snippet inside an isolated Altium sandbox and report
     what happened, step by step.
@@ -1152,7 +1165,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     - Assign findings to the string variable ResultText - it is returned.
     - DelphiScript has NO inline variable declarations. Reuse the provided
       scratch variables: S1..S3 (String), I1..I3 and B1 (Integer),
-      Obj1..Obj5 (IDispatch), List1 (TStringList), IntMan, DbDoc.
+      Obj1..Obj5 (IDispatch), List1 (TStringList), IntMan, DbDoc - or pass
+      your own const/var blocks, procedures and functions in `declarations`;
+      they are placed at unit level before Run, so the body can call them
+      and they can call SandboxLog. Names must not collide with the
+      sandbox's own (LogLines, LogPath, OutPath, S1.., Obj1.., List1, ...).
     - try/except does NOT catch runtime errors such as bad conversions or
       invalid API calls, so it cannot be relied on to keep a script alive.
     - The sandbox is standalone: helpers and constants from the production
@@ -1168,6 +1185,8 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     Args:
         script (str): DelphiScript statements to execute (body only).
         timeout_seconds (int): How long to wait for completion (default 120).
+        declarations (str): Optional unit-level DelphiScript (const, var,
+            procedures, functions) made available to the body.
 
     Returns:
         str: JSON with success, the step log, the script's ResultText, and on
@@ -1182,14 +1201,9 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
     try:
         src = SANDBOX_PAS.read_text(encoding="utf-8")
-        pre, rest = src.split(SANDBOX_BEGIN, 1)
-        marker_line, rest = rest.split("\n", 1)
-        _, post = rest.split(SANDBOX_END, 1)
-        body = "\n".join("        " + ln if ln.strip() else ln
-                          for ln in script.strip("\n").splitlines())
-        SANDBOX_PAS.write_text(
-            pre + SANDBOX_BEGIN + marker_line + "\n" + body + "\n        " + SANDBOX_END + post,
-            encoding="utf-8")
+        src = _inject_between(src, SANDBOX_DECL_BEGIN, SANDBOX_DECL_END, declarations, "")
+        src = _inject_between(src, SANDBOX_BEGIN, SANDBOX_END, script, "        ")
+        SANDBOX_PAS.write_text(src, encoding="utf-8")
     except Exception as e:
         return json.dumps({"success": False, "error": f"could not inject script: {e}"})
 
