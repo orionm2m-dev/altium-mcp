@@ -1,5 +1,5 @@
 // schematic_edit.pas
-// Editing EXISTING schematic sheets by data, not by hand-written script:
+// Editing schematic sheets and projects by data, not by hand-written script:
 //   * edit_schematic_sheet  - apply a pipe-delimited spec (parts from a SchLib,
 //                             wires, net labels, text, parameters, deletions)
 //                             to one or more sheets and save them
@@ -23,6 +23,8 @@ var
     EditLib      : ISch_Document;
     EditLibPath  : String;
     EditLastPart : ISch_Component;
+    EditLastSymbol : ISch_SheetSymbol;   // target of SHEETENTRY records
+    EditProject    : IProject;           // target of NEWSHEET / ADDTOPROJECT
     EditWarnings : TStringList;
     EditPinMap   : TStringList;
     EditCounts   : TStringList;   // name=value counters
@@ -115,6 +117,139 @@ begin
     EditDoc.DoFileSave('Advanced Schematic binary');
     EditCount('sheets_saved');
     EditSheet := nil;
+end;
+
+// PROJECT|path : open the project, creating the .PrjPcb first when missing.
+procedure EditOpenProject(Path: String);
+var
+    Ini : TStringList;
+begin
+    if not FileExists(Path) then
+    begin
+        // A .PrjPcb is an INI file. These keys are the ones the sheet-entry /
+        // port hierarchy depends on; Altium fills in the rest on save.
+        Ini := TStringList.Create;
+        Ini.Add('[Design]');
+        Ini.Add('Version=1.0');
+        Ini.Add('HierarchyMode=0');
+        Ini.Add('AllowPortNetNames=0');
+        Ini.Add('AllowSheetEntryNetNames=1');
+        Ini.Add('NetlistSinglePinNets=1');
+        Ini.SaveToFile(Path);
+        Ini.Free;
+        EditCount('projects_created');
+    end;
+    EditProject := GetWorkspace.DM_GetProjectFromPath(Path);
+    if EditProject = nil then EditProject := GetWorkspace.DM_OpenProject(Path, True);
+    if EditProject = nil then
+        EditWarn('PROJECT: cannot open ' + Path)
+    else
+        EditProject.DM_SetAsCurrentProject;
+end;
+
+// ADDTOPROJECT|path : add a saved sheet to the PROJECT unless it is already in.
+procedure EditAddToProject(Path: String);
+var
+    i : Integer;
+begin
+    if EditProject = nil then
+    begin
+        EditWarn('ADDTOPROJECT before any PROJECT: ' + Path);
+        Exit;
+    end;
+    for i := 0 to EditProject.DM_LogicalDocumentCount - 1 do
+        if SameText(EditProject.DM_LogicalDocuments(i).DM_FullPath, Path) then Exit;
+    EditProject.DM_AddSourceDocument(Path);
+    EditCount('documents_added');
+end;
+
+// SAVEPROJECT : save the PROJECT file through Altium's own Save process,
+// then close and reopen the project. Saves the current sheet first, so a
+// SHEET record is needed afterwards.
+//
+// The reopen is not cosmetic: the compiler judges "object within sheet
+// boundaries" by the size a NEWSHEET document had when the project first saw
+// it (A4), and reports every object on a resized sheet as off-sheet until the
+// project is loaded again.
+procedure EditSaveProject;
+var
+    Path : String;
+begin
+    if EditProject = nil then
+    begin
+        EditWarn('SAVEPROJECT before any PROJECT');
+        Exit;
+    end;
+    EditSaveSheet;
+    Path := EditProject.DM_ProjectFullPath;
+    EditProject.DM_SetAsCurrentProject;
+    ResetParameters;
+    AddStringParameter('ObjectKind', 'Project');
+    AddStringParameter('SaveMode', 'Standard');
+    RunProcess('WorkspaceManager:SaveObject');
+    EditCount('projects_saved');
+    ResetParameters;
+    AddStringParameter('ObjectKind', 'ProjectAndDocuments');
+    RunProcess('WorkspaceManager:CloseObject');
+    EditProject := GetWorkspace.DM_OpenProject(Path, True);
+    if EditProject = nil then
+        EditWarn('SAVEPROJECT: project did not reopen: ' + Path)
+    else
+        EditProject.DM_SetAsCurrentProject;
+end;
+
+// NEWSHEET|path|width|height : create a sheet, size it, save it under Path
+// and make it the edit target.
+function EditNewSheet(Path: String; WidthMils, HeightMils: Integer): Boolean;
+var
+    Focused : IProject;
+begin
+    Result := False;
+    if FileExists(Path) then
+    begin
+        EditWarn('NEWSHEET: file exists, opened instead of created: ' + Path);
+        Result := EditOpenSheet(Path);
+        Exit;
+    end;
+    GetWorkspace.DM_CreateNewDocument('SCH');
+    EditDoc := Client.GetCurrentView.OwnerDocument;
+    if EditDoc = nil then
+    begin
+        EditWarn('NEWSHEET: Altium did not create a sheet for ' + Path);
+        Exit;
+    end;
+    // DM_CreateNewDocument attaches the sheet to the FOCUSED project under its
+    // temporary name, and a Save As on such a member leaves a second entry
+    // behind. Detach it now; it joins the PROJECT of this spec once it has a
+    // file, and never silently joins whatever the user has focused.
+    Focused := GetWorkspace.DM_FocusedProject;
+    if (Focused <> nil) and (Pos('Free Documents', Focused.DM_ProjectFileName) = 0) then
+        Focused.DM_RemoveSourceDocument(EditDoc.DocumentName);
+    Client.ShowDocument(EditDoc);
+    EditSheet := SchServer.GetCurrentSchDocument;
+    if (EditSheet = nil) or (EditSheet.ObjectID <> SCH_DOC_ID) then
+    begin
+        EditWarn('NEWSHEET: new document is not a schematic: ' + Path);
+        EditSheet := nil;
+        Exit;
+    end;
+    SchServer.ProcessControl.PreProcess(EditSheet, '');
+    EditSheet.SheetStyle := eSheetA3;
+    EditSheet.UseCustomSheet := True;
+    EditSheet.CustomX := MilsToCoord(WidthMils);
+    EditSheet.CustomY := MilsToCoord(HeightMils);
+    EditSheet.SnapGridSize := MilsToCoord(50);
+    EditSheet.ReferenceZonesOn := False;
+    EditSheet.BorderOn := False;
+    EditSheet.TitleBlockOn := False;
+    SchServer.ProcessControl.PostProcess(EditSheet, '');
+    // Save under the final name at once: only a sheet with a file can be a
+    // project member, and the records that follow draw on a named sheet.
+    EditDoc.DoSafeChangeFileNameAndSave(Path, 'Advanced Schematic binary');
+    if EditProject <> nil then EditAddToProject(Path);
+    SchServer.ProcessControl.PreProcess(EditSheet, '');
+    EditCount('sheets_created');
+    Result := True;
 end;
 
 procedure EditRegister(Obj: ISch_GraphicalObject);
@@ -392,6 +527,31 @@ begin
         Exit;
     end;
 
+    if Kind = 'PROJECT' then
+    begin
+        EditOpenProject(GetFieldFromPipeString(Rec, 1));
+        Exit;
+    end;
+
+    if Kind = 'ADDTOPROJECT' then
+    begin
+        EditAddToProject(GetFieldFromPipeString(Rec, 1));
+        Exit;
+    end;
+
+    if Kind = 'SAVEPROJECT' then
+    begin
+        EditSaveProject;
+        Exit;
+    end;
+
+    if Kind = 'NEWSHEET' then
+    begin
+        EditSaveSheet;
+        EditNewSheet(GetFieldFromPipeString(Rec, 1), FieldInt(Rec, 2, 16535), FieldInt(Rec, 3, 11693));
+        Exit;
+    end;
+
     if EditSheet = nil then
     begin
         EditWarn('record before any SHEET: ' + Rec);
@@ -646,6 +806,65 @@ begin
         else EditCount('sheet_symbols_renamed');
     end
 
+    // LINE|x1|y1|x2|y2   (graphical line - a frame or a divider, not a wire)
+    else if Kind = 'LINE' then
+    begin
+        Obj := SchServer.SchObjectFactory(eLine, eCreate_GlobalCopy);
+        Obj.Location := MilsPoint(FieldInt(Rec, 1, 0), FieldInt(Rec, 2, 0));
+        Obj.Corner := MilsPoint(FieldInt(Rec, 3, 0), FieldInt(Rec, 4, 0));
+        Obj.LineWidth := eSmall;
+        EditRegister(Obj);
+        EditCount('lines');
+    end
+
+    // SHEETSYMBOL|x|y|x_size|y_size|name|file[|area_color|line_color]
+    // x, y is the top-left corner; colors are BGR integers.
+    else if Kind = 'SHEETSYMBOL' then
+    begin
+        Obj := SchServer.SchObjectFactory(eSheetSymbol, eCreate_GlobalCopy);
+        Obj.Location := MilsPoint(FieldInt(Rec, 1, 0), FieldInt(Rec, 2, 0));
+        Obj.XSize := MilsToCoord(FieldInt(Rec, 3, 2000));
+        Obj.YSize := MilsToCoord(FieldInt(Rec, 4, 2000));
+        Obj.SheetName.Text := GetFieldFromPipeString(Rec, 5);
+        Obj.SheetName.Location := MilsPoint(FieldInt(Rec, 1, 0), FieldInt(Rec, 2, 0) + 100);
+        Obj.SheetFileName.Text := GetFieldFromPipeString(Rec, 6);
+        Obj.SheetFileName.Location := MilsPoint(FieldInt(Rec, 1, 0), FieldInt(Rec, 2, 0) - FieldInt(Rec, 4, 2000) - 180);
+        Obj.IsSolid := True;
+        if GetFieldFromPipeString(Rec, 7) <> '' then Obj.AreaColor := FieldInt(Rec, 7, 0);
+        if GetFieldFromPipeString(Rec, 8) <> '' then Obj.Color := FieldInt(Rec, 8, 0);
+        Obj.UniqueId := GetWorkspace.DM_GenerateUniqueID;
+        EditRegister(Obj);
+        EditLastSymbol := Obj;
+        EditCount('sheet_symbols');
+    end
+
+    // SHEETENTRY|name|side|distance|iotype   (on the last SHEETSYMBOL;
+    // side 0 left, 1 right, 2 top, 3 bottom; distance from the top/left edge)
+    else if Kind = 'SHEETENTRY' then
+    begin
+        if EditLastSymbol = nil then
+            EditWarn('SHEETENTRY before any SHEETSYMBOL: ' + Rec)
+        else
+        begin
+            Obj := SchServer.SchObjectFactory(eSheetEntry, eCreate_GlobalCopy);
+            Obj.Name := GetFieldFromPipeString(Rec, 1);
+            Obj.Side := FieldInt(Rec, 2, 0);
+            N := MilsToCoord(FieldInt(Rec, 3, 200));
+            Obj.DistanceFromTop := N;
+            Obj.IOType := FieldInt(Rec, 4, 0);
+            EditLastSymbol.AddSchObject(Obj);
+            if Obj.Side = 1 then
+                Obj.Location := Point(EditLastSymbol.Location.X + EditLastSymbol.XSize, EditLastSymbol.Location.Y - N)
+            else if Obj.Side = 2 then
+                Obj.Location := Point(EditLastSymbol.Location.X + N, EditLastSymbol.Location.Y)
+            else if Obj.Side = 3 then
+                Obj.Location := Point(EditLastSymbol.Location.X + N, EditLastSymbol.Location.Y - EditLastSymbol.YSize)
+            else
+                Obj.Location := Point(EditLastSymbol.Location.X, EditLastSymbol.Location.Y - N);
+            EditCount('sheet_entries');
+        end;
+    end
+
     else
         EditWarn('unknown record: ' + Rec);
 end;
@@ -671,6 +890,8 @@ begin
     EditLib := nil;
     EditLibPath := '';
     EditLastPart := nil;
+    EditLastSymbol := nil;
+    EditProject := nil;
     try
         for i := 0 to Spec.Count - 1 do
             EditApplyRecord(Spec[i]);

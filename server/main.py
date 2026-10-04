@@ -1664,7 +1664,7 @@ def _part_records(parts: list) -> list:
     return lines
 
 
-def _wiring_records(wires, junctions, net_labels, power_ports, ports, no_erc, notes) -> list:
+def _wiring_records(wires, junctions, net_labels, power_ports, ports, no_erc, notes, graphic_lines=None) -> list:
     lines = []
     for route in (wires or []):
         if len(route) < 4 or len(route) % 2:
@@ -1689,7 +1689,105 @@ def _wiring_records(wires, junctions, net_labels, power_ports, ports, no_erc, no
         if nt.get("font_size"):
             rec += "|{}|{}".format(int(nt["font_size"]), _spec_field(nt.get("font_name", "Arial")))
         lines.append(rec)
+    for g in (graphic_lines or []):
+        if len(g) != 4:
+            raise ValueError(f"line needs x1, y1, x2, y2: {g}")
+        lines.append("LINE|" + "|".join(str(int(v)) for v in g))
     return lines
+
+
+def _sheet_symbol_records(symbols: list) -> list:
+    lines = []
+    for sym in symbols:
+        for key in ("x", "y", "x_size", "y_size", "name", "file"):
+            if key not in sym:
+                raise ValueError(f"sheet symbol missing required key '{key}': {sym}")
+        rec = "SHEETSYMBOL|{}|{}|{}|{}|{}|{}".format(
+            int(sym["x"]), int(sym["y"]), int(sym["x_size"]), int(sym["y_size"]),
+            _spec_field(sym["name"]), _spec_field(sym["file"]))
+        if sym.get("area_color") is not None or sym.get("line_color") is not None:
+            rec += "|{}|{}".format(
+                "" if sym.get("area_color") is None else int(sym["area_color"]),
+                "" if sym.get("line_color") is None else int(sym["line_color"]))
+        lines.append(rec)
+        for e in (sym.get("entries") or []):
+            lines.append("SHEETENTRY|{}|{}|{}|{}".format(
+                _spec_field(e["name"]), int(e.get("side", 0)), int(e["distance"]), int(e.get("io_type", 0))))
+    return lines
+
+
+@mcp.tool()
+async def create_schematic_project(ctx: Context, project_path: str, sheets: list) -> str:
+    """
+    Create a .PrjPcb with new, sized, empty schematic sheets and save it.
+
+    The project file is created when it does not exist and opened in Altium.
+    Each sheet that does not exist yet is created, given a custom size (no
+    border or title block - draw your own with add_sheet_symbols' lines and
+    notes), saved under its path and added to the project; a sheet that
+    already exists is only added. Fill the sheets afterwards with
+    add_sheet_symbols, place_schematic_components and add_schematic_wiring.
+
+    Args:
+        project_path (str): Full path of the .PrjPcb.
+        sheets (list): [{"path": "...SchDoc", "width": 16535, "height": 11693}]
+            in mils; the defaults are an A3 landscape sheet.
+
+    Returns:
+        str: JSON with projects_created / sheets_created / documents_added /
+             projects_saved and warnings.
+    """
+    logger.info(f"create_schematic_project {project_path} with {len(sheets)} sheets")
+    lines = [f"PROJECT|{_spec_field(project_path)}"]
+    for sheet in sheets:
+        if "path" not in sheet:
+            return json.dumps({"success": False, "error": f"sheet missing 'path': {sheet}"})
+        if Path(sheet["path"]).is_file():
+            lines.append(f"ADDTOPROJECT|{_spec_field(sheet['path'])}")
+        else:
+            lines.append("NEWSHEET|{}|{}|{}".format(
+                _spec_field(sheet["path"]), int(sheet.get("width", 16535)), int(sheet.get("height", 11693))))
+    lines.append("SAVEPROJECT")
+    return await _run_sheet_spec(lines)
+
+
+@mcp.tool()
+async def add_sheet_symbols(ctx: Context, sheet_path: str, symbols: list, wires: list = None,
+                            net_labels: list = None, notes: list = None, lines: list = None) -> str:
+    """
+    Place hierarchical sheet symbols with their sheet entries on an EXISTING
+    sheet - the active block diagram of a project - and save it.
+
+    Each symbol references a child .SchDoc; each entry is a hierarchical
+    connection that Altium matches with the same-named port on that child
+    sheet. Entries are stacked from the symbol's top edge: an entry on the
+    left side of a symbol whose top-left corner is (x, y), at distance d,
+    connects at (x, y - d); on the right side at (x + x_size, y - d). Wires
+    from the entries, net labels on those wires, notes and frame lines are
+    drawn in the same call.
+
+    Args:
+        sheet_path (str): Full path of the target .SchDoc.
+        symbols (list): [{"x", "y", "x_size", "y_size", "name", "file",
+            "entries": [{"name", "side", "distance", "io_type"}],
+            "area_color", "line_color"}] - mils; side 0 left, 1 right, 2 top,
+            3 bottom; io_type 0 unspecified, 1 output, 2 input, 3 bidirectional;
+            the colors are optional BGR integers.
+        wires, net_labels, notes: as in add_schematic_wiring.
+        lines (list): [[x1, y1, x2, y2], ...] graphical lines, not wires.
+
+    Returns:
+        str: JSON with sheet_symbols / sheet_entries / wires / net_labels /
+             notes / lines and warnings.
+    """
+    logger.info(f"add_sheet_symbols on {sheet_path}: {len(symbols)} symbols")
+    spec = [f"SHEET|{sheet_path}"]
+    try:
+        spec += _sheet_symbol_records(symbols)
+        spec += _wiring_records(wires, None, net_labels, None, None, None, notes, lines)
+    except (ValueError, KeyError) as e:
+        return json.dumps({"success": False, "error": str(e)})
+    return await _run_sheet_spec(spec)
 
 
 @mcp.tool()
@@ -1704,6 +1802,9 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
 
     Records (one per line; a value must not contain '|'):
         SHEET|<path .SchDoc>            target for the records that follow
+        PROJECT|<path .PrjPcb>          open it (created first when missing)
+        NEWSHEET|<path .SchDoc>|width|height   create, size, save a sheet
+        ADDTOPROJECT|<path .SchDoc>  SAVEPROJECT
         LIBRARY|<path .SchLib>          symbol source for PART records
         PART|designator|symbol|x|y|orientation|mirror
         COMMENT|text  DESCRIPTION|text  FOOTPRINT|model  PARAM|name|value
@@ -1719,6 +1820,9 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new
+        LINE|x1|y1|x2|y2                graphical line (not a wire)
+        SHEETSYMBOL|x|y|x_size|y_size|name|file[|area_color|line_color]
+        SHEETENTRY|name|side|distance|iotype   (last SHEETSYMBOL)
     A library component whose pins do not survive Altium's Replicate is
     rebuilt from its primitives; the result says so in `warnings`.
 

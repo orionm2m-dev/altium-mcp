@@ -146,7 +146,9 @@ The server provides several tools to interact with Altium Designer:
 - `edit_schematic_text`: Replace, move, delete or add free text; rename sheet symbols.
 - `set_component_parameters`: Parameters (assembly variants such as `Assembly_Base`), comment and footprint model of placed components.
 - `delete_schematic_objects`: Components by designator, other objects by position.
-- `edit_schematic_sheet`: The batch form of the five tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
+- `create_schematic_project`: Create a `.PrjPcb` (when missing) with new, sized, empty sheets saved under the given paths and added to the project.
+- `add_sheet_symbols`: Place hierarchical sheet symbols with their sheet entries (plus wires, net labels, notes and frame lines) on a sheet - the active block diagram of a project.
+- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
 - `compile_project`: Compile a `.PrjPcb`, return Altium's violations (ERC) and, on request, the net of every pin - the proof that an edit connected what it should.
 - `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
 
