@@ -1147,7 +1147,7 @@ def _dismiss_altium_dialogs():
 
 @mcp.tool()
 async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120,
-                            declarations: str = "") -> str:
+                            declarations: str = "", declarations_file: str = "") -> str:
     """
     Run a DelphiScript snippet inside an isolated Altium sandbox and report
     what happened, step by step.
@@ -1190,6 +1190,10 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         timeout_seconds (int): How long to wait for completion (default 120).
         declarations (str): Optional unit-level DelphiScript (const, var,
             procedures, functions) made available to the body.
+        declarations_file (str): Path to a .pas file whose contents are used
+            as the declarations - for generated or multi-kilobyte helper
+            units that would be unwieldy inline. Ignored if `declarations`
+            is given.
 
     Returns:
         str: JSON with success, the step log, the script's ResultText, and on
@@ -1201,6 +1205,13 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     if not SANDBOX_PAS.exists() or not SANDBOX_PRJ.exists():
         return json.dumps({"success": False,
                            "error": f"sandbox project missing at {SANDBOX_DIR}"})
+
+    if not declarations and declarations_file:
+        try:
+            declarations = Path(declarations_file).read_text(encoding="utf-8")
+        except OSError as e:
+            return json.dumps({"success": False,
+                               "error": f"could not read declarations_file: {e}"})
 
     try:
         src = SANDBOX_PAS.read_text(encoding="utf-8")
