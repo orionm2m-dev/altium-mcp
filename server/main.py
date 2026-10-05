@@ -2252,6 +2252,39 @@ async def create_multiboard_project(ctx: Context, project_path: str, modules: li
                       indent=1, ensure_ascii=False)
 
 
+@mcp.tool()
+async def create_project_group(ctx: Context, group_path: str, projects: list) -> str:
+    """
+    Write a project group (.DsnWrk): the set of projects Altium opens
+    together, shown as the top node of the Projects panel.
+
+    The file is the one File » Save Project Group As writes: an INI list of
+    project paths, relative to the group file where they share its drive.
+
+    Args:
+        group_path (str): Full path of the .DsnWrk to create (must not exist).
+        projects (list): Full paths of the projects (.PrjPcb, .PrjMbd,
+            .PrjScr, ...) in the order the panel should list them.
+
+    Returns:
+        str: JSON with the file written and the project paths as stored.
+    """
+    group = Path(group_path)
+    if group.exists():
+        return json.dumps({"success": False, "error": f"project group already exists: {group_path}"})
+    missing = [p for p in projects if not Path(p).is_file()]
+    if missing or not projects:
+        return json.dumps({"success": False, "error": "projects not found" if missing else "no projects given",
+                           "missing": missing})
+    stored = [_relative_windows_path(p, str(group.parent)) for p in projects]
+    lines = ["[ProjectGroup]", "Version=1.0", ""]
+    for n, path in enumerate(stored, 1):
+        lines += [f"[Project{n}]", f"ProjectPath={path}", ""]
+    group.parent.mkdir(parents=True, exist_ok=True)
+    group.write_text("\r\n".join(lines), encoding="utf-8", newline="")
+    return json.dumps({"success": True, "group": str(group), "projects": stored}, indent=1, ensure_ascii=False)
+
+
 CONNECTORS_REPORT = EXCHANGE_DIR / "connectors_report.json"
 ERC_REPORT = EXCHANGE_DIR / "erc_report.json"
 
