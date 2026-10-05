@@ -1108,10 +1108,6 @@ begin
 end;
 
 // ---------------------------------------------------------------------------
-// compile_project: compile, then report violations and (optionally) every pin's net
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // get_project_connectors: compile a project and report every component that
 // carries the parameter System = Connector, with what a Multi-board Schematic
 // keeps for its module entries: the component's unique id, physical path and
@@ -1137,9 +1133,11 @@ begin
     SchDoc.SchIterator_Destroy(Iter);
 end;
 
-// Fills PinIds (pin designator = unique id) for every pin of the component
-// with the given unique id on the sheet DocPath.
-procedure CollectPinUniqueIds(DocPath: String; CompUniqueId: String; PinIds: TStringList);
+// Collects the designator and the unique id of the pins of the component
+// with the given unique id on the sheet DocPath, in two parallel lists. Only
+// the pins of the placed part in its current display mode are taken: a symbol
+// also holds the pins of its other parts and display modes.
+procedure CollectPinUniqueIds(DocPath: String; CompUniqueId: String; Designators, Ids: TStringList);
 var
     Opened : IServerDocument;
     SchDoc : ISch_Document;
@@ -1147,7 +1145,7 @@ var
     Iter   : ISch_Iterator;
     Pin    : ISch_Pin;
 begin
-    // A sheet opened here is closed again, so the workspace is left as found.
+    // A sheet opened here is closed again, so the open documents stay as found.
     Opened := nil;
     if not Client.IsDocumentOpen(DocPath) then
         Opened := Client.OpenDocument('SCH', DocPath);
@@ -1162,7 +1160,12 @@ begin
             Pin := Iter.FirstSchObject;
             while Pin <> nil do
             begin
-                PinIds.Add(Pin.Designator + '=' + Pin.UniqueId);
+                if ((Pin.OwnerPartId = Comp.CurrentPartId) or (Pin.OwnerPartId <= 0)) and
+                   (Pin.OwnerPartDisplayMode = Comp.DisplayMode) then
+                begin
+                    Designators.Add(Pin.Designator);
+                    Ids.Add(Pin.UniqueId);
+                end;
                 Pin := Iter.NextSchObject;
             end;
             Comp.SchIterator_Destroy(Iter);
@@ -1171,13 +1174,30 @@ begin
     if Opened <> nil then Client.CloseDocument(Opened);
 end;
 
+// The unique id collected for a pin designator. The match is exact, and each
+// record is handed out once, so pins sharing a designator get their ids in
+// sheet order.
+function TakePinUniqueId(Designators, Ids: TStringList; Designator: String): String;
+var
+    i : Integer;
+begin
+    Result := '';
+    for i := 0 to Designators.Count - 1 do
+        if Designators[i] = Designator then
+        begin
+            Result := Ids[i];
+            Designators[i] := #1;
+            Exit;
+        end;
+end;
+
 function ProjectConnectorsReport(ProjectPath: String; OutPath: String): String;
 var
     Prj   : IProject;
     Doc   : IDocument;
     Comp, Pin, Param;
-    Compiled, IsConnector : Boolean;
-    Conns, Pins, PinIds, CompProps, Props, OutList : TStringList;
+    IsConnector : Boolean;
+    Conns, Pins, PinNames, PinIds, CompProps, Props, OutList : TStringList;
     i, j, k : Integer;
     NetName : String;
 begin
@@ -1194,7 +1214,14 @@ begin
         Exit;
     end;
     Prj.DM_SetAsCurrentProject;
-    Compiled := Prj.DM_Compile;
+    Prj.DM_Compile;
+    // Without compiled documents there is nothing to report; saying "no
+    // connectors" instead would make the caller drop the ones it has.
+    if Prj.DM_PhysicalDocumentCount = 0 then
+    begin
+        Result := 'ERROR: project has no compiled documents: ' + ProjectPath;
+        Exit;
+    end;
 
     Conns := TStringList.Create;
     for i := 0 to Prj.DM_PhysicalDocumentCount - 1 do
@@ -1211,8 +1238,9 @@ begin
             end;
             if not IsConnector then Continue;
 
+            PinNames := TStringList.Create;
             PinIds := TStringList.Create;
-            CollectPinUniqueIds(Doc.DM_FullPath, Comp.DM_UniqueIdName, PinIds);
+            CollectPinUniqueIds(Doc.DM_FullPath, Comp.DM_UniqueIdName, PinNames, PinIds);
             Pins := TStringList.Create;
             for k := 0 to Comp.DM_PinCount - 1 do
             begin
@@ -1220,14 +1248,13 @@ begin
                 NetName := Pin.DM_FlattenedNetName;
                 if NetName = '?' then NetName := '';
                 Pins.Add('{"number": ' + JSONStr(Pin.DM_PinNumber) + ', "name": ' + JSONStr(Pin.DM_PinName) +
-                         ', "net": ' + JSONStr(NetName) + ', "electrical": ' + IntToStr(Pin.DM_Electrical) +
-                         ', "unique_id": ' + JSONStr(PinIds.Values[Pin.DM_PinNumber]) + '}');
+                         ', "net": ' + JSONStr(NetName) +
+                         ', "unique_id": ' + JSONStr(TakePinUniqueId(PinNames, PinIds, Pin.DM_PinNumber)) + '}');
             end;
             CompProps := TStringList.Create;
             AddJSONProperty(CompProps, 'designator', Comp.DM_PhysicalDesignator);
             AddJSONProperty(CompProps, 'comment', Comp.DM_Comment);
             AddJSONProperty(CompProps, 'unique_id', Comp.DM_UniqueId);
-            AddJSONProperty(CompProps, 'unique_id_name', Comp.DM_UniqueIdName);
             AddJSONProperty(CompProps, 'physical_path', Comp.DM_PhysicalPath);
             AddJSONProperty(CompProps, 'document', Doc.DM_FullPath);
             CompProps.Add(BuildJSONArray(Pins, 'pins', 2));
@@ -1235,12 +1262,12 @@ begin
             CompProps.Free;
             Pins.Free;
             PinIds.Free;
+            PinNames.Free;
         end;
     end;
 
     Props := TStringList.Create;
     AddJSONBoolean(Props, 'success', True);
-    AddJSONBoolean(Props, 'compiled', Compiled);
     AddJSONProperty(Props, 'project', Prj.DM_ProjectFullPath);
     Props.Add(BuildJSONArray(Conns, 'connectors', 1));
     OutList := TStringList.Create;
@@ -1299,7 +1326,8 @@ begin
         Msg := MM.Messages(i);
         Msgs.Add('{"class": ' + JSONStr(Msg.MsgClass) + ', "text": ' + JSONStr(Msg.Text) +
                  ', "source": ' + JSONStr(Msg.Source) + ', "document": ' + JSONStr(ExtractFileName(Msg.Document)) + '}');
-        if Pos('[Error]', Msg.MsgClass) > 0 then Errors := Errors + 1
+        // '[Error]' and '[Fatal Error]' both count as errors
+        if Pos('Error]', Msg.MsgClass) > 0 then Errors := Errors + 1
         else if Pos('[Warning]', Msg.MsgClass) > 0 then Warnings := Warnings + 1;
     end;
     Props := TStringList.Create;
@@ -1321,15 +1349,85 @@ end;
 // open_project_group: open a project group (.DsnWrk) in place of the one in
 // the workspace and list the projects it brought in.
 // ---------------------------------------------------------------------------
+
+// Paths of the open documents of all projects that have unsaved changes.
+function ModifiedDocumentPaths: String;
+var
+    Prj  : IProject;
+    Doc  : IServerDocument;
+    DocPath : String;
+    i, j : Integer;
+begin
+    Result := '';
+    for i := 0 to GetWorkspace.DM_ProjectCount - 1 do
+    begin
+        Prj := GetWorkspace.DM_Projects(i);
+        for j := 0 to Prj.DM_LogicalDocumentCount - 1 do
+        begin
+            DocPath := Prj.DM_LogicalDocuments(j).DM_FullPath;
+            Doc := Client.GetDocumentByPath(DocPath);
+            if (Doc <> nil) and Doc.Modified then
+                Result := Result + DocPath + '; ';
+        end;
+    end;
+end;
+
+// True when the group in the workspace is a saved one whose list of projects
+// no longer matches its file. Script projects count: Altium adds the project
+// of every script it runs to the group.
+function ProjectGroupChanged: Boolean;
+var
+    Lines, Listed : TStringList;
+    GroupPath, PrjName : String;
+    i, OpenCount : Integer;
+begin
+    Result := False;
+    GroupPath := GetWorkspace.DM_WorkspaceFullPath;
+    if not FileExists(GroupPath) then Exit;
+    Lines := TStringList.Create;
+    Listed := TStringList.Create;
+    Lines.LoadFromFile(GroupPath);
+    for i := 0 to Lines.Count - 1 do
+        if Copy(Lines[i], 1, 12) = 'ProjectPath=' then
+            Listed.Add(UpperCase(ExtractFileName(Copy(Lines[i], 13, Length(Lines[i])))));
+    OpenCount := 0;
+    for i := 0 to GetWorkspace.DM_ProjectCount - 1 do
+    begin
+        PrjName := UpperCase(GetWorkspace.DM_Projects(i).DM_ProjectFileName);
+        if PrjName = 'FREE DOCUMENTS' then Continue;
+        OpenCount := OpenCount + 1;
+        if Listed.IndexOf(PrjName) < 0 then Result := True;
+    end;
+    if OpenCount <> Listed.Count then Result := True;
+    Listed.Free;
+    Lines.Free;
+end;
+
 function OpenProjectGroupReport(GroupPath: String; OutPath: String): String;
 var
     Prjs, Props, OutList : TStringList;
     i : Integer;
     Opened : Boolean;
+    Unsaved : String;
 begin
     if not FileExists(GroupPath) then
     begin
         Result := 'ERROR: project group not found: ' + GroupPath;
+        Exit;
+    end;
+    // Replacing the group closes every project. With unsaved documents, or a
+    // saved group that has changed, Altium asks what to do in a dialog that
+    // nothing could answer, so both stop the run.
+    Unsaved := ModifiedDocumentPaths;
+    if Unsaved <> '' then
+    begin
+        Result := 'ERROR: unsaved changes, save or discard them first: ' + Unsaved;
+        Exit;
+    end;
+    if ProjectGroupChanged then
+    begin
+        Result := 'ERROR: the project group in the workspace has changed since it was saved, save or discard it in Altium first: ' +
+                  GetWorkspace.DM_WorkspaceFullPath;
         Exit;
     end;
     ResetParameters;
@@ -1354,9 +1452,11 @@ begin
     Prjs.Free;
 end;
 
+// ---------------------------------------------------------------------------
 // open_project: open a project of any kind (.PrjPcb, .PrjMbd, ...) and list
 // its logical documents, so a project written by a tool can be checked
 // through Altium's own loader.
+// ---------------------------------------------------------------------------
 function OpenProjectReport(ProjectPath: String; OutPath: String): String;
 var
     Prj   : IProject;
@@ -1399,6 +1499,9 @@ begin
     Docs.Free;
 end;
 
+// ---------------------------------------------------------------------------
+// compile_project: compile, then report violations and (optionally) every pin's net
+// ---------------------------------------------------------------------------
 function CompileProjectReport(ProjectPath: String; OutPath: String; IncludePins: Boolean): String;
 var
     Prj   : IProject;
