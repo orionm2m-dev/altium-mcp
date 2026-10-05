@@ -1303,6 +1303,43 @@ begin
     Msgs.Free;
 end;
 
+// ---------------------------------------------------------------------------
+// open_project_group: open a project group (.DsnWrk) in place of the one in
+// the workspace and list the projects it brought in.
+// ---------------------------------------------------------------------------
+function OpenProjectGroupReport(GroupPath: String; OutPath: String): String;
+var
+    Prjs, Props, OutList : TStringList;
+    i : Integer;
+    Opened : Boolean;
+begin
+    if not FileExists(GroupPath) then
+    begin
+        Result := 'ERROR: project group not found: ' + GroupPath;
+        Exit;
+    end;
+    ResetParameters;
+    AddStringParameter('ObjectKind', 'Workspace');
+    AddStringParameter('FileName', GroupPath);
+    RunProcess('WorkspaceManager:OpenObject');
+
+    Opened := UpperCase(GetWorkspace.DM_WorkspaceFullPath) = UpperCase(GroupPath);
+    Prjs := TStringList.Create;
+    for i := 0 to GetWorkspace.DM_ProjectCount - 1 do
+        Prjs.Add(JSONStr(GetWorkspace.DM_Projects(i).DM_ProjectFileName));
+    Props := TStringList.Create;
+    AddJSONBoolean(Props, 'success', Opened);
+    AddJSONProperty(Props, 'group', GetWorkspace.DM_WorkspaceFullPath);
+    Props.Add(BuildJSONArray(Prjs, 'projects', 1));
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
+    Result := '{"success": ' + JSONBool(Opened) + ', "projects": ' + IntToStr(Prjs.Count) + ', "file": ' + JSONStr(OutPath) + '}';
+    OutList.Free;
+    Props.Free;
+    Prjs.Free;
+end;
+
 // open_project: open a project of any kind (.PrjPcb, .PrjMbd, ...) and list
 // its logical documents, so a project written by a tool can be checked
 // through Altium's own loader.

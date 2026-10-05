@@ -2304,6 +2304,25 @@ async def _altium_report(command: str, params: dict, report: Path, what: str) ->
         return {"success": False, "error": f"{what} is not valid JSON: {e}"}
 
 
+@mcp.tool()
+async def open_project_group(ctx: Context, group_path: str) -> str:
+    """
+    Open a project group (.DsnWrk) in Altium in place of the group currently
+    in the workspace, as File » Open Project Group does.
+
+    Save modified documents first: the projects of the current group are
+    closed.
+
+    Args:
+        group_path (str): Full path of the .DsnWrk.
+
+    Returns:
+        str: JSON with the group now in the workspace and its projects.
+    """
+    data = await _altium_report("open_project_group", {"group_path": group_path}, PROJECT_REPORT, "project report")
+    return json.dumps(data, indent=1, ensure_ascii=False)
+
+
 def _document_unique_ids(project_file: Path) -> dict:
     """basename (lower case) -> DocumentUniqueId, from the [DocumentN] sections of a project file."""
     ids, current = {}, ""

@@ -1149,6 +1149,8 @@ begin
             Result := ProjectConnectorsReport(ParamValueOf('project_path'), ROOT_DIR + 'connectors_report.json');
         'run_multiboard_erc':
             Result := MultiboardErcReport(ParamValueOf('document_path'), ROOT_DIR + 'erc_report.json');
+        'open_project_group':
+            Result := OpenProjectGroupReport(ParamValueOf('group_path'), ROOT_DIR + 'project_report.json');
     else
         LogScriptError('Error: Unknown command: ' + CommandName);
     end;

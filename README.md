@@ -151,6 +151,7 @@ The server provides several tools to interact with Altium Designer:
 - `open_project`: Open a project of any kind (`.PrjPcb`, `.PrjMbd`, ...) and list its logical documents - the check for a project a tool wrote.
 - `create_multiboard_project`: Write a Multi-board Design project (`.PrjMbd`) with a Multi-board Schematic (`.MbsDoc`) whose modules reference child PCB projects; importing the connectors and drawing the connections stay GUI steps, as that editor has no scripting interface.
 - `create_project_group`: Write a project group (`.DsnWrk`) listing the projects Altium opens together.
+- `open_project_group`: Open a project group in place of the one in the workspace.
 - `link_multiboard_modules`: Import the connectors of the child projects into a Multi-board Schematic as module entries and connect them pin by pin, as Design » Import From Child Projects and Place » Direct Connection do; the child projects are only read.
 - `run_multiboard_erc`: Reload a Multi-board Schematic, run its ERC and return the Messages panel.
 - `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
