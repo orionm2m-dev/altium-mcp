@@ -163,6 +163,8 @@ begin
        (CommandName = 'get_schematic_sheet') or
        (CommandName = 'compile_project') or
        (CommandName = 'open_project') or
+       (CommandName = 'get_project_connectors') or
+       (CommandName = 'run_multiboard_erc') or
        (CommandName = 'save_documents') then
     begin
         Result := True;

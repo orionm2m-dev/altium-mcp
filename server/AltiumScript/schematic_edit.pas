@@ -1111,6 +1111,198 @@ end;
 // compile_project: compile, then report violations and (optionally) every pin's net
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// get_project_connectors: compile a project and report every component that
+// carries the parameter System = Connector, with what a Multi-board Schematic
+// keeps for its module entries: the component's unique id, physical path and
+// owner document, and for every pin its number, name, compiled net and unique
+// id. The compiled model does not expose a pin's unique id, so it is read
+// from the pin on its source sheet (ISch_Pin.UniqueId). Nothing is modified.
+// ---------------------------------------------------------------------------
+
+function SchComponentByUniqueId(SchDoc: ISch_Document; UniqueId: String): ISch_Component;
+var
+    Iter : ISch_Iterator;
+    Comp : ISch_Component;
+begin
+    Result := nil;
+    Iter := SchDoc.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Comp := Iter.FirstSchObject;
+    while Comp <> nil do
+    begin
+        if Comp.UniqueId = UniqueId then Result := Comp;
+        Comp := Iter.NextSchObject;
+    end;
+    SchDoc.SchIterator_Destroy(Iter);
+end;
+
+// Fills PinIds (pin designator = unique id) for every pin of the component
+// with the given unique id on the sheet DocPath.
+procedure CollectPinUniqueIds(DocPath: String; CompUniqueId: String; PinIds: TStringList);
+var
+    SchDoc : ISch_Document;
+    Comp   : ISch_Component;
+    Iter   : ISch_Iterator;
+    Pin    : ISch_Pin;
+begin
+    if not Client.IsDocumentOpen(DocPath) then
+        Client.OpenDocument('SCH', DocPath);
+    SchDoc := SchServer.GetSchDocumentByPath(DocPath);
+    if SchDoc = nil then Exit;
+    Comp := SchComponentByUniqueId(SchDoc, CompUniqueId);
+    if Comp = nil then Exit;
+    Iter := Comp.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(ePin));
+    Pin := Iter.FirstSchObject;
+    while Pin <> nil do
+    begin
+        PinIds.Add(Pin.Designator + '=' + Pin.UniqueId);
+        Pin := Iter.NextSchObject;
+    end;
+    Comp.SchIterator_Destroy(Iter);
+end;
+
+function ProjectConnectorsReport(ProjectPath: String; OutPath: String): String;
+var
+    Prj   : IProject;
+    Doc   : IDocument;
+    Comp, Pin, Param;
+    Compiled, IsConnector : Boolean;
+    Conns, Pins, PinIds, CompProps, Props, OutList : TStringList;
+    i, j, k : Integer;
+    NetName : String;
+begin
+    if not FileExists(ProjectPath) then
+    begin
+        Result := 'ERROR: project file not found: ' + ProjectPath;
+        Exit;
+    end;
+    Prj := GetWorkspace.DM_GetProjectFromPath(ProjectPath);
+    if Prj = nil then Prj := GetWorkspace.DM_OpenProject(ProjectPath, True);
+    if Prj = nil then
+    begin
+        Result := 'ERROR: cannot open project ' + ProjectPath;
+        Exit;
+    end;
+    Prj.DM_SetAsCurrentProject;
+    Compiled := Prj.DM_Compile;
+
+    Conns := TStringList.Create;
+    for i := 0 to Prj.DM_PhysicalDocumentCount - 1 do
+    begin
+        Doc := Prj.DM_PhysicalDocuments(i);
+        for j := 0 to Doc.DM_ComponentCount - 1 do
+        begin
+            Comp := Doc.DM_Components(j);
+            IsConnector := False;
+            for k := 0 to Comp.DM_ParameterCount - 1 do
+            begin
+                Param := Comp.DM_Parameters(k);
+                if (Param.DM_Name = 'System') and (Param.DM_Value = 'Connector') then IsConnector := True;
+            end;
+            if not IsConnector then Continue;
+
+            PinIds := TStringList.Create;
+            CollectPinUniqueIds(Doc.DM_FullPath, Comp.DM_UniqueIdName, PinIds);
+            Pins := TStringList.Create;
+            for k := 0 to Comp.DM_PinCount - 1 do
+            begin
+                Pin := Comp.DM_Pins(k);
+                NetName := Pin.DM_FlattenedNetName;
+                if NetName = '?' then NetName := '';
+                Pins.Add('{"number": ' + JSONStr(Pin.DM_PinNumber) + ', "name": ' + JSONStr(Pin.DM_PinName) +
+                         ', "net": ' + JSONStr(NetName) + ', "electrical": ' + IntToStr(Pin.DM_Electrical) +
+                         ', "unique_id": ' + JSONStr(PinIds.Values[Pin.DM_PinNumber]) + '}');
+            end;
+            CompProps := TStringList.Create;
+            AddJSONProperty(CompProps, 'designator', Comp.DM_PhysicalDesignator);
+            AddJSONProperty(CompProps, 'comment', Comp.DM_Comment);
+            AddJSONProperty(CompProps, 'unique_id', Comp.DM_UniqueId);
+            AddJSONProperty(CompProps, 'unique_id_name', Comp.DM_UniqueIdName);
+            AddJSONProperty(CompProps, 'physical_path', Comp.DM_PhysicalPath);
+            AddJSONProperty(CompProps, 'document', Doc.DM_FullPath);
+            CompProps.Add(BuildJSONArray(Pins, 'pins', 2));
+            Conns.Add(BuildJSONObject(CompProps, 1));
+            CompProps.Free;
+            Pins.Free;
+            PinIds.Free;
+        end;
+    end;
+
+    Props := TStringList.Create;
+    AddJSONBoolean(Props, 'success', True);
+    AddJSONBoolean(Props, 'compiled', Compiled);
+    AddJSONProperty(Props, 'project', Prj.DM_ProjectFullPath);
+    Props.Add(BuildJSONArray(Conns, 'connectors', 1));
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
+    Result := '{"success": true, "connectors": ' + IntToStr(Conns.Count) + ', "file": ' + JSONStr(OutPath) + '}';
+    OutList.Free;
+    Props.Free;
+    Conns.Free;
+end;
+
+// ---------------------------------------------------------------------------
+// run_multiboard_erc: reload a Multi-board Schematic from disk, run the ERC
+// the Design » Run ERC menu item runs, and report the Messages panel.
+// ---------------------------------------------------------------------------
+function MultiboardErcReport(DocPath: String; OutPath: String): String;
+var
+    Doc  : IServerDocument;
+    MM, Msg;
+    Msgs, Props, OutList : TStringList;
+    i, Errors, Warnings : Integer;
+begin
+    if not FileExists(DocPath) then
+    begin
+        Result := 'ERROR: document not found: ' + DocPath;
+        Exit;
+    end;
+    // Close and reopen so that a file rewritten on disk is what gets checked.
+    Doc := Client.GetDocumentByPath(DocPath);
+    if Doc <> nil then Client.CloseDocument(Doc);
+    Doc := Client.OpenDocument('SdDoc', DocPath);
+    if Doc = nil then
+    begin
+        Result := 'ERROR: cannot open ' + DocPath;
+        Exit;
+    end;
+    Client.ShowDocument(Doc);
+    Doc.Focus;
+    MM := GetWorkspace.DM_MessagesManager;
+    MM.ClearMessages;
+    ResetParameters;
+    AddStringParameter('ObjectKind', 'Document');
+    RunProcess('WorkspaceManager:RunERC');
+
+    Msgs := TStringList.Create;
+    Errors := 0;
+    Warnings := 0;
+    for i := 0 to MM.MessagesCount - 1 do
+    begin
+        Msg := MM.Messages(i);
+        Msgs.Add('{"class": ' + JSONStr(Msg.MsgClass) + ', "text": ' + JSONStr(Msg.Text) +
+                 ', "source": ' + JSONStr(Msg.Source) + ', "document": ' + JSONStr(ExtractFileName(Msg.Document)) + '}');
+        if Pos('[Error]', Msg.MsgClass) > 0 then Errors := Errors + 1
+        else if Pos('[Warning]', Msg.MsgClass) > 0 then Warnings := Warnings + 1;
+    end;
+    Props := TStringList.Create;
+    AddJSONBoolean(Props, 'success', True);
+    AddJSONProperty(Props, 'document', DocPath);
+    AddJSONInteger(Props, 'errors', Errors);
+    AddJSONInteger(Props, 'warnings', Warnings);
+    Props.Add(BuildJSONArray(Msgs, 'messages', 1));
+    OutList := TStringList.Create;
+    OutList.Text := BuildJSONObject(Props);
+    OutList.SaveToFile(OutPath);
+    Result := '{"success": true, "messages": ' + IntToStr(Msgs.Count) + ', "file": ' + JSONStr(OutPath) + '}';
+    OutList.Free;
+    Props.Free;
+    Msgs.Free;
+end;
+
 // open_project: open a project of any kind (.PrjPcb, .PrjMbd, ...) and list
 // its logical documents, so a project written by a tool can be checked
 // through Altium's own loader.

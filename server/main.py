@@ -22,6 +22,9 @@ import base64
 import glob
 import re
 import locale
+import uuid
+import zipfile
+from datetime import datetime, timezone
 
 # Configure logging
 logging.basicConfig(
@@ -2147,11 +2150,10 @@ async def create_multiboard_project(ctx: Context, project_path: str, modules: li
     The schematic editor has no scripting interface, so the files are written
     directly: the project is an INI file, the schematic a ZIP of JSON files
     built from the template of an empty document saved by Altium Designer 26.
-    Each module gets its designator, title and source project; what Altium
-    does on its own afterwards stays in the GUI: Design » Import From Child
-    Projects (brings in the connectors - components with a parameter
-    System = Connector - as module entries) and the connections between
-    modules. Open the result with open_project to let Altium validate it.
+    Each module gets its designator, title and source project. Bringing in
+    the connectors of the child projects (components with a parameter
+    System = Connector) and connecting them is link_multiboard_modules;
+    open_project lets Altium load the result.
 
     Args:
         project_path (str): Full path of the .PrjMbd to create (must not exist).
@@ -2169,10 +2171,6 @@ async def create_multiboard_project(ctx: Context, project_path: str, modules: li
     Returns:
         str: JSON with the files written and the modules placed.
     """
-    import uuid
-    import zipfile
-    from datetime import datetime, timezone
-
     sizes = {"A4": (1122.52, 793.70), "A3": (1587.40, 1122.52), "A2": (2245.04, 1587.40)}
     if sheet_size not in sizes:
         return json.dumps({"success": False, "error": f"sheet_size must be one of {sorted(sizes)}"})
@@ -2223,7 +2221,7 @@ async def create_multiboard_project(ctx: Context, project_path: str, modules: li
     styles = json.loads((MULTIBOARD_TEMPLATE / "styles.json").read_text(encoding="utf-8"))
     styles["lineStyles"] = [{"thickness": 1.889763779527559, "color": {"a": 255, "r": 112, "g": 48, "b": 160},
                              "thicknessPresetId": 2, "dashPatternPresetId": 0, "id": 1}]
-    styles["fillStyles"] = [{"a": 255, "r": 146, "g": 205, "b": 220, "id": 1}]
+    styles["fillStyles"] = [{"color": {"a": 255, "r": 146, "g": 205, "b": 220}, "hatchBackColor": {}, "id": 1}]
     width, height = sizes[sheet_size]
     page = {"size": {"width": width, "height": height},
             "margin": {"top": 10.0, "left": 10.0, "right": 10.0, "bottom": 10.0},
@@ -2249,9 +2247,479 @@ async def create_multiboard_project(ctx: Context, project_path: str, modules: li
     return json.dumps({"success": True, "project": str(project), "schematic": str(schematic),
                        "documents": doc_paths, "modules": [m["designator"] for m in modules],
                        "next_steps": ["open_project to let Altium load it",
-                                      "Design > Import From Child Projects in the schematic (GUI, ECO dialog)",
-                                      "Place > Direct Connection between the connector entries (GUI)"]},
+                                      "link_multiboard_modules to import the connectors and connect them",
+                                      "run_multiboard_erc to check the result"]},
                       indent=1, ensure_ascii=False)
+
+
+CONNECTORS_REPORT = EXCHANGE_DIR / "connectors_report.json"
+ERC_REPORT = EXCHANGE_DIR / "erc_report.json"
+
+
+async def _altium_report(command: str, params: dict, report: Path, what: str) -> dict:
+    """Run a script command that writes a JSON report into the exchange dir and return it parsed."""
+    if report.exists():
+        report.unlink()
+    response = await altium_bridge.execute_command(command, params)
+    if not response.get("success", False):
+        return {"success": False, "error": response.get("error", "unknown error")}
+    if not report.is_file():
+        return {"success": False, "error": f"{what} was not written", "result": response.get("result")}
+    try:
+        return json.loads(report.read_text(encoding=SPEC_ENCODING, errors="replace"))
+    except ValueError as e:
+        return {"success": False, "error": f"{what} is not valid JSON: {e}"}
+
+
+def _document_unique_ids(project_file: Path) -> dict:
+    """basename (lower case) -> DocumentUniqueId, from the [DocumentN] sections of a project file."""
+    ids, current = {}, ""
+    for line in project_file.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        if line.startswith("DocumentPath="):
+            current = line[len("DocumentPath="):].strip().replace("/", "\\").split("\\")[-1].lower()
+        elif line.startswith("DocumentUniqueId=") and current:
+            ids[current] = line[len("DocumentUniqueId="):].strip()
+    return ids
+
+
+class _MultiboardSchematic:
+    """A Multi-board Schematic (.MbsDoc): a ZIP of JSON files edited in place.
+
+    The geometry below mirrors what Altium Designer 26 writes: a module entry
+    is a 20 x 16 box docked outside the module's left edge (offset from the
+    module's top-left corner) or, with dockType 2, its right edge (offset from
+    the bottom-right corner); a connection point sits 8.8 units beyond the
+    entry's outer face, and ids are one global sequence of integers.
+    """
+    ENTRY_W, ENTRY_H, ENTRY_PITCH, POINT_GAP = 20.0, 16.0, 24.0, 8.8
+    PURPLE = {"a": 255, "r": 112, "g": 48, "b": 160}
+    BLUE = {"a": 255, "r": 47, "g": 90, "b": 142}
+
+    def __init__(self, path: Path):
+        self.path = path
+        with zipfile.ZipFile(path) as z:
+            self.members = {i.filename: z.read(i.filename) for i in z.infolist()}
+        self.logical = json.loads(self.members["logical.json"].decode("utf-8-sig"))
+        self.page_name = sorted(n for n in self.members if n.lower().startswith("pages/"))[0]
+        self.page = json.loads(self.members[self.page_name].decode("utf-8-sig"))
+        self.styles = json.loads(self.members["styles.json"].decode("utf-8-sig"))
+        # A fill style holds its colour under "color"; a bare colour is put right on the way through.
+        for style in self.styles.get("fillStyles", []):
+            if "color" not in style and "a" in style:
+                style["color"] = {k: style.pop(k) for k in ("a", "r", "g", "b") if k in style}
+                style.setdefault("hatchBackColor", {})
+        self.next_id = 1 + max([0] + self._ids(self.logical) + self._ids(self.page))
+
+    @classmethod
+    def _ids(cls, obj) -> list:
+        found = []
+        if isinstance(obj, dict):
+            if isinstance(obj.get("id"), int):
+                found.append(obj["id"])
+            for v in obj.values():
+                found += cls._ids(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                found += cls._ids(v)
+        return found
+
+    def new_id(self) -> int:
+        self.next_id += 1
+        return self.next_id - 1
+
+    def module(self, designator: str) -> dict:
+        for m in self.logical["modules"]:
+            if m["designator"] == designator:
+                return m
+        raise KeyError(f"module {designator} not found")
+
+    def module_item(self, module: dict) -> dict:
+        for item in self.page["items"]:
+            if item.get("$type") == "__drawingModule" and item.get("logicalObjectId") == module["id"]:
+                return item
+        raise KeyError(f"module {module['designator']} has no drawing on {self.page_name}")
+
+    def entry_item(self, entry: dict) -> dict:
+        for item in self.page["items"]:
+            if item.get("$type") == "__drawingModuleEntry" and item.get("logicalObjectId") == entry["id"]:
+                return item
+        raise KeyError(f"entry {entry['calculatedDesignator']} has no drawing")
+
+    def _style(self, kind: str, spec: dict) -> int:
+        table = self.styles.setdefault(kind, [])
+        for s in table:
+            if {k: v for k, v in s.items() if k != "id"} == spec:
+                return s["id"]
+        new = dict(spec, id=1 + max([0] + [s["id"] for s in table]))
+        table.append(new)
+        return new["id"]
+
+    def entry_line_style(self) -> int:
+        return self._style("lineStyles", {"thickness": 0.3779527559055119, "color": self.PURPLE,
+                                          "thicknessPresetId": 0, "dashPatternPresetId": 0})
+
+    def entry_fill_style(self) -> int:
+        return self._style("fillStyles", {"hatchSpacingScale": 5.0, "hatchLineThickness": 0.3779527559055118,
+                                          "color": self.PURPLE,
+                                          "hatchBackColor": {"a": 255, "r": 255, "g": 255, "b": 255}})
+
+    def point_line_style(self) -> int:
+        return self._style("lineStyles", {"thickness": 0.384, "dashPattern": [], "color": self.BLUE,
+                                          "thicknessPresetId": 0})
+
+    def connection_line_style(self) -> int:
+        return self._style("lineStyles", {"thickness": 1.92, "dashPattern": [2.5, 1.25], "color": self.BLUE,
+                                          "thicknessPresetId": 0})
+
+    def add_entry_drawing(self, module: dict, entry: dict, side: str, center_y: float) -> dict:
+        """Dock the entry on the module's left or right edge with its middle at center_y."""
+        item = self.module_item(module)
+        rect = item["rect"]
+        drawing = {"$type": "__drawingModuleEntry", "offset": {}, "logicalObjectId": entry["id"],
+                   "lineStyleId": self.entry_line_style(), "fillStyleId": self.entry_fill_style()}
+        if side == "right":
+            drawing["offset"] = {"y": center_y - self.ENTRY_H / 2 - (rect["y"] + rect["height"])}
+            drawing["dockType"] = 2
+            label = {"offset": {"x": -14.37, "y": -8.05}, "anchorType": 3}
+        else:
+            drawing["offset"] = {"x": -self.ENTRY_W, "y": center_y - self.ENTRY_H / 2 - rect["y"]}
+            label = {"offset": {"x": 1.92, "y": -8.05}, "anchorType": 5}
+        drawing.update({"anchor": 5, "parentId": item["id"], "selectable": True, "id": self.new_id()})
+        self.page["items"].append(drawing)
+        self.page["items"].append({"$type": "__drawingLinkedProperty", "offset": label["offset"],
+                                   "color": {"a": 255, "r": 128}, "directValue": entry["calculatedDesignator"],
+                                   "propertyValuePath": "Designator", "fontStyleId": 1, "autoposition": True,
+                                   "isVisible": True, "anchorType": label["anchorType"], "anchor": 5,
+                                   "parentId": drawing["id"], "selectable": True, "id": self.new_id()})
+        return drawing
+
+    def entry_point(self, module: dict, drawing: dict) -> tuple:
+        """Absolute position of the connection point of an entry and its direction."""
+        rect = self.module_item(module)["rect"]
+        if drawing.get("dockType") == 2:
+            x = rect["x"] + rect["width"] + self.ENTRY_W + self.POINT_GAP
+            y = rect["y"] + rect["height"] + drawing["offset"]["y"] + self.ENTRY_H / 2
+            return {"x": x, "y": y}, {"x": 1.0}
+        x = rect["x"] - self.ENTRY_W - self.POINT_GAP
+        y = rect["y"] + drawing["offset"]["y"] + self.ENTRY_H / 2
+        return {"x": x, "y": y}, {"x": -1.0}
+
+    def add_connection_drawing(self, connection: dict, ends: list) -> dict:
+        """Draw a connection between two entries; ends: [(module, entry), (module, entry)].
+
+        The group holds the two end points (each labelled with the entry at
+        the other end), the connection designator and the connection item,
+        whose children - corner points and the segments chained through
+        them - are the line that is actually drawn.
+        """
+        point_style, line_style = self.point_line_style(), self.connection_line_style()
+        group = {"$type": "__drawingConnectionGroup", "moduleEntryIds": [entry["id"] for _, entry in ends],
+                 "lineStyleId": line_style, "designatorPointId": 0, "logicalConnectionId": connection["id"],
+                 "anchor": 5, "selectable": True, "id": self.new_id()}
+        points, labels = [], []
+        for n, (module, entry) in enumerate(ends):
+            other_module, other_entry = ends[1 - n]
+            position, direction = self.entry_point(module, self.entry_item(entry))
+            point = {"$type": "__drawingConnectionPoint", "position": position, "direction": direction,
+                     "pinId": self.entry_item(entry)["id"], "lineStyleId": point_style, "anchor": 5,
+                     "parentId": group["id"], "selectable": True, "id": self.new_id()}
+            text = f"{other_module['designator']}-{other_entry['calculatedDesignator']}"
+            labels.append({"$type": "__drawingLinkedProperty",
+                           "offset": {"x": 1.92 if direction["x"] > 0 else -(7.0 * len(text) + 3.48)},
+                           "color": {"a": 255, "r": 128}, "directValue": text, "propertyValuePath": "Designator",
+                           "fontStyleId": 1, "autoposition": True, "isVisible": True, "anchor": 5,
+                           "parentId": point["id"], "selectable": True, "id": self.new_id()})
+            points.append(point)
+        group["designatorPointId"] = points[0]["id"]
+        line = {"$type": "__drawingConnection", "endItemId1": points[0]["id"], "endItemId2": points[1]["id"],
+                "lineStyleId": line_style, "anchor": 5, "parentId": group["id"], "selectable": True,
+                "id": self.new_id()}
+        # route: out of the first entry, across at the middle, into the second entry
+        p1, p2 = points[0]["position"], points[1]["position"]
+        middle = (p1["x"] + p2["x"]) / 2
+        corners = [{"x": middle, "y": p1["y"]}]
+        if abs(p1["y"] - p2["y"]) > 0.01:
+            corners.append({"x": middle, "y": p2["y"]})
+        route, chain = [], [points[0]["id"]]
+        for corner in corners:
+            item = {"$type": "__drawingConnectionPoint", "position": corner, "direction": {},
+                    "connectionItemType": 1, "lineStyleId": point_style, "anchor": 5, "parentId": line["id"],
+                    "selectable": True, "id": self.new_id()}
+            route.append(item)
+            chain.append(item["id"])
+        chain.append(points[1]["id"])
+        for start, end in zip(chain, chain[1:]):
+            route.append({"$type": "__drawingConnection", "endItemId1": start, "endItemId2": end,
+                          "lineStyleId": line_style, "connectionItemType": 1, "anchor": 5,
+                          "parentId": line["id"], "selectable": True, "id": self.new_id()})
+        designator = {"$type": "__drawingLinkedProperty", "offset": {"x": (middle - p1["x"]) / 2 - 8.0, "y": -18.0},
+                      "color": {"a": 255, "b": 128}, "directValue": connection["designator"],
+                      "propertyValuePath": "Designator", "fontStyleId": 1, "isVisible": True, "anchor": 5,
+                      "parentId": group["id"], "selectable": True, "id": self.new_id()}
+        self.page["items"] += [group] + points + labels + [designator, line] + route
+        return group
+
+    def save(self):
+        core = {"version": 1, "modified": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f0Z")}
+        self.members["logical.json"] = json.dumps(self.logical, indent=2).encode("utf-8")
+        self.members[self.page_name] = json.dumps(self.page, indent=2).encode("utf-8")
+        self.members["styles.json"] = json.dumps(self.styles, indent=2).encode("utf-8")
+        self.members["core.json"] = json.dumps(core, indent=2).encode("utf-8")
+        with zipfile.ZipFile(self.path, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, data in self.members.items():
+                z.writestr(name, data)
+
+
+def _refresh_connector_nets(component: dict, connector: dict, new_id) -> tuple:
+    """Bring the pin nets of an imported connector in line with the compiled project.
+
+    Returns (pins whose net changed, pins present on one side only).
+    """
+    fresh = {p["number"]: p for p in connector["pins"]}
+    changed, differing = [], []
+    for pin in component["pins"]:
+        source = fresh.pop(pin["number"], None)
+        if source is None:
+            differing.append(pin["number"])
+            continue
+        params = pin["parameters"]
+        current = next((p for p in params if p["name"] == "ExternalNetName"), None)
+        if source["net"] and current is None:
+            params.append({"name": "ExternalNetName", "value": source["net"], "id": new_id()})
+        elif source["net"] and current["value"] != source["net"]:
+            current["value"] = source["net"]
+        elif not source["net"] and current is not None:
+            params.remove(current)
+        else:
+            continue
+        changed.append(pin["number"])
+    return changed, differing + list(fresh)
+
+
+def _pin_sort_key(pin: dict):
+    number = pin["number"]
+    return (0, int(number)) if number.isdigit() else (1, number)
+
+
+@mcp.tool()
+async def link_multiboard_modules(ctx: Context, schematic_path: str, connections: list = None) -> str:
+    """
+    Bring the connectors of the child projects into a Multi-board Schematic
+    and connect them, as Design » Import From Child Projects and Place »
+    Direct Connection do in the GUI.
+
+    Every module whose source is a .PrjPcb is compiled in Altium; each of its
+    components with a parameter System = Connector becomes a module entry
+    (component, pins with their compiled nets, entry, pin map and the entry
+    box drawn on the module edge that faces its partner). The child projects
+    are only read. A connection pairs the pins of two entries by pin
+    designator and draws the line between them. A connector that is already
+    in the schematic keeps its entry and gets its pin nets brought up to
+    date, so the tool can be run again after the child projects change. The
+    document is rewritten on disk: run run_multiboard_erc (which reloads it)
+    next.
+
+    Args:
+        schematic_path (str): Full path of the .MbsDoc.
+        connections (list): [{"from": "M1:J1", "to": "M2:J1"}] - module
+            designator and connector designator of each end.
+
+    Returns:
+        str: JSON with the connectors imported or refreshed per module, the
+             connections made (pin pairs, unpaired pins, pins whose nets
+             differ) and warnings.
+    """
+    path = Path(schematic_path)
+    if not path.is_file():
+        return json.dumps({"success": False, "error": f"schematic not found: {schematic_path}"})
+    try:
+        mbs = _MultiboardSchematic(path)
+    except (KeyError, ValueError, OSError) as e:
+        return json.dumps({"success": False, "error": f"cannot read the schematic: {e}"})
+    wanted = []
+    for c in connections or []:
+        try:
+            a, b = c["from"].split(":", 1), c["to"].split(":", 1)
+        except (KeyError, ValueError, AttributeError):
+            return json.dumps({"success": False, "error": f"connection must be {{'from': 'M1:J1', 'to': 'M2:J1'}}: {c}"})
+        wanted.append(((a[0].strip(), a[1].strip()), (b[0].strip(), b[1].strip())))
+    rects = {}
+    for m in mbs.logical["modules"]:
+        try:
+            rects[m["designator"]] = mbs.module_item(m)["rect"]
+        except KeyError:
+            pass
+
+    def partner_rect(module: str, connector: str):
+        for a, b in wanted:
+            if a == (module, connector):
+                return rects.get(b[0])
+            if b == (module, connector):
+                return rects.get(a[0])
+        return None
+
+    def entry_side(module: str, connector: str) -> str:
+        """The edge that faces the entry's partner; left when it has none."""
+        own, other = rects.get(module), partner_rect(module, connector)
+        if own and other and other["x"] + other["width"] / 2 > own["x"] + own["width"] / 2:
+            return "right"
+        return "left"
+
+    def entry_height(module: str, connector: str) -> float:
+        """Middle of the vertical span shared with the partner, so that the line runs level."""
+        own, other = rects[module], partner_rect(module, connector)
+        if other:
+            top = max(own["y"], other["y"])
+            bottom = min(own["y"] + own["height"], other["y"] + other["height"])
+            if bottom - top >= mbs.ENTRY_H:
+                return (top + bottom) / 2
+        return own["y"] + own["height"] / 2
+
+    warnings, report_modules = [], []
+    for module in mbs.logical["modules"]:
+        source = module.get("source", {}).get("sourceProject", "")
+        if not source.lower().endswith(".prjpcb"):
+            continue
+        project = Path(os.path.normpath(os.path.join(str(path.parent), source)))
+        if not project.is_file():
+            warnings.append(f"{module['designator']}: child project not found: {project}")
+            continue
+        data = await _altium_report("get_project_connectors", {"project_path": str(project)},
+                                    CONNECTORS_REPORT, "connectors report")
+        if not data.get("success"):
+            return json.dumps({"success": False, "module": module["designator"], **data}, ensure_ascii=False)
+        doc_ids = _document_unique_ids(project)
+        present = {p["value"]: c for c in module.get("components", []) for p in c.get("parameters", [])
+                   if p.get("name") == "SourceId"}
+        added, kept, refreshed = [], [], {}
+        new_entries = []
+        for conn in data.get("connectors", []):
+            if conn["unique_id"] in present:
+                kept.append(conn["designator"])
+                changed, differing = _refresh_connector_nets(present[conn["unique_id"]], conn, mbs.new_id)
+                if changed:
+                    refreshed[conn["designator"]] = changed
+                if differing:
+                    warnings.append(f"{module['designator']}.{conn['designator']}: pins {', '.join(differing)} exist "
+                                    "on one side only (schematic or project); the entry was not rebuilt")
+                continue
+            doc_name = conn["document"].replace("/", "\\").split("\\")[-1].lower()
+            parent_id = doc_ids.get(doc_name, "")
+            if not parent_id:
+                warnings.append(f"{module['designator']}.{conn['designator']}: no DocumentUniqueId for {doc_name} in {project.name}")
+            pins = []
+            for pin in sorted(conn["pins"], key=_pin_sort_key):
+                params = [{"name": "SourceId", "value": pin["unique_id"], "id": mbs.new_id()},
+                          {"name": "ParentSourceId", "value": conn["unique_id"], "id": mbs.new_id()}]
+                if pin["net"]:
+                    params.append({"name": "ExternalNetName", "value": pin["net"], "id": mbs.new_id()})
+                if not pin["unique_id"]:
+                    warnings.append(f"{module['designator']}.{conn['designator']} pin {pin['number']}: no unique id")
+                pins.append({"pinId": pin["number"], "name": pin["name"], "number": pin["number"],
+                             "parameters": params, "id": mbs.new_id()})
+            component = {"designator": conn["designator"], "comment": conn["comment"], "pins": pins,
+                         "parameters": [{"name": "ParentSourceId", "value": parent_id, "id": mbs.new_id()},
+                                        {"name": "PhysicalPath", "value": conn["physical_path"], "id": mbs.new_id()},
+                                        {"name": "SourceId", "value": conn["unique_id"], "id": mbs.new_id()}],
+                         "id": mbs.new_id()}
+            entry = {"calculatedDesignator": conn["designator"], "parameters": [], "id": mbs.new_id()}
+            module.setdefault("components", []).append(component)
+            module.setdefault("entries", []).append(entry)
+            pin_map = module.setdefault("entryPinMap", {"map": []}).setdefault("map", [])
+            pin_map += [{"key": p["id"], "value": entry["id"]} for p in pins]
+            new_entries.append(entry)
+            added.append(conn["designator"])
+        # draw the new entries: stacked on the edge facing their partner
+        by_side = {"left": [], "right": []}
+        for entry in new_entries:
+            by_side[entry_side(module["designator"], entry["calculatedDesignator"])].append(entry)
+        if module["designator"] not in rects:
+            if new_entries:
+                warnings.append(f"{module['designator']}: no drawing on the page, entries not drawn")
+        else:
+            for side, entries in by_side.items():
+                last = None
+                for y, entry in sorted(((entry_height(module["designator"], e["calculatedDesignator"]), e)
+                                        for e in entries), key=lambda t: t[0]):
+                    if last is not None and y - last < mbs.ENTRY_PITCH:
+                        y = last + mbs.ENTRY_PITCH
+                    last = y
+                    mbs.add_entry_drawing(module, entry, side, y)
+        report_modules.append({"designator": module["designator"], "project": str(project),
+                               "connectors_added": added, "connectors_present": kept,
+                               "nets_updated": refreshed})
+
+    def find_entry(module_designator: str, connector: str):
+        module = mbs.module(module_designator)
+        for entry in module.get("entries", []):
+            if entry["calculatedDesignator"] == connector:
+                component = next(c for c in module["components"] if c["designator"] == connector)
+                return module, entry, component
+        raise KeyError(f"{module_designator} has no connector {connector}")
+
+    report_connections = []
+    existing = {tuple(sorted((c["entriesConnection"]["entry1"], c["entriesConnection"]["entry2"])))
+                for c in mbs.logical["connections"]}
+    for (ma, ca), (mb, cb) in wanted:
+        try:
+            module_a, entry_a, comp_a = find_entry(ma, ca)
+            module_b, entry_b, comp_b = find_entry(mb, cb)
+        except KeyError as e:
+            warnings.append(str(e))
+            continue
+        if tuple(sorted((entry_a["id"], entry_b["id"]))) in existing:
+            warnings.append(f"{ma}:{ca} - {mb}:{cb} already connected")
+            continue
+        pins_b = {p["number"]: p for p in comp_b["pins"]}
+        pairs, unpaired, conflicts = [], [], []
+        for pin_a in sorted(comp_a["pins"], key=_pin_sort_key):
+            pin_b = pins_b.pop(pin_a["number"], None)
+            if pin_b is None:
+                unpaired.append(f"{ma}:{ca}-{pin_a['number']}")
+                continue
+            pairs.append({"$type": "__logicalPinToPinConnection",
+                          "pinPair": {"pin1": pin_a["id"], "pin2": pin_b["id"], "parameters": [], "id": mbs.new_id()},
+                          "designator": pin_a["number"], "parameters": [], "id": mbs.new_id()})
+            net_a = next((p["value"] for p in pin_a["parameters"] if p["name"] == "ExternalNetName"), "")
+            net_b = next((p["value"] for p in pin_b["parameters"] if p["name"] == "ExternalNetName"), "")
+            if net_a and net_b and net_a != net_b:
+                conflicts.append({"pin": pin_a["number"], ma: net_a, mb: net_b})
+        unpaired += [f"{mb}:{cb}-{n}" for n in pins_b]
+        designator = f"C{len(mbs.logical['connections']) + 1}"
+        connection = {"$type": "__logicalDirectConnection",
+                      "entriesConnection": {"entry1": entry_a["id"], "entry2": entry_b["id"],
+                                            "physicalConnections": pairs, "id": mbs.new_id()},
+                      "designator": designator, "parameters": [], "id": mbs.new_id()}
+        entry_a["logicalConnection"] = connection["id"]
+        entry_b["logicalConnection"] = connection["id"]
+        mbs.logical["connections"].append(connection)
+        try:
+            mbs.add_connection_drawing(connection, [(module_a, entry_a), (module_b, entry_b)])
+        except KeyError as e:
+            warnings.append(f"{designator}: not drawn: {e}")
+        report_connections.append({"designator": designator, "from": f"{ma}:{ca}", "to": f"{mb}:{cb}",
+                                   "pin_pairs": len(pairs), "unpaired": unpaired, "net_conflicts": conflicts})
+    mbs.save()
+    return json.dumps({"success": True, "schematic": str(path), "modules": report_modules,
+                       "connections": report_connections, "warnings": warnings,
+                       "next_steps": ["run_multiboard_erc reloads the schematic in Altium and checks it"]},
+                      indent=1, ensure_ascii=False)
+
+
+@mcp.tool()
+async def run_multiboard_erc(ctx: Context, schematic_path: str) -> str:
+    """
+    Reload a Multi-board Schematic (.MbsDoc) from disk, run its ERC (Design »
+    Run ERC) and return the Messages panel.
+
+    Args:
+        schematic_path (str): Full path of the .MbsDoc.
+
+    Returns:
+        str: JSON with errors, warnings and messages[] (class, text, source, document).
+    """
+    data = await _altium_report("run_multiboard_erc", {"document_path": schematic_path}, ERC_REPORT, "ERC report")
+    return json.dumps(data, indent=1, ensure_ascii=False)
 
 
 @mcp.tool()
