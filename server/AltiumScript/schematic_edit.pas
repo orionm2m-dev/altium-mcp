@@ -1141,26 +1141,34 @@ end;
 // with the given unique id on the sheet DocPath.
 procedure CollectPinUniqueIds(DocPath: String; CompUniqueId: String; PinIds: TStringList);
 var
+    Opened : IServerDocument;
     SchDoc : ISch_Document;
     Comp   : ISch_Component;
     Iter   : ISch_Iterator;
     Pin    : ISch_Pin;
 begin
+    // A sheet opened here is closed again, so the workspace is left as found.
+    Opened := nil;
     if not Client.IsDocumentOpen(DocPath) then
-        Client.OpenDocument('SCH', DocPath);
+        Opened := Client.OpenDocument('SCH', DocPath);
     SchDoc := SchServer.GetSchDocumentByPath(DocPath);
-    if SchDoc = nil then Exit;
-    Comp := SchComponentByUniqueId(SchDoc, CompUniqueId);
-    if Comp = nil then Exit;
-    Iter := Comp.SchIterator_Create;
-    Iter.AddFilter_ObjectSet(MkSet(ePin));
-    Pin := Iter.FirstSchObject;
-    while Pin <> nil do
+    if SchDoc <> nil then
     begin
-        PinIds.Add(Pin.Designator + '=' + Pin.UniqueId);
-        Pin := Iter.NextSchObject;
+        Comp := SchComponentByUniqueId(SchDoc, CompUniqueId);
+        if Comp <> nil then
+        begin
+            Iter := Comp.SchIterator_Create;
+            Iter.AddFilter_ObjectSet(MkSet(ePin));
+            Pin := Iter.FirstSchObject;
+            while Pin <> nil do
+            begin
+                PinIds.Add(Pin.Designator + '=' + Pin.UniqueId);
+                Pin := Iter.NextSchObject;
+            end;
+            Comp.SchIterator_Destroy(Iter);
+        end;
     end;
-    Comp.SchIterator_Destroy(Iter);
+    if Opened <> nil then Client.CloseDocument(Opened);
 end;
 
 function ProjectConnectorsReport(ProjectPath: String; OutPath: String): String;
@@ -1260,8 +1268,14 @@ begin
         Result := 'ERROR: document not found: ' + DocPath;
         Exit;
     end;
-    // Close and reopen so that a file rewritten on disk is what gets checked.
+    // Close and reopen so that a file rewritten on disk is what gets checked;
+    // edits that exist only in memory would be lost, so they stop the run.
     Doc := Client.GetDocumentByPath(DocPath);
+    if (Doc <> nil) and Doc.Modified then
+    begin
+        Result := 'ERROR: document has unsaved changes, save or discard them first: ' + DocPath;
+        Exit;
+    end;
     if Doc <> nil then Client.CloseDocument(Doc);
     Doc := Client.OpenDocument('SdDoc', DocPath);
     if Doc = nil then
