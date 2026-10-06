@@ -1006,6 +1006,39 @@ begin
 end;
 
 // Function to execute a command with parameters
+
+// save_documents: {"paths": ["...", "..."]}
+function ExecuteSaveDocuments(RequestData: TStringList): String;
+var
+    i : Integer;
+    Line : String;
+    Paths : TStringList;
+    InList : Boolean;
+begin
+    Paths := TStringList.Create;
+    InList := False;
+    try
+        for i := 0 to RequestData.Count - 1 do
+        begin
+            Line := RequestData[i];
+            if Pos('"paths"', Line) > 0 then begin InList := True; Continue; end;
+            if InList then
+            begin
+                if Pos(']', Line) > 0 then InList := False
+                else
+                begin
+                    Line := Trim(StringReplace(StringReplace(Line, '"', '', REPLACEALL), ',', '', REPLACEALL));
+                    Line := StringReplace(Line, '\\', '\', REPLACEALL);
+                    if Line <> '' then Paths.Add(Line);
+                end;
+            end;
+        end;
+        Result := SaveDocumentsFromList(Paths);
+    finally
+        Paths.Free;
+    end;
+end;
+
 function ExecuteCommand(CommandName: String): String;
 var
     ViewHint   : String;
@@ -1101,6 +1134,17 @@ begin
             Result := ExecuteSearchLibrarySymbol(RequestData);
         'create_pcb_footprint':
             Result := ExecuteCreatePCBFootprint(RequestData);
+        'edit_schematic_sheet':
+            Result := EditSchematicSheet(ROOT_DIR + 'sheet_edit_spec.txt', ROOT_DIR + 'pin_map.txt');
+        'get_schematic_sheet':
+            Result := GetSchematicSheet(ParamValueOf('sheet_path'), ROOT_DIR + 'sheet_objects.json');
+        'compile_project':
+            Result := CompileProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'compile_report.json',
+                                           ParamValueOf('include_pins') = 'true');
+        'save_documents':
+            Result := ExecuteSaveDocuments(RequestData);
+        'open_project':
+            Result := OpenProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'project_report.json');
     else
         LogScriptError('Error: Unknown command: ' + CommandName);
     end;

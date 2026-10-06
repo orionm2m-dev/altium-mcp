@@ -139,6 +139,21 @@ The server provides several tools to interact with Altium Designer:
 
 ![Symbol Creator](assets/symbol_creator.gif)
 
+### Schematic Sheets (editing existing sheets)
+- `get_schematic_sheet`: Read every object of a sheet - components with parameters, footprint models and pin connection points, labels, net labels, ports, sheet symbols with entries, wires, junctions, No-ERC and power ports - in mils. The survey step before any edit.
+- `place_schematic_components`: Place symbols from a `.SchLib` onto an existing sheet (designator, position, orientation, mirror, comment, footprint model, parameters) and get back the measured connection point of every placed pin. A symbol whose pins do not survive Altium's `Replicate` is rebuilt from its primitives.
+- `add_schematic_wiring`: Wires, junctions, net labels, power ports, sheet ports, No-ERC markers and notes on an existing sheet.
+- `edit_schematic_text`: Replace, move, delete or add free text; rename sheet symbols.
+- `set_component_parameters`: Parameters (assembly variants such as `Assembly_Base`), comment and footprint model of placed components.
+- `delete_schematic_objects`: Components by designator, other objects by position.
+- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
+- `create_schematic_project`: Create a `.PrjPcb` (when missing) with new, sized, empty sheets saved under the given paths and added to the project.
+- `add_sheet_symbols`: Place hierarchical sheet symbols with their sheet entries (plus wires, net labels, notes and frame lines) on a sheet - the active block diagram of a project.
+- `compile_project`: Compile a `.PrjPcb`, return Altium's violations (ERC) and, on request, the net of every pin - the proof that an edit connected what it should.
+- `open_project`: Open a project of any kind (`.PrjPcb`, `.PrjMbd`, ...) and list its logical documents - the check for a project a tool wrote.
+- `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
+
+
 ### Layout Operations
 - `get_all_nets`: Returns a list of unique nets from the pcb
 - `create_net_class` ([YouTube](https://youtu.be/89booqRbnzQ)): Create a net class from a list of nets

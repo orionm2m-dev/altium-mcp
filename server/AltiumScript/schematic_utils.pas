@@ -856,7 +856,20 @@ begin
             if (Kind = 'LIBRARY') then
             begin
                 LibPath := Trim(GetFieldFromPipeString(Line, 1));
-                if (LibPath <> '') and FileExists(LibPath) then
+                if (LibPath <> '') and not FileExists(LibPath) then
+                begin
+                    // A library that does not exist yet is created and saved
+                    // under that name, so a batch can start a new library.
+                    GetWorkspace.DM_CreateNewDocument('SCHLIB');
+                    ServerDoc := Client.GetCurrentView.OwnerDocument;
+                    if (ServerDoc <> Nil) then
+                    begin
+                        Client.ShowDocument(ServerDoc);
+                        Sleep(500);
+                        ServerDoc.DoSafeChangeFileNameAndSave(LibPath, 'Advanced Schematic binary library');
+                    end;
+                end
+                else if (LibPath <> '') then
                 begin
                     // Focus if already open; never re-open (reload discards
                     // unsaved symbols)
