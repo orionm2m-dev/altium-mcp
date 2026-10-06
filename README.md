@@ -153,6 +153,12 @@ The server provides several tools to interact with Altium Designer:
 - `open_project`: Open a project of any kind (`.PrjPcb`, `.PrjMbd`, ...) and list its logical documents - the check for a project a tool wrote.
 - `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
 
+### Multi-board Design
+- `create_multiboard_project`: Write a Multi-board Design project (`.PrjMbd`) with a Multi-board Schematic (`.MbsDoc`) whose modules reference child PCB projects; the files are written directly, as that editor has no scripting interface; `link_multiboard_modules` then imports the connectors and connects them.
+- `link_multiboard_modules`: Import the connectors of the child projects into a Multi-board Schematic as module entries and connect them pin by pin, as Design » Import From Child Projects and Place » Direct Connection do. The child projects are opened and only read; a later run refreshes the nets and designators of connectors already imported and reports what it does not rebuild.
+- `run_multiboard_erc`: Reload a Multi-board Schematic, run its ERC and return the Messages panel; a schematic with unsaved changes is refused.
+- `create_project_group`: Write a project group (`.DsnWrk`) listing the projects Altium opens together.
+- `open_project_group`: Open a project group in a freshly started Altium; refused while documents have unsaved changes or a saved group in the workspace has changed.
 
 ### Layout Operations
 - `get_all_nets`: Returns a list of unique nets from the pcb
