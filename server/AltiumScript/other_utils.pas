@@ -532,7 +532,7 @@ end;
 
 // Get all available output job containers from the first open OutJob
 // TIniFile goes through the Windows private-profile API, which cannot read a
-// file on a network share such as \\wsl.localhost. Give it a local copy.
+// file on a network share such as \\server\share. Give it a local copy.
 function OpenOutJobIni(OutJobPath: String; ROOT_DIR: String): TIniFile;
 var
     Lines : TStringList;

@@ -146,17 +146,19 @@ The server provides several tools to interact with Altium Designer:
 - `edit_schematic_text`: Replace, move, delete or add free text; rename sheet symbols.
 - `set_component_parameters`: Parameters (assembly variants such as `Assembly_Base`), comment and footprint model of placed components.
 - `delete_schematic_objects`: Components by designator, other objects by position.
+- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
 - `create_schematic_project`: Create a `.PrjPcb` (when missing) with new, sized, empty sheets saved under the given paths and added to the project.
 - `add_sheet_symbols`: Place hierarchical sheet symbols with their sheet entries (plus wires, net labels, notes and frame lines) on a sheet - the active block diagram of a project.
+- `compile_project`: Compile a `.PrjPcb`, return Altium's violations (ERC) and, on request, the net of every pin - the proof that an edit connected what it should.
 - `open_project`: Open a project of any kind (`.PrjPcb`, `.PrjMbd`, ...) and list its logical documents - the check for a project a tool wrote.
+- `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
+
+### Multi-board Design
 - `create_multiboard_project`: Write a Multi-board Design project (`.PrjMbd`) with a Multi-board Schematic (`.MbsDoc`) whose modules reference child PCB projects; the files are written directly, as that editor has no scripting interface; `link_multiboard_modules` then imports the connectors and connects them.
-- `create_project_group`: Write a project group (`.DsnWrk`) listing the projects Altium opens together.
-- `open_project_group`: Open a project group in a freshly started Altium; refused while documents have unsaved changes or a saved group in the workspace has changed.
 - `link_multiboard_modules`: Import the connectors of the child projects into a Multi-board Schematic as module entries and connect them pin by pin, as Design » Import From Child Projects and Place » Direct Connection do. The child projects are opened and only read; a later run refreshes the nets and designators of connectors already imported and reports what it does not rebuild.
 - `run_multiboard_erc`: Reload a Multi-board Schematic, run its ERC and return the Messages panel; a schematic with unsaved changes is refused.
-- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
-- `compile_project`: Compile a `.PrjPcb`, return Altium's violations (ERC) and, on request, the net of every pin - the proof that an edit connected what it should.
-- `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
+- `create_project_group`: Write a project group (`.DsnWrk`) listing the projects Altium opens together.
+- `open_project_group`: Open a project group in a freshly started Altium; refused while documents have unsaved changes or a saved group in the workspace has changed.
 
 ### Layout Operations
 - `get_all_nets`: Returns a list of unique nets from the pcb

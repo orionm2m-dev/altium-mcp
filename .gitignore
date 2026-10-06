@@ -11,6 +11,7 @@ wheels/
 *.egg-info
 *.log
 *.json
+!server/resources/**/*.json
 *.png
 *.dxt
 

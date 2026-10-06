@@ -1,0 +1,53 @@
+[
+  {
+    "name": "CurrentDate"
+  },
+  {
+    "name": "CurrentTime"
+  },
+  {
+    "name": "Date"
+  },
+  {
+    "name": "DocumentFullPathAndName"
+  },
+  {
+    "name": "DocumentName"
+  },
+  {
+    "name": "DocumentScale"
+  },
+  {
+    "name": "DocumentUnits"
+  },
+  {
+    "name": "VersionControl_RevNumber"
+  },
+  {
+    "name": "ProjectName"
+  },
+  {
+    "name": "Revision"
+  },
+  {
+    "name": "SheetNumber"
+  },
+  {
+    "name": "SheetTotal"
+  },
+  {
+    "name": "Time"
+  },
+  {
+    "name": "ViewLayerName"
+  },
+  {
+    "name": "ViewSide"
+  },
+  {
+    "name": "ViewScale"
+  },
+  {
+    "name": "ViewLabel"
+  }
+]
