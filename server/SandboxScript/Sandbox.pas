@@ -31,6 +31,12 @@ begin
     LogLines.SaveToFile(LogPath);
 end;
 
+// Unit-level declarations supplied through the tool's `declarations`
+// argument: const/var blocks, procedures and functions the experiment body
+// calls. They may use SandboxLog. Names must not collide with the ones above.
+// === BEGIN DECLARATIONS (rewritten by the run_altium_script tool) ===
+// === END DECLARATIONS ===
+
 procedure Run;
 var
     ResultText : String;
@@ -44,13 +50,7 @@ begin
 
     try
         // === BEGIN EXPERIMENT (rewritten by the run_altium_script tool) ===
-        SandboxLog('compile-check the exporter by loading it and calling a harmless entry point');
-        S1 := 'c:\Users\stephen.thompson\Documents\Claude Code\PCB_RL\exporter\Export_PCB_Data.pas';
-        SandboxLog('file exists: ' + BoolToStr(FileExists(S1), True));
-        SandboxLog('running ExportAllPCBsInFolderAuto via RunScriptFile');
-        Client.SendMessage('ScriptingSystem:RunScriptFile',
-            'FileName=' + S1 + '|ProcName=ExportAllPCBsInFolderAuto', 512, Client.CurrentView);
-        ResultText := 'dispatched';
+        ResultText := '{"sandbox": "empty experiment"}';
         // === END EXPERIMENT ===
     except
         SandboxLog('EXCEPTION escaped the script body');
