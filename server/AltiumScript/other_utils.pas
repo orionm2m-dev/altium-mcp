@@ -523,9 +523,33 @@ begin
 end;
 
 // Get all available output job containers from the first open OutJob
-function GetOutputJobContainers(ROOT_DIR: String): String;
+// TIniFile goes through the Windows private-profile API, which cannot read a
+// file on a network share such as \\server\share. Give it a local copy.
+function OpenOutJobIni(OutJobPath: String; ROOT_DIR: String): TIniFile;
 var
-    OutJobPath: String;
+    Lines : TStringList;
+    LocalPath : String;
+begin
+    if Copy(OutJobPath, 1, 2) <> '\\' then
+    begin
+        Result := TIniFile.Create(OutJobPath);
+        Exit;
+    end;
+    LocalPath := ROOT_DIR + 'outjob_copy.ini';
+    Lines := TStringList.Create;
+    try
+        Lines.LoadFromFile(OutJobPath);
+        Lines.SaveToFile(LocalPath);
+    finally
+        Lines.Free;
+    end;
+    Result := TIniFile.Create(LocalPath);
+end;
+
+// OutJobPath names the job file; '' falls back to the first OutJob of any
+// open project, which is ambiguous as soon as two projects are open.
+function GetOutputJobContainers(ROOT_DIR: String; OutJobPath: String): String;
+var
     IniFile: TIniFile;
     ContainerName, ContainerAction: String;
     G, J: Integer;
@@ -535,16 +559,17 @@ var
     ContainerProps: TStringList;
     OutputLines: TStringList;
 begin
-    // Get the path of the first open OutJob
-    OutJobPath := GetOpenOutputJob();
+    if OutJobPath = '' then OutJobPath := GetOpenOutputJob();
 
-    // Exit if no open OutJob was found
-    if OutJobPath = '' then
+    if (OutJobPath = '') or not FileExists(OutJobPath) then
     begin
         ResultProps := TStringList.Create;
         try
             AddJSONBoolean(ResultProps, 'success', False);
-            AddJSONProperty(ResultProps, 'error', 'No open OutJob document found');
+            if OutJobPath = '' then
+                AddJSONProperty(ResultProps, 'error', 'No open OutJob document found')
+            else
+                AddJSONProperty(ResultProps, 'error', 'OutJob file not found: ' + OutJobPath);
             Result := BuildJSONObject(ResultProps);
         finally
             ResultProps.Free;
@@ -561,7 +586,7 @@ begin
         AddJSONProperty(ResultProps, 'outjob_path', OutJobPath);
 
         // Open the OutJob file (it's just an INI file)
-        IniFile := TIniFile.Create(OutJobPath);
+        IniFile := OpenOutJobIni(OutJobPath, ROOT_DIR);
         try
             G := 1; // Group Number
             J := 1; // Job/Container Number
@@ -635,9 +660,8 @@ begin
 end;
 
 // Run selected output job containers with simplified logic
-function RunOutputJobs(ContainerNames: TStringList, ROOT_DIR: String): String;
+function RunOutputJobs(ContainerNames: TStringList; ROOT_DIR: String; OutJobPath: String): String;
 var
-    OutJobPath: String;
     IniFile: TIniFile;
     ContainerName, ContainerAction, RelativePath: String;
     G, J: Integer;
@@ -651,16 +675,17 @@ var
     OutJobDoc: IServerDocument;
     OutputLines: TStringList;
 begin
-    // Get the path of the first open OutJob
-    OutJobPath := GetOpenOutputJob();
+    if OutJobPath = '' then OutJobPath := GetOpenOutputJob();
 
-    // Exit if no open OutJob was found
-    if OutJobPath = '' then
+    if (OutJobPath = '') or not FileExists(OutJobPath) then
     begin
         ResultProps := TStringList.Create;
         try
             AddJSONBoolean(ResultProps, 'success', False);
-            AddJSONProperty(ResultProps, 'error', 'No open OutJob document found');
+            if OutJobPath = '' then
+                AddJSONProperty(ResultProps, 'error', 'No open OutJob document found')
+            else
+                AddJSONProperty(ResultProps, 'error', 'OutJob file not found: ' + OutJobPath);
             Result := BuildJSONObject(ResultProps);
         finally
             ResultProps.Free;
@@ -677,15 +702,16 @@ begin
         // Add the OutJob path to the result
         AddJSONProperty(ResultProps, 'outjob_path', OutJobPath);
 
-        // Open the OutJob document
+        // Open the OutJob document and make it the active one: the Print
+        // process works on the active document, and Focus alone does not
+        // activate a document that was just opened.
         if not(Client.IsDocumentOpen(OutJobPath)) then
-        begin
-            OutJobDoc := Client.OpenDocument('OUTPUTJOB', OutJobPath);
-            OutJobDoc.Focus();
-        end
+            OutJobDoc := Client.OpenDocument('OUTPUTJOB', OutJobPath)
         else
-        begin
             OutJobDoc := Client.GetDocumentByPath(OutJobPath);
+        if OutJobDoc <> Nil then
+        begin
+            Client.ShowDocument(OutJobDoc);
             OutJobDoc.Focus();
         end;
 
@@ -699,7 +725,7 @@ begin
         end;
 
         // Open the OutJob file (it's just an INI file)
-        IniFile := TIniFile.Create(OutJobPath);
+        IniFile := OpenOutJobIni(OutJobPath, ROOT_DIR);
         try
             // Process each requested container
             for I := 0 to ContainerNames.Count - 1 do
@@ -753,12 +779,17 @@ begin
                                 end
                                 else if ContainerAction = 'Publish' then
                                 begin
-                                    // Run PublishToPDF with simpler parameters
+                                    // Run PublishToPDF. The job file already holds its
+                                    // output path; passing it again as OutputBasePath
+                                    // makes the publisher write nothing when that path
+                                    // is on a network share, so it is only passed for
+                                    // local paths.
                                     ResetParameters;
                                     AddStringParameter('Action', 'PublishToPDF');
                                     AddStringParameter('OutputMedium', ContainerName);
                                     AddStringParameter('ObjectKind', 'OutputBatch');
-                                    AddStringParameter('OutputBasePath', RelativePath);
+                                    if (RelativePath <> '') and (Copy(RelativePath, 1, 2) <> '\\') then
+                                        AddStringParameter('OutputBasePath', RelativePath);
                                     AddStringParameter('DisableDialog', 'True');
                                     RunProcess('WorkspaceManager:Print');
 
