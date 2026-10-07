@@ -879,7 +879,8 @@ var
     Prj : IProject;
     BoardDoc, SourceDoc, JobDoc : IServerDocument;
     JobModel, Outputer, ProjectVariant : Variant;
-    DocPath, Overrides, OutputDirectory : String;
+    TargetVariant, PreviousVariant, AppliedVariant : IProjectVariant;
+    DocPath, Overrides, OutputDirectory, AppliedVariantName : String;
     i : Integer;
     BoardFound, JobFound, VariantFound : Boolean;
 begin
@@ -947,11 +948,16 @@ begin
         Result := 'ERROR: The export project must own both the PCB and dedicated OutJob';
         Exit;
     end;
+    TargetVariant := nil;
     VariantFound := VariantName = '[No Variations]';
     for i := 0 to Prj.DM_ProjectVariantCount - 1 do
     begin
         ProjectVariant := Prj.DM_ProjectVariants(i);
-        if ProjectVariant.DM_Description = VariantName then VariantFound := True;
+        if ProjectVariant.DM_Description = VariantName then
+        begin
+            VariantFound := True;
+            TargetVariant := Prj.DM_ProjectVariants(i);
+        end;
     end;
     if not VariantFound then
     begin
@@ -1016,13 +1022,31 @@ begin
     // isolated output directory do not depend on a generic report process.
     OutputDirectory := ExtractFilePath(OutJobPath);
     Overrides := '';
-    if not Outputer.DM_Generate_OutputFilesTo(OutputDirectory, Overrides) then
-    begin
-        Result := 'ERROR: The STEP output-file generator reported failure';
-        Exit;
+    // The STEP outputer also consults the project's current assembly variant.
+    // Its serialized variant name alone does not select the exported assembly.
+    // Only the disposable export project's state is changed, then restored.
+    PreviousVariant := Prj.DM_CurrentProjectVariant;
+    try
+        Prj.DM_SetCurrentProjectVariantSilent(TargetVariant);
+        AppliedVariant := Prj.DM_CurrentProjectVariant;
+        AppliedVariantName := '[No Variations]';
+        if AppliedVariant <> nil then AppliedVariantName := AppliedVariant.DM_Description;
+        if AppliedVariantName <> VariantName then
+        begin
+            Result := 'ERROR: Could not activate the requested assembly variant for STEP export';
+            Exit;
+        end;
+        if not Outputer.DM_Generate_OutputFilesTo(OutputDirectory, Overrides) then
+        begin
+            Result := 'ERROR: The STEP output-file generator reported failure';
+            Exit;
+        end;
+        Result := '{"success": true, "generator_api": "DM_Generate_OutputFilesTo", ' +
+                  '"applied_variant": ' + JSONStr(AppliedVariantName) + ', ' +
+                  '"output_directory": ' + JSONStr(OutputDirectory) + '}';
+    finally
+        Prj.DM_SetCurrentProjectVariantSilent(PreviousVariant);
     end;
-    Result := '{"success": true, "generator_api": "DM_Generate_OutputFilesTo", ' +
-              '"output_directory": ' + JSONStr(OutputDirectory) + '}';
 end;
 
 // Helper function to check if a document is open

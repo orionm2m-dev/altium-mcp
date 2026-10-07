@@ -48,7 +48,8 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
                     if answer is not None:
                         return answer
                 else:
-                    (job.parent / "Controller.STEP").write_bytes(STEP)
+                    suffix = "" if params["variant"] == NO_VARIATIONS else f"({params['variant']})"
+                    (job.parent / f"Controller{suffix}.STEP").write_bytes(STEP)
             return {"success": True, "result": {"success": True}}
         args = dict(project_path=str(self.project), pcb_path=str(self.pcb),
                     output_path=str(self.output), variant="Wireless", encoding="utf-8",
@@ -111,6 +112,24 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_export(variant=NO_VARIATIONS)
         self.assertTrue(result["success"], result)
 
+    async def test_wrong_variant_file_is_never_published(self):
+        for name in ("Controller(Wired).step", "Controller.step", "Other(Wireless).step"):
+            with self.subTest(name=name):
+                def produce(job):
+                    (job.parent / name).write_bytes(STEP)
+                result = await self.run_export(produce)
+                self.assertFalse(result["success"])
+                self.assertIn("requested assembly variant", result["error"])
+                self.assertFalse(self.output.exists())
+
+    async def test_base_design_refuses_variant_file(self):
+        def produce(job):
+            (job.parent / "Controller(Wired).step").write_bytes(STEP)
+        result = await self.run_export(produce, variant=NO_VARIATIONS)
+        self.assertFalse(result["success"])
+        self.assertIn("requested assembly variant", result["error"])
+        self.assertFalse(self.output.exists())
+
     async def test_unknown_variant_fails_before_bridge(self):
         result = await self.run_export(variant="Not a variant")
         self.assertFalse(result["success"])
@@ -134,7 +153,7 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_created_during_export_is_preserved(self):
         def produce(job):
-            (job.parent / "Controller.step").write_bytes(STEP)
+            (job.parent / "Controller(Wireless).step").write_bytes(STEP)
             self.output.write_bytes(b"created concurrently")
         result = await self.run_export(produce)
         self.assertFalse(result["success"])
@@ -142,7 +161,7 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_nested_export_failure_is_not_success(self):
         def produce(job):
-            (job.parent / "Controller.step").write_bytes(STEP)
+            (job.parent / "Controller(Wireless).step").write_bytes(STEP)
             return {"success": True, "result": '{"success": false, "error": "export refused"}'}
         result = await self.run_export(produce)
         self.assertFalse(result["success"])
@@ -165,7 +184,7 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
         for data, stale in ((STEP, True), (STEP[:-22], False), (b"arbitrary content" * 20, False)):
             with self.subTest(stale=stale, length=len(data)):
                 def produce(job):
-                    path = job.parent / "Controller.step"
+                    path = job.parent / "Controller(Wireless).step"
                     path.write_bytes(data)
                     if stale:
                         os.utime(path, (1, 1))
@@ -183,7 +202,7 @@ class StepExportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_changed_source_prevents_publishing(self):
         def produce(job):
-            (job.parent / "Controller.step").write_bytes(STEP)
+            (job.parent / "Controller(Wireless).step").write_bytes(STEP)
             self.pcb.write_bytes(b"changed during export")
         result = await self.run_export(produce)
         self.assertFalse(result["success"])

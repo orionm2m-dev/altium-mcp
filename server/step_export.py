@@ -226,6 +226,23 @@ async def _wait_for_step(directory: Path, started_ns: int, timeout: float) -> Pa
         await asyncio.sleep(min(0.5, max(0, deadline - time.monotonic())))
 
 
+def verify_variant_filename(generated: Path, pcb: Path, variant: str) -> None:
+    """Altium names a variant STEP as <board>(<variant>).step.
+
+    A generator can return success while using another current project variant.
+    Reject a mismatched or unrecognized filename before publishing any output.
+    """
+    if variant == NO_VARIATIONS:
+        matches = generated.stem.casefold() == pcb.stem.casefold()
+    else:
+        suffix = f"({variant})"
+        matches = (generated.stem.endswith(suffix)
+                   and generated.stem[:-len(suffix)].casefold() == pcb.stem.casefold())
+    if not matches:
+        raise ValueError(f"Generated STEP filename {generated.name!r} does not identify "
+                         f"the requested assembly variant {variant!r}")
+
+
 async def export_step(execute_command, project_path: str, pcb_path: str, output_path: str,
                       variant: str = NO_VARIATIONS, include_extruded_bodies: bool = False,
                       verification_timeout: float = 30, encoding: str = None) -> dict:
@@ -266,6 +283,7 @@ async def export_step(execute_command, project_path: str, pcb_path: str, output_
         if error:
             raise ValueError(f"STEP export command failed: {error}")
         generated = await _wait_for_step(directory, started_ns, verification_timeout)
+        verify_variant_filename(generated, pcb, variant)
         changed = [name for name, expected in snapshots.items()
                    if not Path(name).is_file() or file_hash(Path(name)) != expected]
         if changed:
