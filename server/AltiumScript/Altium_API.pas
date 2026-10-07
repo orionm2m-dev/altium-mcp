@@ -1145,6 +1145,10 @@ begin
             Result := ExecuteSaveDocuments(RequestData);
         'open_project':
             Result := OpenProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'project_report.json');
+        'export_pcb_step':
+            Result := ExportPCBStepJob(ParamValueOf('project_path'), ParamValueOf('export_project_path'),
+                                      ParamValueOf('pcb_path'),
+                                      ParamValueOf('outjob_path'), ParamValueOf('variant'), ROOT_DIR);
         'get_project_connectors':
             Result := ProjectConnectorsReport(ParamValueOf('project_path'), ROOT_DIR + 'connectors_report.json');
         'run_multiboard_erc':

@@ -25,6 +25,7 @@ import locale
 import uuid
 import zipfile
 from datetime import datetime, timezone
+from step_export import export_step
 
 # Configure logging
 logging.basicConfig(
@@ -4067,6 +4068,38 @@ async def run_output_jobs(ctx: Context, container_names: list, outjob_path: str 
     
     # Otherwise, convert to JSON
     return json.dumps(result_data, indent=2)
+
+@mcp.tool()
+async def export_pcb_step(ctx: Context, project_path: str, pcb_path: str, output_path: str,
+                          variant: str = "[No Variations]",
+                          include_extruded_bodies: bool = False) -> str:
+    """
+    Export one saved PCB and assembly variant as a populated STEP model.
+
+    Creates an isolated export project and dedicated STEP-only OutJob, then
+    runs them through Altium. The export project preserves the source variants
+    and settings, with absolute references to its existing documents. Source project, PCB and existing OutJobs are not saved or
+    modified. Unsaved source documents and existing output files are refused.
+    All components and holes are requested, with separate component bodies.
+    Success requires one fresh, complete STEP file and unchanged source hashes.
+
+    Args:
+        project_path: Absolute local path to the .PrjPcb containing the PCB.
+        pcb_path: Absolute local path to that project's .PcbDoc (not a panel).
+        output_path: New absolute .step or .stp path; parent must already exist.
+        variant: Exact assembly variant name, or "[No Variations]" for the base design.
+        include_extruded_bodies: Request both extruded bodies and STEP models (may overlap).
+
+    Returns:
+        JSON with success, output size/hash, source hashes and diagnostic OutJob
+        directory. The directory is retained on failure. An export transport
+        timeout is a failure even if Altium finishes writing a file later.
+    """
+    logger.info(f"Exporting STEP from {pcb_path}, variant {variant}, to {output_path}")
+    result = await export_step(altium_bridge.execute_command, project_path, pcb_path,
+                               output_path, variant, include_extruded_bodies)
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
 
 @mcp.tool()
 async def create_pcb_footprint(ctx: Context, footprint_name: str, description: str, pads: list, courtyard_x_mm: float = 0, courtyard_y_mm: float = 0) -> str:

@@ -163,6 +163,7 @@ begin
        (CommandName = 'get_schematic_sheet') or
        (CommandName = 'compile_project') or
        (CommandName = 'open_project') or
+       (CommandName = 'export_pcb_step') or
        (CommandName = 'get_project_connectors') or
        (CommandName = 'run_multiboard_erc') or
        (CommandName = 'open_project_group') or
@@ -867,6 +868,156 @@ begin
     finally
         ResultProps.Free;
         ContainerResults.Free;
+    end;
+end;
+
+// Export a dedicated STEP job against one explicit, saved project and board.
+// The Python tool creates the job and verifies the fresh STEP artifact; this
+// function establishes Altium's project/document/variant context atomically.
+function ExportPCBStepJob(ProjectPath, ExportProjectPath, PCBPath, OutJobPath, VariantName, ROOT_DIR: String): String;
+var
+    Prj : IProject;
+    BoardDoc, SourceDoc, JobDoc : IServerDocument;
+    JobModel, Outputer, ProjectVariant : Variant;
+    Containers : TStringList;
+    DocPath : String;
+    i : Integer;
+    BoardFound, JobFound, VariantFound : Boolean;
+begin
+    Result := '';
+    if not FileExists(ProjectPath) or not FileExists(ExportProjectPath) or
+       not FileExists(PCBPath) or not FileExists(OutJobPath) then
+    begin
+        Result := 'ERROR: STEP export project, PCB or dedicated OutJob does not exist';
+        Exit;
+    end;
+    Prj := GetWorkspace.DM_GetProjectFromPath(ProjectPath);
+    if Prj = nil then Prj := GetWorkspace.DM_OpenProject(ProjectPath, True);
+    if Prj = nil then
+    begin
+        Result := 'ERROR: STEP export could not open the requested project';
+        Exit;
+    end;
+    SourceDoc := Prj.DM_ServerDocument;
+    if SourceDoc = nil then
+    begin
+        Result := 'ERROR: Could not verify whether the project has unsaved changes';
+        Exit;
+    end;
+    if SourceDoc.Modified then
+    begin
+        Result := 'ERROR: Save or discard project changes explicitly before STEP export';
+        Exit;
+    end;
+    BoardFound := False;
+    for i := 0 to Prj.DM_LogicalDocumentCount - 1 do
+    begin
+        DocPath := Prj.DM_LogicalDocuments(i).DM_FullPath;
+        if UpperCase(DocPath) = UpperCase(PCBPath) then BoardFound := True;
+        SourceDoc := Client.GetDocumentByPath(DocPath);
+        if (SourceDoc <> nil) and SourceDoc.Modified then
+        begin
+            Result := 'ERROR: STEP export refuses unsaved changes: ' + DocPath;
+            Exit;
+        end;
+    end;
+    if not BoardFound then
+    begin
+        Result := 'ERROR: The requested PCB is not a logical document of the project';
+        Exit;
+    end;
+    // The disposable project preserves the source's variant definitions and
+    // owns the dedicated OutJob. It is never saved back to the source project.
+    Prj := GetWorkspace.DM_GetProjectFromPath(ExportProjectPath);
+    if Prj = nil then Prj := GetWorkspace.DM_OpenProject(ExportProjectPath, True);
+    if Prj = nil then
+    begin
+        Result := 'ERROR: Could not open the dedicated STEP export project';
+        Exit;
+    end;
+    BoardFound := False;
+    JobFound := False;
+    for i := 0 to Prj.DM_LogicalDocumentCount - 1 do
+    begin
+        DocPath := Prj.DM_LogicalDocuments(i).DM_FullPath;
+        if UpperCase(DocPath) = UpperCase(PCBPath) then BoardFound := True;
+        if UpperCase(DocPath) = UpperCase(OutJobPath) then JobFound := True;
+    end;
+    if not BoardFound or not JobFound then
+    begin
+        Result := 'ERROR: The export project must own both the PCB and dedicated OutJob';
+        Exit;
+    end;
+    VariantFound := VariantName = '[No Variations]';
+    for i := 0 to Prj.DM_ProjectVariantCount - 1 do
+    begin
+        ProjectVariant := Prj.DM_ProjectVariants(i);
+        if ProjectVariant.DM_Description = VariantName then VariantFound := True;
+    end;
+    if not VariantFound then
+    begin
+        Result := 'ERROR: The requested assembly variant is not present in the open project';
+        Exit;
+    end;
+    Prj.DM_SetAsCurrentProject;
+    BoardDoc := Client.GetDocumentByPath(PCBPath);
+    if BoardDoc = nil then BoardDoc := Client.OpenDocument('PCB', PCBPath);
+    if BoardDoc = nil then
+    begin
+        Result := 'ERROR: STEP export could not open the requested PCB';
+        Exit;
+    end;
+    Client.ShowDocument(BoardDoc);
+    if BoardDoc.Modified then
+    begin
+        Result := 'ERROR: The PCB has unsaved changes after opening; STEP export cancelled';
+        Exit;
+    end;
+    if PCBServer.GetCurrentPCBBoard = nil then
+    begin
+        Result := 'ERROR: No current PCB after opening the STEP source';
+        Exit;
+    end;
+    if UpperCase(PCBServer.GetCurrentPCBBoard.FileName) <> UpperCase(PCBPath) then
+    begin
+        Result := 'ERROR: The current PCB is not the requested STEP source';
+        Exit;
+    end;
+    JobDoc := Client.OpenDocument('OUTPUTJOB', OutJobPath);
+    if JobDoc = nil then
+    begin
+        Result := 'ERROR: Could not open the dedicated STEP OutJob';
+        Exit;
+    end;
+    JobModel := GetWorkspace.DM_GetOutputJobDocumentByPath(OutJobPath);
+    if JobModel = nil then
+    begin
+        Result := 'ERROR: Could not read the dedicated STEP OutJob';
+        Exit;
+    end;
+    if JobModel.GetState_OutputerCount <> 1 then
+    begin
+        Result := 'ERROR: STEP OutJob must contain exactly one generator';
+        Exit;
+    end;
+    Outputer := JobModel.GetState_Outputer(0);
+    if UpperCase(Outputer.DM_GetDocumentPath) <> UpperCase(PCBPath) then
+    begin
+        Result := 'ERROR: STEP OutJob source does not match the requested PCB';
+        Exit;
+    end;
+    if Outputer.DM_GetState_VariantName <> VariantName then
+    begin
+        Result := 'ERROR: STEP OutJob variant does not match the requested variant';
+        Exit;
+    end;
+    Prj.DM_SetAsCurrentProject;
+    Containers := TStringList.Create;
+    try
+        Containers.Add('PCB STEP export');
+        Result := RunOutputJobs(Containers, ROOT_DIR, OutJobPath);
+    finally
+        Containers.Free;
     end;
 end;
 

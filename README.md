@@ -121,6 +121,18 @@ The server provides several tools to interact with Altium Designer:
 - `get_output_job_containers`: Reads all available output containers of an .OutJob file - the one named by `outjob_path`, or the first OutJob of any open project when the path is omitted.
 - `run_output_jobs`: Pass a list of output job container names to run any number of them; `outjob_path` names the .OutJob (it is opened and focused as needed), otherwise the first OutJob of any open project is used.
 
+### PCB STEP Export
+- `export_pcb_step`: Export one explicit `.PcbDoc` of a `.PrjPcb` with an exact assembly variant name (`[No Variations]` for the base design). It creates an isolated export project that owns a dedicated, single-generator OutJob, includes all components and holes, and keeps component bodies separate. The export project preserves the source project settings and variant definitions, rebases its document references to absolute paths, and adds only the dedicated OutJob. `include_extruded_bodies=false` (default) selects Altium's AsStep model option. Set it to `true` to request AsBoth (STEP and extruded bodies); overlapping representations may then be present.
+- Give absolute **local-drive** paths for the project, PCB, and new `.step`/`.stp` file. The output directory must exist; existing output files are never overwritten. Use a local working copy when Altium cannot reliably open a network/WSL source path.
+- Unsaved source documents are refused; the tool does not save the project, PCB, or existing OutJobs. It checks the project/PCB/variant in Altium, runs the job, then requires exactly one fresh, complete STEP file and unchanged source hashes before publishing the requested file. This checks the export artifact, not geometric completeness or component collisions; inspect the STEP in your mechanical CAD system.
+- The unique `altium-step-*` directory is retained with the generated project, OutJob and original export for diagnostics. Export-command errors, timeouts, missing/truncated/stale files, and ambiguous multiple files return `success=false`; a bridge dispatch alone is not treated as export success. Do not retry while Altium is still finishing a timed-out run.
+- The ExportSTEPView configuration and variant handling are based on Altium's serialized OutJob format and API. Loading a generated job and reading back its explicit source and variant were verified in Altium Designer 26.9.1. Offline tests cover selection, validation, source preservation, output races and export failures; live STEP generation still requires validation in the target Altium installation.
+
+Offline tests (do not start Altium):
+```powershell
+python -m unittest discover -s server/tests -p test_step_export.py -v
+```
+
 ### Component Information
 - `get_all_designators`: Get a list of all component designators in the current board
 - `get_all_component_property_names`: Get a list of all available component property names
