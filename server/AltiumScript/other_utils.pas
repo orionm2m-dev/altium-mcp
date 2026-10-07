@@ -879,8 +879,7 @@ var
     Prj : IProject;
     BoardDoc, SourceDoc, JobDoc : IServerDocument;
     JobModel, Outputer, ProjectVariant : Variant;
-    Containers : TStringList;
-    DocPath : String;
+    DocPath, Overrides, OutputDirectory : String;
     i : Integer;
     BoardFound, JobFound, VariantFound : Boolean;
 begin
@@ -1012,13 +1011,18 @@ begin
         Exit;
     end;
     Prj.DM_SetAsCurrentProject;
-    Containers := TStringList.Create;
-    try
-        Containers.Add('PCB STEP export');
-        Result := RunOutputJobs(Containers, ROOT_DIR, OutJobPath);
-    finally
-        Containers.Free;
+    // ExportSTEP is an output-file generator, not a report generator. Call the
+    // verified job's outputer directly so the selected source, variant and
+    // isolated output directory do not depend on a generic report process.
+    OutputDirectory := ExtractFilePath(OutJobPath);
+    Overrides := '';
+    if not Outputer.DM_Generate_OutputFilesTo(OutputDirectory, Overrides) then
+    begin
+        Result := 'ERROR: The STEP output-file generator reported failure';
+        Exit;
     end;
+    Result := '{"success": true, "generator_api": "DM_Generate_OutputFilesTo", ' +
+              '"output_directory": ' + JSONStr(OutputDirectory) + '}';
 end;
 
 // Helper function to check if a document is open
