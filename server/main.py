@@ -714,8 +714,9 @@ async def create_schematic_symbol(ctx: Context, symbol_name: str, description: s
                                Use 0 for pins shared across all parts (e.g. power/GND).
                                Defaults to 1 if omitted. Only needed for multi-part symbols.
                     length (optional): pin length in mils (default 300)
-                    show_name / show_designator (optional): 1 or 0 to show/hide
-                               the pin name / number (e.g. op-amp pins often hide names)
+                    show_name / show_designator (optional): 1 or 0 (true or
+                               false) to show/hide the pin name / number
+                               (e.g. op-amp pins often hide names)
         part_count (int): Number of parts in the symbol (default 1).
                          Use >1 for multi-part symbols like quad op-amps or hex buffers.
         graphics (list, optional): Explicit body graphics. When given, the
@@ -2990,6 +2991,11 @@ async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
             LIBRARY|<path to .SchLib>   (optional first line: opens/focuses;
                                          an already-open library is only
                                          focused, never reloaded)
+            REPLACE|1                   (optional: each following SYMBOL
+                                         first removes every symbol of the
+                                         same name; REPLACE|0 switches it
+                                         off. Without it a symbol is added
+                                         next to an existing namesake.)
             SYMBOL|<name>|<description>|<part_count>
             PIN|<same pipe fields as create_schematic_symbol pins>
             GRAPHIC|<same entry format as create_schematic_symbol graphics>
@@ -2997,7 +3003,8 @@ async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
             to the most recent SYMBOL.
 
     Returns:
-        str: JSON object with created count and a failed name list
+        str: JSON object with created and replaced counts and a failed
+             name list
     """
     logger.info(f"Creating symbols batch from {spec_file}")
 
