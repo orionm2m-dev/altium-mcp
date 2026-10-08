@@ -1472,7 +1472,11 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
         spec_file (str): Path to a plain-text spec file, one record per line
             (coords in mils, layers as names, shapes/hole types as raw
             Altium enum ints, booleans as 1/0):
-            FPLIB|<path to .PcbLib>   (optional first line: opens/focuses)
+            FPLIB|<path to .PcbLib>   (optional first line: opens/focuses;
+                                       a library that does not exist yet is
+                                       created and saved under that path,
+                                       without Altium's empty placeholder
+                                       footprint)
             FOOTPRINT|<name>|<description>
             PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
             TRACK|x1|y1|x2|y2|width|layer
@@ -1480,6 +1484,8 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
             FILL|x1|y1|x2|y2|rotation|layer
             TEXT|x|y|size|width|rotation|layer|mirror|ttf|text
             REGION|layer|kind|x1|y1|x2|y2|...
+        The footprints are created in the open library in memory; save it
+        with save_documents.
 
     Returns:
         str: JSON with created count, primitive_errors, failed names

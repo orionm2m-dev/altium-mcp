@@ -18,10 +18,31 @@ begin
         Result := PCBServer.GetCurrentPCBLibrary;
 end;
 
+// Create a PCB library under LibPath and save it there. DM_CreateNewDocument
+// attaches the document to the FOCUSED project under its temporary name;
+// it is detached at once, so a library never silently joins whatever
+// project the user has focused.
+function CreatePcbLibDocument(LibPath: String): IServerDocument;
+var
+    Focused : IProject;
+begin
+    Result := nil;
+    GetWorkspace.DM_CreateNewDocument('PCBLIB');
+    Result := Client.GetCurrentView.OwnerDocument;
+    if (Result = nil) then Exit;
+    Focused := GetWorkspace.DM_FocusedProject;
+    if (Focused <> nil) and (Pos('Free Documents', Focused.DM_ProjectFileName) = 0) then
+        Focused.DM_RemoveSourceDocument(Result.FileName);
+    Client.ShowDocument(Result);
+    Sleep(500);
+    Result.DoSafeChangeFileNameAndSave(LibPath, 'PCB Library File');
+end;
+
 // Create many footprints in a single script run from a spec file (plain
 // text, pipe-delimited; coords in mils, layers as names, shapes/hole types
 // as raw enum ints - symmetric with get_footprint_primitives):
-//   FPLIB|<path to .PcbLib>              (optional first line - focus/open)
+//   FPLIB|<path to .PcbLib>              (optional first line - focus/open;
+//                                         a missing library is created)
 //   FOOTPRINT|<name>|<description>
 //   PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
 //   TRACK|x1|y1|x2|y2|width|layer
@@ -32,6 +53,7 @@ function CreateFootprintsBatch(SpecFilePath: String): String;
 var
     PcbLib      : IPCB_Library;
     LibComp     : IPCB_LibComponent;
+    Placeholder : IPCB_LibComponent;
     ServerDoc   : IServerDocument;
     Lines       : TStringList;
     FailedArray : TStringList;
@@ -63,6 +85,7 @@ begin
     FailedArray := TStringList.Create;
     ResultProps := TStringList.Create;
     LibComp := nil;
+    Placeholder := nil;
     CreatedCount := 0;
     PrimErrors := 0;
 
@@ -78,7 +101,18 @@ begin
                 if (Kind = 'FPLIB') then
                 begin
                     LibPath := GetFieldFromPipeString(Line, 1);
-                    if (LibPath <> '') and FileExists(LibPath) then
+                    if (LibPath <> '') and not FileExists(LibPath) then
+                    begin
+                        // A library that does not exist yet is created, so a
+                        // batch can start a new library. Altium gives it an
+                        // empty footprint; that one is dropped once the first
+                        // FOOTPRINT of the batch is registered.
+                        ServerDoc := CreatePcbLibDocument(LibPath);
+                        PcbLib := GetPcbLibSafe(0);
+                        if (PcbLib <> nil) and (PcbLib.ComponentCount = 1) then
+                            Placeholder := PcbLib.GetComponent(0);
+                    end
+                    else if (LibPath <> '') then
                     begin
                         if Client.IsDocumentOpen(LibPath) then
                             ServerDoc := Client.GetDocumentByPath(LibPath)
@@ -112,6 +146,11 @@ begin
                     LibComp.Description := GetFieldFromPipeString(Line, 2);
                     PcbLib.RegisterComponent(LibComp);
                     CreatedCount := CreatedCount + 1;
+                    if (Placeholder <> nil) then
+                    begin
+                        PcbLib.RemoveComponent(Placeholder);
+                        Placeholder := nil;
+                    end;
                 end
                 else if (LibComp <> nil) and (Kind = 'PAD') then
                 begin
