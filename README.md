@@ -158,7 +158,7 @@ python -m unittest discover -s server/tests -p test_step_export.py -v
 - `edit_schematic_text`: Replace, move, delete or add free text; rename sheet symbols.
 - `set_component_parameters`: Parameters (assembly variants such as `Assembly_Base`), comment and footprint model of placed components.
 - `delete_schematic_objects`: Components by designator, other objects by position.
-- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved.
+- `edit_schematic_sheet`: The batch form of the tools above - one pipe-delimited spec applied to several sheets in a single Altium run (same record format as `build_schematic`, plus the editing records). Every touched sheet is saved. `RENAME|kind|old|new` renames net labels, ports, sheet entries or power objects across a sheet, and `DELETE_ENTRY|name` removes sheet entries, so a net can be renamed or retired through a hierarchy.
 - `create_schematic_project`: Create a `.PrjPcb` (when missing) with new, sized, empty sheets saved under the given paths and added to the project.
 - `add_sheet_symbols`: Place hierarchical sheet symbols with their sheet entries (plus wires, net labels, notes and frame lines) on a sheet - the active block diagram of a project.
 - `compile_project`: Compile a `.PrjPcb`, return Altium's violations (ERC) and, on request, the net of every pin - the proof that an edit connected what it should.

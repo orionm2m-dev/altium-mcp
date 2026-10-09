@@ -493,6 +493,110 @@ begin
     end;
 end;
 
+// Rename every object of a kind on the sheet whose name equals OldName:
+// net labels and power ports by text, ports and sheet entries by name.
+// Returns the number of objects renamed.
+function EditRename(Kind, OldName, NewName: String): Integer;
+var
+    Iter, SubIter : ISch_Iterator;
+    Obj, Entry    : ISch_GraphicalObject;
+begin
+    Result := 0;
+    Iter := EditSheet.SchIterator_Create;
+    if Kind = 'netlabel' then Iter.AddFilter_ObjectSet(MkSet(eNetLabel))
+    else if Kind = 'power' then Iter.AddFilter_ObjectSet(MkSet(ePowerObject))
+    else if Kind = 'port' then Iter.AddFilter_ObjectSet(MkSet(ePort))
+    else if Kind = 'sheetentry' then Iter.AddFilter_ObjectSet(MkSet(eSheetSymbol))
+    else
+    begin
+        EditSheet.SchIterator_Destroy(Iter);
+        EditWarn('RENAME: unknown kind ' + Kind);
+        Exit;
+    end;
+    Obj := Iter.FirstSchObject;
+    while Obj <> nil do
+    begin
+        if (Kind = 'netlabel') or (Kind = 'power') then
+        begin
+            if OwnedBySheet(Obj) and (Obj.Text = OldName) then
+            begin
+                Obj.Text := NewName;
+                Result := Result + 1;
+            end;
+        end
+        else if Kind = 'port' then
+        begin
+            if Obj.Name = OldName then
+            begin
+                Obj.Name := NewName;
+                Result := Result + 1;
+            end;
+        end
+        else
+        begin
+            SubIter := Obj.SchIterator_Create;
+            SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
+            Entry := SubIter.FirstSchObject;
+            while Entry <> nil do
+            begin
+                if Entry.Name = OldName then
+                begin
+                    Entry.Name := NewName;
+                    Result := Result + 1;
+                end;
+                Entry := SubIter.NextSchObject;
+            end;
+            Obj.SchIterator_Destroy(SubIter);
+        end;
+        Obj := Iter.NextSchObject;
+    end;
+    EditSheet.SchIterator_Destroy(Iter);
+end;
+
+// Remove every sheet entry called Name from the sheet symbols of the sheet.
+// The search restarts after each removal; returns the number removed.
+function EditDeleteEntries(Name: String): Integer;
+var
+    Iter, SubIter : ISch_Iterator;
+    Sym, Entry    : ISch_GraphicalObject;
+    HitSym, Hit   : ISch_GraphicalObject;
+    Guard         : Integer;
+begin
+    Result := 0;
+    Guard := 0;
+    repeat
+        Hit := nil;
+        HitSym := nil;
+        Iter := EditSheet.SchIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(eSheetSymbol));
+        Sym := Iter.FirstSchObject;
+        while (Sym <> nil) and (Hit = nil) do
+        begin
+            SubIter := Sym.SchIterator_Create;
+            SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
+            Entry := SubIter.FirstSchObject;
+            while (Entry <> nil) and (Hit = nil) do
+            begin
+                if Entry.Name = Name then
+                begin
+                    Hit := Entry;
+                    HitSym := Sym;
+                end;
+                Entry := SubIter.NextSchObject;
+            end;
+            Sym.SchIterator_Destroy(SubIter);
+            Sym := Iter.NextSchObject;
+        end;
+        EditSheet.SchIterator_Destroy(Iter);
+        if Hit <> nil then
+        begin
+            HitSym.RemoveSchObject(Hit);
+            Result := Result + 1;
+        end;
+        Guard := Guard + 1;
+    until (Hit = nil) or (Guard > 100);
+end;
+
 procedure EditApplyRecord(Rec: String);
 var
     Kind : String;
@@ -784,6 +888,24 @@ begin
             EditSheet.RemoveSchObject(Obj);
             EditCount('texts_deleted');
         end;
+    end
+
+    // RENAME|kind|old|new   (kind: netlabel, port, sheetentry, power; every
+    // object of that kind on the sheet named old)
+    else if Kind = 'RENAME' then
+    begin
+        N := EditRename(LowerCase(Trim(GetFieldFromPipeString(Rec, 1))),
+                        GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3));
+        if N = 0 then EditWarn('RENAME: nothing named ' + GetFieldFromPipeString(Rec, 2))
+        else EditCount('renamed');
+    end
+
+    // DELETE_ENTRY|name   (every sheet entry called name)
+    else if Kind = 'DELETE_ENTRY' then
+    begin
+        N := EditDeleteEntries(GetFieldFromPipeString(Rec, 1));
+        if N = 0 then EditWarn('DELETE_ENTRY: no sheet entry named ' + GetFieldFromPipeString(Rec, 1))
+        else EditCount('sheet_entries_deleted');
     end
 
     // SHEETSYMBOL_RENAME|old|new
