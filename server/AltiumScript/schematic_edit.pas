@@ -495,8 +495,9 @@ end;
 
 // Rename every object of a kind on the sheet whose name equals OldName:
 // net labels and power ports by text, ports and sheet entries by name.
-// Returns the number of objects renamed.
-function EditRename(Kind, OldName, NewName: String): Integer;
+// Scope, when not empty, limits sheet entries to the sheet symbol of that
+// name. Returns the number of objects renamed.
+function EditRename(Kind, OldName, NewName, Scope: String): Integer;
 var
     Iter, SubIter : ISch_Iterator;
     Obj, Entry    : ISch_GraphicalObject;
@@ -532,7 +533,7 @@ begin
                 Result := Result + 1;
             end;
         end
-        else
+        else if (Scope = '') or (Obj.SheetName.Text = Scope) then
         begin
             SubIter := Obj.SchIterator_Create;
             SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
@@ -553,9 +554,10 @@ begin
     EditSheet.SchIterator_Destroy(Iter);
 end;
 
-// Remove every sheet entry called Name from the sheet symbols of the sheet.
-// The search restarts after each removal; returns the number removed.
-function EditDeleteEntries(Name: String): Integer;
+// Remove every sheet entry called Name from the sheet symbols of the sheet
+// (only from the symbol named Scope when Scope is not empty). The search
+// restarts after each removal; returns the number removed.
+function EditDeleteEntries(Name, Scope: String): Integer;
 var
     Iter, SubIter : ISch_Iterator;
     Sym, Entry    : ISch_GraphicalObject;
@@ -572,6 +574,11 @@ begin
         Sym := Iter.FirstSchObject;
         while (Sym <> nil) and (Hit = nil) do
         begin
+            if (Scope <> '') and (Sym.SheetName.Text <> Scope) then
+            begin
+                Sym := Iter.NextSchObject;
+                Continue;
+            end;
             SubIter := Sym.SchIterator_Create;
             SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
             Entry := SubIter.FirstSchObject;
@@ -890,22 +897,43 @@ begin
         end;
     end
 
-    // RENAME|kind|old|new   (kind: netlabel, port, sheetentry, power; every
-    // object of that kind on the sheet named old)
+    // RENAME|kind|old|new[|symbol]   (kind: netlabel, port, sheetentry,
+    // power; every object of that kind on the sheet named old; symbol limits
+    // sheet entries to one sheet symbol)
     else if Kind = 'RENAME' then
     begin
         N := EditRename(LowerCase(Trim(GetFieldFromPipeString(Rec, 1))),
-                        GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3));
+                        GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3),
+                        GetFieldFromPipeString(Rec, 4));
         if N = 0 then EditWarn('RENAME: nothing named ' + GetFieldFromPipeString(Rec, 2))
         else EditCount('renamed');
     end
 
-    // DELETE_ENTRY|name   (every sheet entry called name)
+    // DELETE_ENTRY|name[|symbol]   (every sheet entry called name, or only
+    // those of the sheet symbol named symbol)
     else if Kind = 'DELETE_ENTRY' then
     begin
-        N := EditDeleteEntries(GetFieldFromPipeString(Rec, 1));
+        N := EditDeleteEntries(GetFieldFromPipeString(Rec, 1), GetFieldFromPipeString(Rec, 2));
         if N = 0 then EditWarn('DELETE_ENTRY: no sheet entry named ' + GetFieldFromPipeString(Rec, 1))
         else EditCount('sheet_entries_deleted');
+    end
+
+    // SELECT_SYMBOL|name   (an existing sheet symbol becomes the target of the
+    // SHEETENTRY records that follow)
+    else if Kind = 'SELECT_SYMBOL' then
+    begin
+        EditLastSymbol := nil;
+        Iter := EditSheet.SchIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(eSheetSymbol));
+        Lbl := Iter.FirstSchObject;
+        while (Lbl <> nil) and (EditLastSymbol = nil) do
+        begin
+            if Lbl.SheetName.Text = GetFieldFromPipeString(Rec, 1) then EditLastSymbol := Lbl;
+            Lbl := Iter.NextSchObject;
+        end;
+        EditSheet.SchIterator_Destroy(Iter);
+        if EditLastSymbol = nil then EditWarn('SELECT_SYMBOL: no sheet symbol named ' + GetFieldFromPipeString(Rec, 1))
+        else EditCount('sheet_symbols_selected');
     end
 
     // SHEETSYMBOL_RENAME|old|new

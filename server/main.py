@@ -1854,12 +1854,16 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new
-        RENAME|kind|old|new             every netlabel / port / sheetentry /
-                                        power object named old gets new
-        DELETE_ENTRY|name               remove every sheet entry named name
+        RENAME|kind|old|new[|symbol]    every netlabel / port / sheetentry /
+                                        power object named old gets new;
+                                        symbol limits sheet entries to one
+                                        sheet symbol
+        DELETE_ENTRY|name[|symbol]      remove sheet entries named name
+        SELECT_SYMBOL|name              existing sheet symbol becomes the
+                                        target of following SHEETENTRY
         LINE|x1|y1|x2|y2                graphical line (not a wire)
         SHEETSYMBOL|x|y|x_size|y_size|name|file[|area_color|line_color]
-        SHEETENTRY|name|side|distance|iotype   (last SHEETSYMBOL)
+        SHEETENTRY|name|side|distance|iotype   (last SHEETSYMBOL or SELECT_SYMBOL)
     A library component whose pins do not survive Altium's Replicate is
     rebuilt from its primitives; the result says so in `warnings`.
 
