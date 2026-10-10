@@ -260,6 +260,16 @@ begin
         SCHM_PrimitiveRegistration, Obj.I_ObjectAddress);
 end;
 
+// Remove an object from its container and tell the robots, the counterpart
+// of EditRegister: without the message the compiler keeps the object in the
+// connectivity until the project is closed and reopened.
+procedure EditRemove(Owner: ISch_GraphicalObject; Obj: ISch_GraphicalObject);
+begin
+    Owner.RemoveSchObject(Obj);
+    SchServer.RobotManager.SendMessage(Owner.I_ObjectAddress, c_BroadCast,
+        SCHM_PrimitiveRegistration, Obj.I_ObjectAddress);
+end;
+
 function CountPins(Comp: ISch_Component): Integer;
 var
     Iter : ISch_Iterator;
@@ -488,7 +498,7 @@ begin
     EditSheet.SchIterator_Destroy(Iter);
     if Hit <> nil then
     begin
-        EditSheet.RemoveSchObject(Hit);
+        EditRemove(EditSheet, Hit);
         Result := True;
     end;
 end;
@@ -597,7 +607,7 @@ begin
         EditSheet.SchIterator_Destroy(Iter);
         if Hit <> nil then
         begin
-            HitSym.RemoveSchObject(Hit);
+            EditRemove(HitSym, Hit);
             Result := Result + 1;
         end;
         Guard := Guard + 1;
@@ -776,7 +786,7 @@ begin
             EditWarn('DELETE_PART: designator not found ' + GetFieldFromPipeString(Rec, 1))
         else
         begin
-            EditSheet.RemoveSchObject(Comp);
+            EditRemove(EditSheet, Comp);
             EditCount('parts_deleted');
         end;
     end
@@ -937,7 +947,7 @@ begin
         if Obj = nil then EditWarn('TEXT_DELETE: no label reads ' + GetFieldFromPipeString(Rec, 1))
         else
         begin
-            EditSheet.RemoveSchObject(Obj);
+            EditRemove(EditSheet, Obj);
             EditCount('texts_deleted');
         end;
     end
