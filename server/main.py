@@ -1857,7 +1857,8 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         SHEETSYMBOL_RESIZE|name|x_size|y_size   resize an existing sheet
                                         symbol (empty size keeps it); the
                                         top-left corner stays, right and
-                                        bottom entries follow their edge
+                                        bottom entries follow their edge,
+                                        so does a file name under the symbol
         RENAME|kind|old|new[|symbol]    every netlabel / port / sheetentry /
                                         power object named old gets new;
                                         symbol limits sheet entries to one

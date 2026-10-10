@@ -612,6 +612,7 @@ function EditResizeSymbol(Name: String; XSizeMils, YSizeMils: Integer): Integer;
 var
     Iter, SubIter : ISch_Iterator;
     Sym, Entry    : ISch_GraphicalObject;
+    Bottom        : Integer;
 begin
     Result := 0;
     Iter := EditSheet.SchIterator_Create;
@@ -621,8 +622,13 @@ begin
     begin
         if Sym.SheetName.Text = Name then
         begin
+            Bottom := Sym.Location.Y - Sym.YSize;
             if XSizeMils >= 0 then Sym.XSize := MilsToCoord(XSizeMils);
             if YSizeMils >= 0 then Sym.YSize := MilsToCoord(YSizeMils);
+            // A file name placed under the symbol keeps its distance from the bottom edge.
+            if Sym.SheetFileName.Location.Y < Bottom then
+                Sym.SheetFileName.Location := Point(Sym.SheetFileName.Location.X,
+                    Sym.SheetFileName.Location.Y + (Sym.Location.Y - Sym.YSize) - Bottom);
             SubIter := Sym.SchIterator_Create;
             SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
             Entry := SubIter.FirstSchObject;
