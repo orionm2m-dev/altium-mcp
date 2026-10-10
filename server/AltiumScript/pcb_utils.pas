@@ -38,11 +38,32 @@ begin
     Result.DoSafeChangeFileNameAndSave(LibPath, 'PCB Library File');
 end;
 
+// Remove every footprint of the library whose name equals FpName (case-
+// insensitive). Returns the number removed.
+function RemoveLibraryFootprints(PcbLib: IPCB_Library; FpName: String): Integer;
+var
+    i    : Integer;
+    Comp : IPCB_LibComponent;
+begin
+    Result := 0;
+    for i := PcbLib.ComponentCount - 1 downto 0 do
+    begin
+        Comp := PcbLib.GetComponent(i);
+        if (Comp <> nil) and (UpperCase(Comp.Name) = UpperCase(FpName)) then
+        begin
+            PcbLib.RemoveComponent(Comp);
+            Result := Result + 1;
+        end;
+    end;
+end;
+
 // Create many footprints in a single script run from a spec file (plain
 // text, pipe-delimited; coords in mils, layers as names, shapes/hole types
 // as raw enum ints - symmetric with get_footprint_primitives):
 //   FPLIB|<path to .PcbLib>              (optional first line - focus/open;
 //                                         a missing library is created)
+//   REPLACE|<1 or 0>                     (optional: 1 = a footprint replaces
+//                                         any footprint of the same name)
 //   FOOTPRINT|<name>|<description>
 //   PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
 //   TRACK|x1|y1|x2|y2|width|layer
@@ -71,6 +92,8 @@ var
     FieldValue  : String;
     CreatedCount: Integer;
     PrimErrors  : Integer;
+    ReplaceMode : Boolean;
+    Replaced    : Integer;
     i, V        : Integer;
 
 
@@ -88,6 +111,8 @@ begin
     Placeholder := nil;
     CreatedCount := 0;
     PrimErrors := 0;
+    ReplaceMode := False;
+    Replaced := 0;
 
     try
         Lines.LoadFromFile(SpecFilePath);
@@ -125,6 +150,11 @@ begin
                         end;
                     end;
                 end
+                else if (Kind = 'REPLACE') then
+                begin
+                    FieldValue := Trim(GetFieldFromPipeString(Line, 1));
+                    ReplaceMode := (FieldValue = '') or (FieldValue = '1') or (UpperCase(FieldValue) = 'TRUE');
+                end
                 else if (Kind = 'FOOTPRINT') then
                 begin
                     PcbLib := GetPcbLibSafe(0);
@@ -141,6 +171,8 @@ begin
                         Result := 'ERROR: No PCB library document is active';
                         Exit;
                     end;
+                    if ReplaceMode then
+                        Replaced := Replaced + RemoveLibraryFootprints(PcbLib, Trim(GetFieldFromPipeString(Line, 1)));
                     LibComp := PCBServer.CreatePCBLibComp;
                     LibComp.Name := Trim(GetFieldFromPipeString(Line, 1));
                     LibComp.Description := GetFieldFromPipeString(Line, 2);
@@ -283,6 +315,7 @@ begin
         end;
 
         AddJSONInteger(ResultProps, 'created', CreatedCount);
+        AddJSONInteger(ResultProps, 'replaced', Replaced);
         AddJSONInteger(ResultProps, 'primitive_errors', PrimErrors);
         if (FailedArray.Count > 0) then
             ResultProps.Add(BuildJSONArray(FailedArray, 'failed'))

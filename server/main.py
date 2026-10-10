@@ -1478,6 +1478,9 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
                                        created and saved under that path,
                                        without Altium's empty placeholder
                                        footprint)
+            REPLACE|1                 (optional: each FOOTPRINT replaces any
+                                       footprint of the same name instead of
+                                       being added next to it)
             FOOTPRINT|<name>|<description>
             PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
             TRACK|x1|y1|x2|y2|width|layer
@@ -1489,7 +1492,8 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
         with save_documents.
 
     Returns:
-        str: JSON with created count, primitive_errors, failed names
+        str: JSON with created and replaced counts, primitive_errors, failed
+             names
     """
     logger.info(f"Creating footprints batch from {spec_file}")
 
