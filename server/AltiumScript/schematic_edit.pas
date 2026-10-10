@@ -604,6 +604,45 @@ begin
     until (Hit = nil) or (Guard > 100);
 end;
 
+// Resize every sheet symbol called Name (sizes in mils; a negative size keeps
+// the current one). The top-left corner and the entries' distances stay;
+// entries on the right and bottom edges move with their edge. Returns the
+// number of symbols resized.
+function EditResizeSymbol(Name: String; XSizeMils, YSizeMils: Integer): Integer;
+var
+    Iter, SubIter : ISch_Iterator;
+    Sym, Entry    : ISch_GraphicalObject;
+begin
+    Result := 0;
+    Iter := EditSheet.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eSheetSymbol));
+    Sym := Iter.FirstSchObject;
+    while Sym <> nil do
+    begin
+        if Sym.SheetName.Text = Name then
+        begin
+            if XSizeMils >= 0 then Sym.XSize := MilsToCoord(XSizeMils);
+            if YSizeMils >= 0 then Sym.YSize := MilsToCoord(YSizeMils);
+            SubIter := Sym.SchIterator_Create;
+            SubIter.AddFilter_ObjectSet(MkSet(eSheetEntry));
+            Entry := SubIter.FirstSchObject;
+            while Entry <> nil do
+            begin
+                if Entry.Side = 1 then
+                    Entry.Location := Point(Sym.Location.X + Sym.XSize, Sym.Location.Y - Entry.DistanceFromTop)
+                else if Entry.Side = 3 then
+                    Entry.Location := Point(Sym.Location.X + Entry.DistanceFromTop, Sym.Location.Y - Sym.YSize);
+                Entry := SubIter.NextSchObject;
+            end;
+            Sym.SchIterator_Destroy(SubIter);
+            Sym.GraphicallyInvalidate;
+            Result := Result + 1;
+        end;
+        Sym := Iter.NextSchObject;
+    end;
+    EditSheet.SchIterator_Destroy(Iter);
+end;
+
 procedure EditApplyRecord(Rec: String);
 var
     Kind : String;
@@ -955,6 +994,15 @@ begin
         EditSheet.SchIterator_Destroy(Iter);
         if N = 0 then EditWarn('SHEETSYMBOL_RENAME: no sheet symbol named ' + GetFieldFromPipeString(Rec, 1))
         else EditCount('sheet_symbols_renamed');
+    end
+
+    // SHEETSYMBOL_RESIZE|name|x_size|y_size   (mils; an empty size keeps the
+    // current one)
+    else if Kind = 'SHEETSYMBOL_RESIZE' then
+    begin
+        N := EditResizeSymbol(GetFieldFromPipeString(Rec, 1), FieldInt(Rec, 2, -1), FieldInt(Rec, 3, -1));
+        if N = 0 then EditWarn('SHEETSYMBOL_RESIZE: no sheet symbol named ' + GetFieldFromPipeString(Rec, 1))
+        else EditCount('sheet_symbols_resized');
     end
 
     // LINE|x1|y1|x2|y2   (graphical line - a frame or a divider, not a wire)

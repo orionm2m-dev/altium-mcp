@@ -1854,6 +1854,10 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new
+        SHEETSYMBOL_RESIZE|name|x_size|y_size   resize an existing sheet
+                                        symbol (empty size keeps it); the
+                                        top-left corner stays, right and
+                                        bottom entries follow their edge
         RENAME|kind|old|new[|symbol]    every netlabel / port / sheetentry /
                                         power object named old gets new;
                                         symbol limits sheet entries to one
