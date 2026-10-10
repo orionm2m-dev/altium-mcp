@@ -353,6 +353,7 @@ var
     OutputLines : TStringList;
     TypeName    : String;
     i, C, V     : Integer;
+    OX, OY      : Integer;
     Found       : Boolean;
 begin
     Result := '';
@@ -445,6 +446,18 @@ begin
                 PrimsArray := TStringList.Create;
                 try
                     AddJSONProperty(FPProps, 'footprint_name', LibComp.Name);
+
+                    // The footprint open in the editor lives on the library board in
+                    // board coordinates; report it relative to the board origin like
+                    // every other footprint of the library.
+                    OX := 0;
+                    OY := 0;
+                    if (PcbLib.CurrentComponent <> nil) and
+                       (UpperCase(PcbLib.CurrentComponent.Name) = UpperCase(LibComp.Name)) then
+                    begin
+                        OX := PcbLib.Board.XOrigin;
+                        OY := PcbLib.Board.YOrigin;
+                    end;
                     AddJSONProperty(FPProps, 'description', LibComp.Description);
 
                     GrpIter := LibComp.GroupIterator_Create;
@@ -461,8 +474,8 @@ begin
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'pad');
                                     AddJSONProperty(PrimProps, 'name', Prim.Name);
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y - OY));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                     AddJSONBoolean(PrimProps, 'plated', Prim.Plated);
@@ -489,18 +502,18 @@ begin
                                 eTrackObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'track');
-                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1));
-                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1));
-                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2));
-                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2));
+                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1 - OX));
+                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1 - OY));
+                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2 - OX));
+                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2 - OY));
                                     AddJSONNumber(PrimProps, 'width', CoordToMils(Prim.Width));
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                 end;
                                 eArcObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'arc');
-                                    AddJSONNumber(PrimProps, 'cx', CoordToMils(Prim.XCenter));
-                                    AddJSONNumber(PrimProps, 'cy', CoordToMils(Prim.YCenter));
+                                    AddJSONNumber(PrimProps, 'cx', CoordToMils(Prim.XCenter - OX));
+                                    AddJSONNumber(PrimProps, 'cy', CoordToMils(Prim.YCenter - OY));
                                     AddJSONNumber(PrimProps, 'radius', CoordToMils(Prim.Radius));
                                     AddJSONNumber(PrimProps, 'start_angle', Prim.StartAngle);
                                     AddJSONNumber(PrimProps, 'end_angle', Prim.EndAngle);
@@ -510,10 +523,10 @@ begin
                                 eFillObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'fill');
-                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1Location));
-                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1Location));
-                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2Location));
-                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2Location));
+                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1Location - OX));
+                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1Location - OY));
+                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2Location - OX));
+                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2Location - OY));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                 end;
@@ -521,8 +534,8 @@ begin
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'text');
                                     AddJSONProperty(PrimProps, 'text', Prim.Text);
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.XLocation));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.YLocation));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.XLocation - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.YLocation - OY));
                                     AddJSONNumber(PrimProps, 'size', CoordToMils(Prim.Size));
                                     AddJSONNumber(PrimProps, 'width', CoordToMils(Prim.Width));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
@@ -541,8 +554,8 @@ begin
                                         begin
                                             PProps := TStringList.Create;
                                             try
-                                                AddJSONNumber(PProps, 'x', CoordToMils(Prim.MainContour.x[V]));
-                                                AddJSONNumber(PProps, 'y', CoordToMils(Prim.MainContour.y[V]));
+                                                AddJSONNumber(PProps, 'x', CoordToMils(Prim.MainContour.x[V] - OX));
+                                                AddJSONNumber(PProps, 'y', CoordToMils(Prim.MainContour.y[V] - OY));
                                                 PointsArray.Add(BuildJSONObject(PProps, 3));
                                             finally
                                                 PProps.Free;
@@ -557,8 +570,8 @@ begin
                                 eViaObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'via');
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y - OY));
                                     AddJSONNumber(PrimProps, 'size', CoordToMils(Prim.Size));
                                     AddJSONNumber(PrimProps, 'hole_size', CoordToMils(Prim.HoleSize));
                                     AddJSONProperty(PrimProps, 'low_layer', Layer2String(Prim.LowLayer));
