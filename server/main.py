@@ -2690,6 +2690,29 @@ def _refresh_connector_nets(component: dict, connector: dict, new_id) -> tuple:
     return changed, differing + list(fresh)
 
 
+def _rebind_connector(component: dict, connector: dict, parent_id: str) -> None:
+    """Point an imported connector at the component that replaced it in the child project.
+
+    Placing a part again gives it a new unique id; matched by designator, the old component and its
+    pins take the new source ids, so the entry and its connection stay as they are.
+    """
+    for param in component["parameters"]:
+        if param["name"] == "SourceId":
+            param["value"] = connector["unique_id"]
+        elif param["name"] == "ParentSourceId" and parent_id:
+            param["value"] = parent_id
+    fresh = {p["number"]: p for p in connector["pins"]}
+    for pin in component["pins"]:
+        source = fresh.get(pin["number"])
+        if source is None:
+            continue
+        for param in pin["parameters"]:
+            if param["name"] == "SourceId":
+                param["value"] = source["unique_id"]
+            elif param["name"] == "ParentSourceId":
+                param["value"] = connector["unique_id"]
+
+
 def _pin_sort_key(pin: dict):
     number = pin["number"]
     return (0, int(number)) if number.isdigit() else (1, number)
@@ -2711,7 +2734,9 @@ async def link_multiboard_modules(ctx: Context, schematic_path: str, connections
     them; an entry takes one connection.
 
     On a later run a connector that is already in the schematic keeps its
-    entry and gets its pin nets, designator and comment brought up to date.
+    entry and gets its pin nets, designator and comment brought up to date;
+    a connector placed again in the child project (same designator, new
+    unique id) keeps its entry and connection the same way.
     Connectors that left the child project and pins that exist on one side
     only are reported, not rebuilt. The document is rewritten on disk only
     when something changed; run run_multiboard_erc (which reloads it) next.
@@ -2784,9 +2809,20 @@ async def link_multiboard_modules(ctx: Context, schematic_path: str, connections
         doc_ids = _document_unique_ids(project)
         present = {p["value"]: c for c in module.get("components", []) for p in c.get("parameters", [])
                    if p.get("name") == "SourceId"}
-        added, kept, renamed, refreshed, seen = [], [], {}, {}, set()
+        live = {conn["unique_id"] for conn in data.get("connectors", [])}
+        # a connector placed again in the child project has a new unique id; its old component is
+        # found by designator
+        orphans = {c["designator"]: (uid, c) for uid, c in present.items() if uid not in live}
+        added, kept, renamed, refreshed, rebound, seen = [], [], {}, {}, [], set()
         new_entries = []
         for conn in data.get("connectors", []):
+            if conn["unique_id"] not in present and conn["designator"] in orphans:
+                old_uid, component = orphans.pop(conn["designator"])
+                doc_name = conn["document"].replace("/", "\\").split("\\")[-1].lower()
+                _rebind_connector(component, conn, doc_ids.get(doc_name, ""))
+                present[conn["unique_id"]] = component
+                seen.add(old_uid)
+                rebound.append(conn["designator"])
             if conn["unique_id"] in present:
                 component = present[conn["unique_id"]]
                 seen.add(conn["unique_id"])
@@ -2855,7 +2891,8 @@ async def link_multiboard_modules(ctx: Context, schematic_path: str, connections
                 mbs.add_entry_drawing(module, entry, side, y)
         report_modules.append({"designator": module["designator"], "project": str(project),
                                "connectors_added": added, "connectors_present": kept,
-                               "connectors_renamed": renamed, "nets_updated": refreshed})
+                               "connectors_renamed": renamed, "connectors_rebound": rebound,
+                               "nets_updated": refreshed})
     if with_source and not report_modules:
         return json.dumps({"success": False, "error": "none of the child projects of the schematic was found",
                            "warnings": warnings}, indent=1, ensure_ascii=False)
