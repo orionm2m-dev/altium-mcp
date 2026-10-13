@@ -1,0 +1,133 @@
+{
+  "gridVisible": true,
+  "gridSize": 9.600000000000001,
+  "gridMultiplier": 1,
+  "gridColor": {
+    "a": 255,
+    "r": 250,
+    "g": 192,
+    "b": 143
+  },
+  "snapEnabled": true,
+  "snapToVertices": true,
+  "snapToLineCenters": true,
+  "snapToCircleCenters": true,
+  "snapToGrid": true,
+  "snapToPrimitiveBoundaries": true,
+  "snappingDistance": 9.600000000000001,
+  "scale": {
+    "numenator": 1.0,
+    "denominator": 1.0
+  },
+  "sheetColor": {
+    "a": 255,
+    "r": 255,
+    "g": 255,
+    "b": 255
+  },
+  "borderColor": {
+    "a": 255
+  },
+  "fontStyleId": 1,
+  "primaryNominalPrecision": 2,
+  "primaryTolerancePrecision": 3,
+  "dualTolerancePrecision": 1,
+  "lineStyleSettings": {
+    "thicknessPresets": [
+      {
+        "name": "Thin",
+        "thickness": 0.3779527559055119
+      },
+      {
+        "name": "Normal",
+        "id": 1,
+        "thickness": 0.7559055118110238
+      },
+      {
+        "name": "Thick",
+        "id": 2,
+        "thickness": 1.889763779527559
+      },
+      {
+        "name": "Thick(2)",
+        "id": 3,
+        "thickness": 3.779527559055118
+      },
+      {
+        "name": "Thick(3)",
+        "id": 4,
+        "thickness": 7.559055118110236
+      },
+      {
+        "name": "Thick(4)",
+        "id": 5,
+        "thickness": 11.338582677165356
+      },
+      {
+        "name": "Thick(5)",
+        "id": 6,
+        "thickness": 15.118110236220472
+      }
+    ],
+    "dashPatternPresets": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "name": "Dashed",
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Phantom",
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Chain",
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Center",
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Stitch",
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "isSystem": true
+      }
+    ]
+  },
+  "decimalSeparator": "."
+}

@@ -1,0 +1,1023 @@
+{
+  "module": {
+    "designator": {
+      "pattern": "",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    },
+    "title": {
+      "pattern": "Title",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    },
+    "borderStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 2,
+      "dashPatternPresetId": 0
+    },
+    "fillStyle": {
+      "a": 255,
+      "r": 146,
+      "g": 205,
+      "b": 220
+    },
+    "size": {}
+  },
+  "moduleEntry": {
+    "designator": {
+      "pattern": "Entry_",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 0,
+      "dashPatternPresetId": 0
+    },
+    "fillStyle": {
+      "a": 255,
+      "r": 112,
+      "g": 48,
+      "b": 160
+    }
+  },
+  "functionalBlock": {
+    "size": {},
+    "lineStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 2,
+      "dashPatternPresetId": 0
+    },
+    "fillStyle": {
+      "a": 255,
+      "r": 128,
+      "g": 255,
+      "b": 128
+    }
+  },
+  "directConnection": {
+    "designator": {
+      "pattern": "C_",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "thickness": 1.92,
+      "dashPattern": [
+        2.5,
+        1.25
+      ],
+      "color": {
+        "a": 255,
+        "r": 47,
+        "g": 90,
+        "b": 142
+      }
+    }
+  },
+  "wireConnection": {
+    "designator": {
+      "pattern": "W_",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "thickness": 1.92,
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      }
+    }
+  },
+  "cableConnection": {
+    "designator": {
+      "pattern": "C_",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "thickness": 1.92,
+      "color": {
+        "a": 255,
+        "g": 22,
+        "b": 50
+      }
+    }
+  },
+  "harnessConnection": {
+    "designator": {
+      "pattern": "H_",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "thickness": 1.92,
+      "color": {
+        "a": 255,
+        "g": 22,
+        "b": 50
+      }
+    }
+  },
+  "powerPort": {
+    "designator": {
+      "pattern": "P_"
+    },
+    "lineStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 2,
+      "dashPatternPresetId": 0
+    }
+  },
+  "circle": {
+    "lineStyle": {
+      "thickness": 1.1338582677165354,
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      }
+    },
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "name": "Dashed",
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Phantom",
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Chain",
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Center",
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Stitch",
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "name": "Thin",
+        "thickness": 0.3779527559055119
+      },
+      {
+        "name": "Normal",
+        "id": 1,
+        "thickness": 0.7559055118110238
+      },
+      {
+        "name": "Thick",
+        "id": 2,
+        "thickness": 1.889763779527559
+      },
+      {
+        "name": "Thick(2)",
+        "id": 3,
+        "thickness": 3.779527559055118
+      },
+      {
+        "name": "Thick(3)",
+        "id": 4,
+        "thickness": 7.559055118110236
+      },
+      {
+        "name": "Thick(4)",
+        "id": 5,
+        "thickness": 11.338582677165356
+      },
+      {
+        "name": "Thick(5)",
+        "id": 6,
+        "thickness": 15.118110236220472
+      }
+    ],
+    "fillStyle": {
+      "a": 255,
+      "r": 146,
+      "g": 205,
+      "b": 220
+    }
+  },
+  "line": {
+    "lineStyle": {
+      "thickness": 1.1338582677165354,
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      }
+    },
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "name": "Dashed",
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Phantom",
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Chain",
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Center",
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Stitch",
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "name": "Thin",
+        "thickness": 0.3779527559055119
+      },
+      {
+        "name": "Normal",
+        "id": 1,
+        "thickness": 0.7559055118110238
+      },
+      {
+        "name": "Thick",
+        "id": 2,
+        "thickness": 1.889763779527559
+      },
+      {
+        "name": "Thick(2)",
+        "id": 3,
+        "thickness": 3.779527559055118
+      },
+      {
+        "name": "Thick(3)",
+        "id": 4,
+        "thickness": 7.559055118110236
+      },
+      {
+        "name": "Thick(4)",
+        "id": 5,
+        "thickness": 11.338582677165356
+      },
+      {
+        "name": "Thick(5)",
+        "id": 6,
+        "thickness": 15.118110236220472
+      }
+    ]
+  },
+  "rectangle": {
+    "fillStyle": {
+      "a": 255,
+      "r": 146,
+      "g": 205,
+      "b": 220
+    },
+    "lineStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 1,
+      "dashPatternPresetId": 0
+    },
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "name": "Dashed",
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Phantom",
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Chain",
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Center",
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Stitch",
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "name": "Thin",
+        "thickness": 0.3779527559055119
+      },
+      {
+        "name": "Normal",
+        "id": 1,
+        "thickness": 0.7559055118110238
+      },
+      {
+        "name": "Thick",
+        "id": 2,
+        "thickness": 1.889763779527559
+      },
+      {
+        "name": "Thick(2)",
+        "id": 3,
+        "thickness": 3.779527559055118
+      },
+      {
+        "name": "Thick(3)",
+        "id": 4,
+        "thickness": 7.559055118110236
+      },
+      {
+        "name": "Thick(4)",
+        "id": 5,
+        "thickness": 11.338582677165356
+      },
+      {
+        "name": "Thick(5)",
+        "id": 6,
+        "thickness": 15.118110236220472
+      }
+    ]
+  },
+  "picture": {
+    "maintainAspectRatio": true
+  },
+  "text": {
+    "useDocumentFont": true,
+    "clipTextToBounds": true,
+    "fontStyle": {
+      "size": 14.0,
+      "familyName": "Times New Roman",
+      "color": "#FF000000"
+    }
+  },
+  "note": {
+    "title": "Title",
+    "titleVisible": true,
+    "titleFontStyle": {
+      "size": 14.0,
+      "familyName": "Times New Roman",
+      "color": "#FF000000"
+    },
+    "elementFontStyle": {
+      "size": 14.0,
+      "familyName": "Times New Roman",
+      "color": "#FF000000"
+    },
+    "elementHorizontalSpacing": 7.559055118110236,
+    "elementVerticalSpacing": 7.559055118110236,
+    "elements": [
+      {
+        "identity": 1,
+        "number": "1",
+        "text": "Text element with no border"
+      },
+      {
+        "identity": 2,
+        "number": "2",
+        "text": "Text element with square border.",
+        "borderStyle": 1
+      },
+      {
+        "identity": 3,
+        "number": "3",
+        "text": "Text element with circle border",
+        "borderStyle": 2
+      }
+    ]
+  },
+  "arc": {
+    "lineStyle": {
+      "color": {
+        "a": 255,
+        "r": 112,
+        "g": 48,
+        "b": 160
+      },
+      "thicknessPresetId": 1,
+      "dashPatternPresetId": 0
+    },
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "name": "Dashed",
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Phantom",
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Chain",
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Center",
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "isSystem": true
+      },
+      {
+        "name": "Stitch",
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "name": "Thin",
+        "thickness": 0.3779527559055119
+      },
+      {
+        "name": "Normal",
+        "id": 1,
+        "thickness": 0.7559055118110238
+      },
+      {
+        "name": "Thick",
+        "id": 2,
+        "thickness": 1.889763779527559
+      },
+      {
+        "name": "Thick(2)",
+        "id": 3,
+        "thickness": 3.779527559055118
+      },
+      {
+        "name": "Thick(3)",
+        "id": 4,
+        "thickness": 7.559055118110236
+      },
+      {
+        "name": "Thick(4)",
+        "id": 5,
+        "thickness": 11.338582677165356
+      },
+      {
+        "name": "Thick(5)",
+        "id": 6,
+        "thickness": 15.118110236220472
+      }
+    ]
+  },
+  "region": {
+    "fillStyle": "#FF92CDDC",
+    "lineStyle": {
+      "thicknessPresetId": 1,
+      "dashPatternPresetId": 0,
+      "color": "#FF7030A0"
+    },
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "name": "Dashed",
+        "isSystem": true
+      },
+      {
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Phantom",
+        "isSystem": true
+      },
+      {
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Chain",
+        "isSystem": true
+      },
+      {
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Center",
+        "isSystem": true
+      },
+      {
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "name": "Stitch",
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "thickness": 0.3779527559055119,
+        "name": "Thin"
+      },
+      {
+        "id": 1,
+        "thickness": 0.7559055118110238,
+        "name": "Normal"
+      },
+      {
+        "id": 2,
+        "thickness": 1.889763779527559,
+        "name": "Thick"
+      },
+      {
+        "id": 3,
+        "thickness": 3.779527559055118,
+        "name": "Thick(2)"
+      },
+      {
+        "id": 4,
+        "thickness": 7.559055118110236,
+        "name": "Thick(3)"
+      },
+      {
+        "id": 5,
+        "thickness": 11.338582677165356,
+        "name": "Thick(4)"
+      },
+      {
+        "id": 6,
+        "thickness": 15.118110236220472,
+        "name": "Thick(5)"
+      }
+    ]
+  },
+  "placeableComponent": {
+    "designator": {
+      "pattern": "",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    },
+    "comment": {
+      "pattern": "",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    }
+  },
+  "virtualModule": {
+    "designator": {
+      "pattern": "",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    },
+    "title": {
+      "pattern": "Title",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF000080"
+      },
+      "isVisible": true
+    },
+    "borderStyle": {
+      "thicknessPresetId": 2,
+      "dashPatternPresetId": 0,
+      "color": "#FF7030A0"
+    },
+    "borderLineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "name": "Dashed",
+        "isSystem": true
+      },
+      {
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Phantom",
+        "isSystem": true
+      },
+      {
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Chain",
+        "isSystem": true
+      },
+      {
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Center",
+        "isSystem": true
+      },
+      {
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "name": "Stitch",
+        "isSystem": true
+      }
+    ],
+    "borderLineThicknesses": [
+      {
+        "thickness": 0.3779527559055119,
+        "name": "Thin"
+      },
+      {
+        "id": 1,
+        "thickness": 0.7559055118110238,
+        "name": "Normal"
+      },
+      {
+        "id": 2,
+        "thickness": 1.889763779527559,
+        "name": "Thick"
+      },
+      {
+        "id": 3,
+        "thickness": 3.779527559055118,
+        "name": "Thick(2)"
+      },
+      {
+        "id": 4,
+        "thickness": 7.559055118110236,
+        "name": "Thick(3)"
+      },
+      {
+        "id": 5,
+        "thickness": 11.338582677165356,
+        "name": "Thick(4)"
+      },
+      {
+        "id": 6,
+        "thickness": 15.118110236220472,
+        "name": "Thick(5)"
+      }
+    ],
+    "fillStyle": "#FF93C47D"
+  },
+  "virtualModuleEntry": {
+    "designator": {
+      "pattern": "J",
+      "fontStyle": {
+        "size": 14.0,
+        "familyName": "Times New Roman",
+        "color": "#FF800000"
+      },
+      "isVisible": true
+    },
+    "lineStyle": {
+      "thicknessPresetId": 0,
+      "dashPatternPresetId": 0,
+      "color": "#FF7030A0"
+    },
+    "fillStyle": "#FF7030A0",
+    "lineDashPatterns": [
+      {
+        "name": "Solid",
+        "isSystem": true
+      },
+      {
+        "id": 1,
+        "dashPattern": [
+          2.5,
+          1.25
+        ],
+        "name": "Dashed",
+        "isSystem": true
+      },
+      {
+        "id": 2,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Phantom",
+        "isSystem": true
+      },
+      {
+        "id": 3,
+        "dashPattern": [
+          12.5,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Chain",
+        "isSystem": true
+      },
+      {
+        "id": 4,
+        "dashPattern": [
+          30.0,
+          2.5,
+          2.5,
+          2.5
+        ],
+        "name": "Center",
+        "isSystem": true
+      },
+      {
+        "id": 5,
+        "dashPattern": [
+          1.0,
+          1.25
+        ],
+        "name": "Stitch",
+        "isSystem": true
+      }
+    ],
+    "lineThicknesses": [
+      {
+        "thickness": 0.3779527559055119,
+        "name": "Thin"
+      },
+      {
+        "id": 1,
+        "thickness": 0.7559055118110238,
+        "name": "Normal"
+      },
+      {
+        "id": 2,
+        "thickness": 1.889763779527559,
+        "name": "Thick"
+      },
+      {
+        "id": 3,
+        "thickness": 3.779527559055118,
+        "name": "Thick(2)"
+      },
+      {
+        "id": 4,
+        "thickness": 7.559055118110236,
+        "name": "Thick(3)"
+      },
+      {
+        "id": 5,
+        "thickness": 11.338582677165356,
+        "name": "Thick(4)"
+      },
+      {
+        "id": 6,
+        "thickness": 15.118110236220472,
+        "name": "Thick(5)"
+      }
+    ]
+  }
+}
