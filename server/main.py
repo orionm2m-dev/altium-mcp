@@ -1854,7 +1854,11 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         NOTE|x|y|text[|font_size[|font_name]]
         TEXT_REPLACE|old|new  TEXT_MOVE|text|x|y  TEXT_DELETE|text
         SET_PARAM|designator|name|value  SET_COMMENT|designator|text
-        SET_FOOTPRINT|designator|model
+        SET_FOOTPRINT|designator|model[|library]   (renames the current
+                                        PCBLIB model or adds one with a
+                                        datafile link; library = .PcbLib
+                                        file name, empty = any project
+                                        library)
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new

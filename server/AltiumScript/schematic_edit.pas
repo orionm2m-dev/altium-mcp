@@ -391,15 +391,40 @@ begin
     end;
 end;
 
-procedure EditAddFootprint(Comp: ISch_Component; Model: String);
+// Make Model the current PCB footprint of a placed part: the first PCBLIB
+// implementation is renamed, a part without one gets a new implementation
+// with a datafile link to the model (Lib names the .PcbLib, empty = any
+// library of the project). The model is resolved by name through the
+// project libraries (UseComponentLibrary = False); with
+// UseComponentLibrary = True and no datafile link Altium looks for it in
+// the model list of the library symbol, so a symbol without a footprint
+// link compiled as "Footprint ... cannot be found".
+procedure EditAddFootprint(Comp: ISch_Component; Model: String; Lib: String);
 var
-    Impl : ISch_Implementation;
+    Impl  : ISch_Implementation;
+    Found : ISch_Implementation;
+    Iter  : ISch_Iterator;
 begin
-    Impl := Comp.AddSchImplementation;
-    Impl.ModelName := Model;
-    Impl.ModelType := 'PCBLIB';
-    Impl.IsCurrent := True;
-    Impl.UseComponentLibrary := True;
+    Found := nil;
+    Iter := Comp.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eImplementation));
+    Impl := Iter.FirstSchObject;
+    while Impl <> nil do
+    begin
+        if (Found = nil) and (UpperCase(Impl.ModelType) = 'PCBLIB') then
+            Found := Impl;
+        Impl := Iter.NextSchObject;
+    end;
+    Comp.SchIterator_Destroy(Iter);
+    if Found = nil then
+    begin
+        Found := Comp.AddSchImplementation;
+        Found.ModelType := 'PCBLIB';
+        Found.AddDataFileLink(Model, Lib, 'PCBLIB');
+    end;
+    Found.ModelName := Model;
+    Found.IsCurrent := True;
+    Found.UseComponentLibrary := False;
 end;
 
 // Record the absolute connection point of every pin of a component.
@@ -740,7 +765,7 @@ begin
 
     else if Kind = 'FOOTPRINT' then
     begin
-        if EditLastPart <> nil then EditAddFootprint(EditLastPart, GetFieldFromPipeString(Rec, 1));
+        if EditLastPart <> nil then EditAddFootprint(EditLastPart, GetFieldFromPipeString(Rec, 1), '');
     end
 
     else if Kind = 'PARAM' then
@@ -773,7 +798,7 @@ begin
         begin
             if Kind = 'SET_PARAM' then EditSetParam(Comp, GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3))
             else if Kind = 'SET_COMMENT' then Comp.Comment.Text := GetFieldFromPipeString(Rec, 2)
-            else EditAddFootprint(Comp, GetFieldFromPipeString(Rec, 2));
+            else EditAddFootprint(Comp, GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3));
             EditCount('parts_updated');
         end;
     end
