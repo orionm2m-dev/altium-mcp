@@ -406,8 +406,11 @@ class AltiumBridge:
             
             logger.info(f"Running command: {command}")
             
-            # Start the process
-            process = subprocess.Popen(command, shell=True)
+            # Start the process. Altium must not inherit this server's stdio:
+            # they are the MCP transport, and a child holding them keeps the
+            # pipes open after the server exits.
+            process = subprocess.Popen(command, shell=True, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Don't wait for completion - Altium will run the script and generate the response
             logger.info(f"Launched Altium with script, process ID: {process.pid}")
@@ -1098,36 +1101,74 @@ def _dismiss_altium_dialogs():
     """Close Altium modal popups that would otherwise block a script run.
 
     Altium uses two kinds: Win32 task dialogs (#32770) and Delphi TMessageForm
-    error/warning boxes.
+    error/warning boxes. Only windows of the Altium process are touched - a
+    dialog box of another application on the same desktop (an Explorer
+    confirmation, a control-panel message) is never the script's problem and
+    must not be answered on the user's behalf. Returns the text of each
+    dialog closed (title plus its static controls), because a compile error
+    or "another instance is busy" message is the only clue the script run
+    leaves behind.
     """
     try:
         import ctypes
         from ctypes import wintypes
     except ImportError:
-        return 0
+        return []
     user32 = ctypes.windll.user32
     found = []
 
+    def window_text(hwnd):
+        n = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        return buf.value
+
+    def process_id(hwnd):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+
+    altium_pids = set()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def find_altium(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd) and "Altium Designer" in window_text(hwnd):
+            altium_pids.add(process_id(hwnd))
+        return True
+
+    user32.EnumWindows(find_altium, 0)
+    if not altium_pids:
+        return []
+
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def cb(hwnd, lparam):
-        if not user32.IsWindowVisible(hwnd):
+        if not user32.IsWindowVisible(hwnd) or process_id(hwnd) not in altium_pids:
             return True
         cls = ctypes.create_unicode_buffer(64)
         user32.GetClassNameW(hwnd, cls, 64)
         if cls.value == "#32770":
             found.append(hwnd)
         elif cls.value == "TMessageForm":
-            n = user32.GetWindowTextLengthW(hwnd)
-            buf = ctypes.create_unicode_buffer(n + 1)
-            user32.GetWindowTextW(hwnd, buf, n + 1)
-            if buf.value in ("Error", "Warning", "Information", "Confirm"):
+            if window_text(hwnd) in ("Error", "Warning", "Information", "Confirm"):
                 found.append(hwnd)
         return True
 
     user32.EnumWindows(cb, 0)
+    texts = []
     for h in found:
+        parts = [window_text(h)]
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def child_cb(child, lparam):
+            t = window_text(child).strip()
+            if t and t not in ("OK", "Cancel", "Yes", "No"):
+                parts.append(t)
+            return True
+
+        user32.EnumChildWindows(h, child_cb, 0)
+        texts.append(" | ".join(p for p in parts if p))
         user32.PostMessageW(h, 0x0010, 0, 0)
-    return len(found)
+    return texts
 
 
 @mcp.tool()
@@ -1202,10 +1243,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
     cmd = (f'"{altium_bridge.config.altium_exe_path}" -RScriptingSystem:RunScript('
            f'ProjectName="{SANDBOX_PRJ}"^|ProcName="Sandbox>Run")')
-    subprocess.Popen(cmd, shell=True)
+    subprocess.Popen(cmd, shell=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     start = time.time()
-    dialogs = 0
+    dialogs = []
     while not SANDBOX_RESULT.exists() and time.time() - start < timeout_seconds:
         await asyncio.sleep(0.5)
         if time.time() - start > 6:
@@ -1218,7 +1260,7 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     if SANDBOX_RESULT.exists():
         result_text = SANDBOX_RESULT.read_text(encoding="utf-8", errors="replace").strip()
         return json.dumps({"success": True, "result": result_text, "steps": steps,
-                           "dialogs_dismissed": dialogs}, indent=2)
+                           "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
     if steps:
         return json.dumps({
@@ -1231,7 +1273,7 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
                         "shell command (sends the debugger Stop process to the running "
                         "Altium): \"<altium_exe>\" -REditScript:Stop  -- then retry.",
             "steps": steps,
-            "dialogs_dismissed": dialogs}, indent=2)
+            "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
     return json.dumps({
         "success": False,
@@ -1242,7 +1284,9 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
         "recovery": "A previously paused script may be blocking execution. Recover by "
                     "running this shell command: \"<altium_exe>\" -REditScript:Stop  "
                     "-- then retry. If it still fails, the script itself has a COMPILE error.",
-        "dialogs_dismissed": dialogs}, indent=2)
+        "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
+
+
 
 
 @mcp.tool()

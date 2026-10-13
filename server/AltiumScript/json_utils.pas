@@ -17,6 +17,10 @@ begin
   Result := InputStr;
   Result := RemoveChar(Result, '"');
   Result := RemoveChar(Result, ',');
+  // json.dump doubles every backslash; collapse the pairs so a Windows path
+  // comes back usable. DelphiScript strings do not escape backslashes: '\\'
+  // is two characters and '\' is one.
+  Result := StringReplace(Result, '\\', '\', REPLACEALL);
   // Trim whitespace
   Result := Trim(Result);
 end;
@@ -111,10 +115,13 @@ function WriteJSONToFile(JSON: TStringList; FileName: String = ''): String;
 var
     TempFile: String;
 begin
-    // Use provided filename or generate temp filename
+    // A .json name is used as is; anything else is taken as the directory
+    // of a temporary file (the output-job functions pass ROOT_DIR here)
     if Not(AnsiEndsStr('.json', LowerCase(FileName))) then
     begin
-        TempFile := Path + 'temp_json_output.json';
+        if (FileName <> '') and (Copy(FileName, Length(FileName), 1) <> '\') then
+            FileName := FileName + '\';
+        TempFile := FileName + 'temp_json_output.json';
     end
     else
     begin
