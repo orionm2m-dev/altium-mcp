@@ -18,10 +18,52 @@ begin
         Result := PCBServer.GetCurrentPCBLibrary;
 end;
 
+// Create a PCB library under LibPath and save it there. DM_CreateNewDocument
+// attaches the document to the FOCUSED project under its temporary name;
+// it is detached at once, so a library never silently joins whatever
+// project the user has focused.
+function CreatePcbLibDocument(LibPath: String): IServerDocument;
+var
+    Focused : IProject;
+begin
+    Result := nil;
+    GetWorkspace.DM_CreateNewDocument('PCBLIB');
+    Result := Client.GetCurrentView.OwnerDocument;
+    if (Result = nil) then Exit;
+    Focused := GetWorkspace.DM_FocusedProject;
+    if (Focused <> nil) and (Pos('Free Documents', Focused.DM_ProjectFileName) = 0) then
+        Focused.DM_RemoveSourceDocument(Result.FileName);
+    Client.ShowDocument(Result);
+    Sleep(500);
+    Result.DoSafeChangeFileNameAndSave(LibPath, 'PCB Library File');
+end;
+
+// Remove every footprint of the library whose name equals FpName (case-
+// insensitive). Returns the number removed.
+function RemoveLibraryFootprints(PcbLib: IPCB_Library; FpName: String): Integer;
+var
+    i    : Integer;
+    Comp : IPCB_LibComponent;
+begin
+    Result := 0;
+    for i := PcbLib.ComponentCount - 1 downto 0 do
+    begin
+        Comp := PcbLib.GetComponent(i);
+        if (Comp <> nil) and (UpperCase(Comp.Name) = UpperCase(FpName)) then
+        begin
+            PcbLib.RemoveComponent(Comp);
+            Result := Result + 1;
+        end;
+    end;
+end;
+
 // Create many footprints in a single script run from a spec file (plain
 // text, pipe-delimited; coords in mils, layers as names, shapes/hole types
 // as raw enum ints - symmetric with get_footprint_primitives):
-//   FPLIB|<path to .PcbLib>              (optional first line - focus/open)
+//   FPLIB|<path to .PcbLib>              (optional first line - focus/open;
+//                                         a missing library is created)
+//   REPLACE|<1 or 0>                     (optional: 1 = a footprint replaces
+//                                         any footprint of the same name)
 //   FOOTPRINT|<name>|<description>
 //   PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
 //   TRACK|x1|y1|x2|y2|width|layer
@@ -32,6 +74,7 @@ function CreateFootprintsBatch(SpecFilePath: String): String;
 var
     PcbLib      : IPCB_Library;
     LibComp     : IPCB_LibComponent;
+    Placeholder : IPCB_LibComponent;
     ServerDoc   : IServerDocument;
     Lines       : TStringList;
     FailedArray : TStringList;
@@ -49,6 +92,8 @@ var
     FieldValue  : String;
     CreatedCount: Integer;
     PrimErrors  : Integer;
+    ReplaceMode : Boolean;
+    Replaced    : Integer;
     i, V        : Integer;
 
 
@@ -63,8 +108,11 @@ begin
     FailedArray := TStringList.Create;
     ResultProps := TStringList.Create;
     LibComp := nil;
+    Placeholder := nil;
     CreatedCount := 0;
     PrimErrors := 0;
+    ReplaceMode := False;
+    Replaced := 0;
 
     try
         Lines.LoadFromFile(SpecFilePath);
@@ -78,7 +126,18 @@ begin
                 if (Kind = 'FPLIB') then
                 begin
                     LibPath := GetFieldFromPipeString(Line, 1);
-                    if (LibPath <> '') and FileExists(LibPath) then
+                    if (LibPath <> '') and not FileExists(LibPath) then
+                    begin
+                        // A library that does not exist yet is created, so a
+                        // batch can start a new library. Altium gives it an
+                        // empty footprint; that one is dropped once the first
+                        // FOOTPRINT of the batch is registered.
+                        ServerDoc := CreatePcbLibDocument(LibPath);
+                        PcbLib := GetPcbLibSafe(0);
+                        if (PcbLib <> nil) and (PcbLib.ComponentCount = 1) then
+                            Placeholder := PcbLib.GetComponent(0);
+                    end
+                    else if (LibPath <> '') then
                     begin
                         if Client.IsDocumentOpen(LibPath) then
                             ServerDoc := Client.GetDocumentByPath(LibPath)
@@ -90,6 +149,11 @@ begin
                             Sleep(500);
                         end;
                     end;
+                end
+                else if (Kind = 'REPLACE') then
+                begin
+                    FieldValue := Trim(GetFieldFromPipeString(Line, 1));
+                    ReplaceMode := (FieldValue = '') or (FieldValue = '1') or (UpperCase(FieldValue) = 'TRUE');
                 end
                 else if (Kind = 'FOOTPRINT') then
                 begin
@@ -107,11 +171,18 @@ begin
                         Result := 'ERROR: No PCB library document is active';
                         Exit;
                     end;
+                    if ReplaceMode then
+                        Replaced := Replaced + RemoveLibraryFootprints(PcbLib, Trim(GetFieldFromPipeString(Line, 1)));
                     LibComp := PCBServer.CreatePCBLibComp;
                     LibComp.Name := Trim(GetFieldFromPipeString(Line, 1));
                     LibComp.Description := GetFieldFromPipeString(Line, 2);
                     PcbLib.RegisterComponent(LibComp);
                     CreatedCount := CreatedCount + 1;
+                    if (Placeholder <> nil) then
+                    begin
+                        PcbLib.RemoveComponent(Placeholder);
+                        Placeholder := nil;
+                    end;
                 end
                 else if (LibComp <> nil) and (Kind = 'PAD') then
                 begin
@@ -244,6 +315,7 @@ begin
         end;
 
         AddJSONInteger(ResultProps, 'created', CreatedCount);
+        AddJSONInteger(ResultProps, 'replaced', Replaced);
         AddJSONInteger(ResultProps, 'primitive_errors', PrimErrors);
         if (FailedArray.Count > 0) then
             ResultProps.Add(BuildJSONArray(FailedArray, 'failed'))
@@ -281,6 +353,7 @@ var
     OutputLines : TStringList;
     TypeName    : String;
     i, C, V     : Integer;
+    OX, OY      : Integer;
     Found       : Boolean;
 begin
     Result := '';
@@ -373,6 +446,18 @@ begin
                 PrimsArray := TStringList.Create;
                 try
                     AddJSONProperty(FPProps, 'footprint_name', LibComp.Name);
+
+                    // The footprint open in the editor lives on the library board in
+                    // board coordinates; report it relative to the board origin like
+                    // every other footprint of the library.
+                    OX := 0;
+                    OY := 0;
+                    if (PcbLib.CurrentComponent <> nil) and
+                       (UpperCase(PcbLib.CurrentComponent.Name) = UpperCase(LibComp.Name)) then
+                    begin
+                        OX := PcbLib.Board.XOrigin;
+                        OY := PcbLib.Board.YOrigin;
+                    end;
                     AddJSONProperty(FPProps, 'description', LibComp.Description);
 
                     GrpIter := LibComp.GroupIterator_Create;
@@ -389,8 +474,8 @@ begin
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'pad');
                                     AddJSONProperty(PrimProps, 'name', Prim.Name);
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y - OY));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                     AddJSONBoolean(PrimProps, 'plated', Prim.Plated);
@@ -417,18 +502,18 @@ begin
                                 eTrackObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'track');
-                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1));
-                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1));
-                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2));
-                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2));
+                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1 - OX));
+                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1 - OY));
+                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2 - OX));
+                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2 - OY));
                                     AddJSONNumber(PrimProps, 'width', CoordToMils(Prim.Width));
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                 end;
                                 eArcObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'arc');
-                                    AddJSONNumber(PrimProps, 'cx', CoordToMils(Prim.XCenter));
-                                    AddJSONNumber(PrimProps, 'cy', CoordToMils(Prim.YCenter));
+                                    AddJSONNumber(PrimProps, 'cx', CoordToMils(Prim.XCenter - OX));
+                                    AddJSONNumber(PrimProps, 'cy', CoordToMils(Prim.YCenter - OY));
                                     AddJSONNumber(PrimProps, 'radius', CoordToMils(Prim.Radius));
                                     AddJSONNumber(PrimProps, 'start_angle', Prim.StartAngle);
                                     AddJSONNumber(PrimProps, 'end_angle', Prim.EndAngle);
@@ -438,10 +523,10 @@ begin
                                 eFillObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'fill');
-                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1Location));
-                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1Location));
-                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2Location));
-                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2Location));
+                                    AddJSONNumber(PrimProps, 'x1', CoordToMils(Prim.x1Location - OX));
+                                    AddJSONNumber(PrimProps, 'y1', CoordToMils(Prim.y1Location - OY));
+                                    AddJSONNumber(PrimProps, 'x2', CoordToMils(Prim.x2Location - OX));
+                                    AddJSONNumber(PrimProps, 'y2', CoordToMils(Prim.y2Location - OY));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
                                     AddJSONProperty(PrimProps, 'layer', Layer2String(Prim.Layer));
                                 end;
@@ -449,8 +534,8 @@ begin
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'text');
                                     AddJSONProperty(PrimProps, 'text', Prim.Text);
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.XLocation));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.YLocation));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.XLocation - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.YLocation - OY));
                                     AddJSONNumber(PrimProps, 'size', CoordToMils(Prim.Size));
                                     AddJSONNumber(PrimProps, 'width', CoordToMils(Prim.Width));
                                     AddJSONNumber(PrimProps, 'rotation', Prim.Rotation);
@@ -469,8 +554,8 @@ begin
                                         begin
                                             PProps := TStringList.Create;
                                             try
-                                                AddJSONNumber(PProps, 'x', CoordToMils(Prim.MainContour.x[V]));
-                                                AddJSONNumber(PProps, 'y', CoordToMils(Prim.MainContour.y[V]));
+                                                AddJSONNumber(PProps, 'x', CoordToMils(Prim.MainContour.x[V] - OX));
+                                                AddJSONNumber(PProps, 'y', CoordToMils(Prim.MainContour.y[V] - OY));
                                                 PointsArray.Add(BuildJSONObject(PProps, 3));
                                             finally
                                                 PProps.Free;
@@ -485,8 +570,8 @@ begin
                                 eViaObject:
                                 begin
                                     AddJSONProperty(PrimProps, 'type', 'via');
-                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x));
-                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y));
+                                    AddJSONNumber(PrimProps, 'x', CoordToMils(Prim.x - OX));
+                                    AddJSONNumber(PrimProps, 'y', CoordToMils(Prim.y - OY));
                                     AddJSONNumber(PrimProps, 'size', CoordToMils(Prim.Size));
                                     AddJSONNumber(PrimProps, 'hole_size', CoordToMils(Prim.HoleSize));
                                     AddJSONProperty(PrimProps, 'low_layer', Layer2String(Prim.LowLayer));

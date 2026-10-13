@@ -1472,7 +1472,14 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
         spec_file (str): Path to a plain-text spec file, one record per line
             (coords in mils, layers as names, shapes/hole types as raw
             Altium enum ints, booleans as 1/0):
-            FPLIB|<path to .PcbLib>   (optional first line: opens/focuses)
+            FPLIB|<path to .PcbLib>   (optional first line: opens/focuses;
+                                       a library that does not exist yet is
+                                       created and saved under that path,
+                                       without Altium's empty placeholder
+                                       footprint)
+            REPLACE|1                 (optional: each FOOTPRINT replaces any
+                                       footprint of the same name instead of
+                                       being added next to it)
             FOOTPRINT|<name>|<description>
             PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
             TRACK|x1|y1|x2|y2|width|layer
@@ -1484,7 +1491,8 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
         with save_documents.
 
     Returns:
-        str: JSON with created count, primitive_errors, failed names
+        str: JSON with created and replaced counts, primitive_errors, failed
+             names
     """
     logger.info(f"Creating footprints batch from {spec_file}")
 
@@ -1743,6 +1751,41 @@ def _sheet_symbol_records(symbols: list) -> list:
             lines.append("SHEETENTRY|{}|{}|{}|{}".format(
                 _spec_field(e["name"]), int(e.get("side", 0)), int(e["distance"]), int(e.get("io_type", 0))))
     return lines
+
+
+@mcp.tool()
+async def create_schematic_project(ctx: Context, project_path: str, sheets: list) -> str:
+    """
+    Create a .PrjPcb with new, sized, empty schematic sheets and save it.
+
+    The project file is created when it does not exist and opened in Altium.
+    Each sheet that does not exist yet is created, given a custom size (no
+    border or title block - draw your own with add_sheet_symbols' lines and
+    notes), saved under its path and added to the project; a sheet that
+    already exists is only added. Fill the sheets afterwards with
+    add_sheet_symbols, place_schematic_components and add_schematic_wiring.
+
+    Args:
+        project_path (str): Full path of the .PrjPcb.
+        sheets (list): [{"path": "...SchDoc", "width": 16535, "height": 11693}]
+            in mils; the defaults are an A3 landscape sheet.
+
+    Returns:
+        str: JSON with projects_created / sheets_created / documents_added /
+             projects_saved and warnings.
+    """
+    logger.info(f"create_schematic_project {project_path} with {len(sheets)} sheets")
+    lines = [f"PROJECT|{_spec_field(project_path)}"]
+    for sheet in sheets:
+        if "path" not in sheet:
+            return json.dumps({"success": False, "error": f"sheet missing 'path': {sheet}"})
+        if Path(sheet["path"]).is_file():
+            lines.append(f"ADDTOPROJECT|{_spec_field(sheet['path'])}")
+        else:
+            lines.append("NEWSHEET|{}|{}|{}".format(
+                _spec_field(sheet["path"]), int(sheet.get("width", 16535)), int(sheet.get("height", 11693))))
+    lines.append("SAVEPROJECT")
+    return await _run_sheet_spec(lines)
 
 
 @mcp.tool()
@@ -3004,6 +3047,11 @@ async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
             LIBRARY|<path to .SchLib>   (optional first line: opens/focuses;
                                          an already-open library is only
                                          focused, never reloaded)
+            REPLACE|1                   (optional: each following SYMBOL
+                                         first removes every symbol of the
+                                         same name; REPLACE|0 switches it
+                                         off. Without it a symbol is added
+                                         next to an existing namesake.)
             SYMBOL|<name>|<description>|<part_count>
             PIN|<same pipe fields as create_schematic_symbol pins>
             GRAPHIC|<same entry format as create_schematic_symbol graphics>
@@ -3011,7 +3059,8 @@ async def create_symbols_batch(ctx: Context, spec_file: str) -> str:
             to the most recent SYMBOL.
 
     Returns:
-        str: JSON object with created count and a failed name list
+        str: JSON object with created and replaced counts and a failed
+             name list
     """
     logger.info(f"Creating symbols batch from {spec_file}")
 
