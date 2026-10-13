@@ -550,13 +550,14 @@ begin
         if (FieldValue <> '') then
             SchPin.PinLength := MilsToCoord(SafeStrToFloat(FieldValue));
 
-        // Optional name/designator visibility (1 = shown, 0 = hidden)
+        // Optional name/designator visibility (1 or true = shown, 0 or
+        // false = hidden)
         FieldValue := Trim(GetFieldFromPipeString(Entry, 8));
         if (FieldValue <> '') then
-            SchPin.ShowName := (FieldValue = '1');
+            SchPin.ShowName := (FieldValue = '1') or (UpperCase(FieldValue) = 'TRUE');
         FieldValue := Trim(GetFieldFromPipeString(Entry, 9));
         if (FieldValue <> '') then
-            SchPin.ShowDesignator := (FieldValue = '1');
+            SchPin.ShowDesignator := (FieldValue = '1') or (UpperCase(FieldValue) = 'TRUE');
 
         // Set ownership to the specified part (0 = shared across all parts)
         SchPin.OwnerPartId := PinOwnerPartId;
@@ -790,6 +791,43 @@ begin
     end;
 end;
 
+// Remove every symbol named SymName from the focused schematic library and
+// return how many were removed. The iterator is rebuilt after each removal,
+// so a library holding duplicates of the name is cleaned completely.
+function RemoveLibrarySymbols(SymName: String): Integer;
+var
+    CurrentLib  : ISch_Lib;
+    LibIterator : ISch_Iterator;
+    LibComp     : ISch_Component;
+    Found       : ISch_Component;
+    Guard       : Integer;
+begin
+    Result := 0;
+    CurrentLib := SchServer.GetCurrentSchDocument;
+    if (CurrentLib = Nil) or (CurrentLib.ObjectID <> eSchLib) then Exit;
+    Guard := 0;
+    repeat
+        Found := Nil;
+        LibIterator := CurrentLib.SchLibIterator_Create;
+        LibIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+        LibComp := LibIterator.FirstSchObject;
+        while (LibComp <> Nil) and (Found = Nil) do
+        begin
+            if (LibComp.LibReference = SymName) then
+                Found := LibComp
+            else
+                LibComp := LibIterator.NextSchObject;
+        end;
+        CurrentLib.SchIterator_Destroy(LibIterator);
+        if (Found <> Nil) then
+        begin
+            CurrentLib.RemoveSchComponent(Found);
+            Result := Result + 1;
+        end;
+        Guard := Guard + 1;
+    until (Found = Nil) or (Guard > 100);
+end;
+
 // Create one symbol for CreateSymbolsBatch. Returns True when created.
 function BatchCreateOne(SymName, SymDesc: String; PartCount: Integer; PinsList, GraphicsList: TStringList): Boolean;
 var
@@ -807,11 +845,15 @@ end;
 // plain text, one record per line, pipe-delimited (no JSON, so field text
 // is preserved exactly):
 //   LIBRARY|<path to .SchLib>            (optional first line - focus/open)
+//   REPLACE|<1 or 0>                     (optional: 1 = a symbol replaces
+//                                         any symbol of the same name)
 //   SYMBOL|<name>|<description>|<part_count>
 //   PIN|<same fields as create_schematic_symbol pins>
 //   GRAPHIC|<same entry format as create_schematic_symbol graphics>
 // Each SYMBOL line flushes the previous symbol. Far fewer Altium script
 // launches than one create call per symbol - use for bulk imports.
+// Without REPLACE a symbol is added next to an existing one of the same
+// name, as before.
 function CreateSymbolsBatch(SpecFilePath: String): String;
 var
     Lines        : TStringList;
@@ -827,6 +869,8 @@ var
     FieldValue   : String;
     PartCount    : Integer;
     CreatedCount : Integer;
+    ReplaceMode  : Boolean;
+    Replaced     : Integer;
     i            : Integer;
 begin
     if not FileExists(SpecFilePath) then
@@ -844,6 +888,8 @@ begin
     CurrentDesc := '';
     PartCount := 1;
     CreatedCount := 0;
+    ReplaceMode := False;
+    Replaced := 0;
 
     try
         Lines.LoadFromFile(SpecFilePath);
@@ -871,11 +917,18 @@ begin
                     end;
                 end;
             end
+            else if (Kind = 'REPLACE') then
+            begin
+                FieldValue := Trim(GetFieldFromPipeString(Line, 1));
+                ReplaceMode := (FieldValue = '') or (FieldValue = '1') or (UpperCase(FieldValue) = 'TRUE');
+            end
             else if (Kind = 'SYMBOL') then
             begin
                 // Flush the previous symbol
                 if (CurrentName <> '') then
                 begin
+                    if ReplaceMode then
+                        Replaced := Replaced + RemoveLibrarySymbols(CurrentName);
                     if BatchCreateOne(CurrentName, CurrentDesc, PartCount, PinsList, GraphicsList) then
                         CreatedCount := CreatedCount + 1
                     else
@@ -904,6 +957,8 @@ begin
         // Flush the last symbol
         if (CurrentName <> '') then
         begin
+            if ReplaceMode then
+                Replaced := Replaced + RemoveLibrarySymbols(CurrentName);
             if BatchCreateOne(CurrentName, CurrentDesc, PartCount, PinsList, GraphicsList) then
                 CreatedCount := CreatedCount + 1
             else
@@ -911,6 +966,7 @@ begin
         end;
 
         AddJSONInteger(ResultProps, 'created', CreatedCount);
+        AddJSONInteger(ResultProps, 'replaced', Replaced);
         if (FailedArray.Count > 0) then
             ResultProps.Add(BuildJSONArray(FailedArray, 'failed'))
         else

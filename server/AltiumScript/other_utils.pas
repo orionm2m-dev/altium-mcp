@@ -158,7 +158,12 @@ begin
        (CommandName = 'create_symbols_batch') or
        (CommandName = 'get_footprint_primitives') or
        (CommandName = 'create_footprints_batch') or
-       (CommandName = 'create_pcb_footprint') then
+       (CommandName = 'create_pcb_footprint') or
+       (CommandName = 'edit_schematic_sheet') or
+       (CommandName = 'get_schematic_sheet') or
+       (CommandName = 'compile_project') or
+       (CommandName = 'open_project') or
+       (CommandName = 'save_documents') then
     begin
         Result := True;
         Exit;
@@ -862,6 +867,9 @@ begin
     end;
 end;
 
+// Export a dedicated STEP job against one explicit, saved project and board.
+// The Python tool creates the job and verifies the fresh STEP artifact; this
+// function establishes Altium's project/document/variant context atomically.
 // Helper function to check if a document is open
 function IsOpenDoc(Path: String): Boolean;
 var
