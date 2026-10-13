@@ -829,29 +829,23 @@ begin
 end;
 
 // Function to execute get output job containers
-function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
+// Scalar parameter from the parsed request ("name": value); '' when absent.
+// TrimJSON strips the quotes and collapses the doubled backslashes of a
+// Windows path.
+function ParamValueOf(Name: String): String;
 var
-    ParamValue: String;
-    i: Integer;
-    OutJobPath: String;
+    i : Integer;
 begin
-    OutJobPath := '';
-    
-    // Parse parameters from the request
+    Result := '';
     for i := 0 to RequestData.Count - 1 do
-    begin
-        if (Pos('"outjob_path"', RequestData[i]) > 0) then
-        begin
-            // Found the outjob_path parameter
-            ParamValue := Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i]));
-            ParamValue := TrimJSON(ParamValue);
-            OutJobPath := ParamValue;
-            break;
-        end;
-    end;
-    
-    // Call the appropriate function
-    Result := GetOutputJobContainers(ROOT_DIR);
+        if Pos('"' + Name + '"', RequestData[i]) > 0 then
+            Result := TrimJSON(Copy(RequestData[i], Pos(':', RequestData[i]) + 1, Length(RequestData[i])));
+end;
+
+// get_output_job_containers: {"outjob_path": "..."} (optional)
+function ExecuteGetOutputJobContainers(RequestData: TStringList): String;
+begin
+    Result := GetOutputJobContainers(ROOT_DIR, ParamValueOf('outjob_path'));
 end;
 
 // Function to execute run output jobs
@@ -890,7 +884,7 @@ begin
         
         if ContainersList.Count > 0 then
         begin
-            Result := RunOutputJobs(ContainersList, ROOT_DIR);
+            Result := RunOutputJobs(ContainersList, ROOT_DIR, ParamValueOf('outjob_path'));
         end
         else
         begin
