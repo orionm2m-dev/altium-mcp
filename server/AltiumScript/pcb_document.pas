@@ -588,6 +588,7 @@ begin
     Spec.LoadFromFile(SpecPath);
     Verts := TStringList.Create;
     Cuts := TStringList.Create;
+    PcbDocWarnings := TStringList.Create;
     PcbPath := '';
     OriginRec := '';
     ClearCutouts := False;
@@ -651,8 +652,14 @@ begin
             if (i = 0) or (Seg.vx > MaxX) then MaxX := Seg.vx;
             if (i = 0) or (Seg.vy < MinY) then MinY := Seg.vy;
             if (i = 0) or (Seg.vy > MaxY) then MaxY := Seg.vy;
-            Verts.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
-                      PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ']');
+            if Seg.Kind = ePolySegmentArc then
+                Verts.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                          PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ', "arc", ' +
+                          PcbDocNum('0.###', CoordToMMs(Seg.Radius)) + ', ' +
+                          PcbDocNum('0.##', Seg.Angle1) + ', ' + PcbDocNum('0.##', Seg.Angle2) + ']')
+            else
+                Verts.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                          PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ']');
         end;
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
                   ', "points": ' + IntToStr(Board.BoardOutline.PointCount) +
@@ -669,6 +676,8 @@ begin
         Spec.Free;
         Verts.Free;
         Cuts.Free;
+        PcbDocWarnings.Free;
+        PcbDocWarnings := nil;
     end;
 end;
 
@@ -677,19 +686,31 @@ end;
 // ---------------------------------------------------------------------------
 
 // Tracks and arcs of one mechanical layer are removed, one at a time.
+function EnabledJSON(B: Boolean): String;
+begin
+    if B then Result := 'true' else Result := 'false';
+end;
+
 function ClearMechanicalLayer(Board: IPCB_Board; LayerIndex: Integer): Integer;
 var
-    Iter : IPCB_BoardIterator;
+    Iter   : IPCB_BoardIterator;
     P, Hit : IPCB_Primitive;
+    Target : TLayer;
 begin
     Result := 0;
+    Target := ILayer.MechanicalLayer(LayerIndex);
     repeat
         Hit := nil;
         Iter := Board.BoardIterator_Create;
         Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
-        Iter.AddFilter_LayerSet(MkSet(ILayer.MechanicalLayer(LayerIndex)));
+        Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
         Iter.AddFilter_Method(eProcessAll);
-        Hit := Iter.FirstPCBObject;
+        P := Iter.FirstPCBObject;
+        while (P <> nil) and (Hit = nil) do
+        begin
+            if P.Layer = Target then Hit := P;
+            P := Iter.NextPCBObject;
+        end;
         Board.BoardIterator_Destroy(Iter);
         if Hit <> nil then
         begin
@@ -739,47 +760,62 @@ begin
         begin
             Rec := Spec[i];
             Key := GetFieldFromPipeString(Rec, 0);
-            N := StrToIntDef(GetFieldFromPipeString(Rec, 1), 0);
-            if (Key <> 'PCB') and ((N < 1) or (N > 32)) then
+            if Key = 'PCB' then Continue;
+            N := Round(SafeStrToFloat(GetFieldFromPipeString(Rec, 1)));
+            if (N < 1) or (N > 32) then
             begin
                 PcbDocWarn('mechanical layer index out of range in ' + Rec);
                 Continue;
             end;
-            if Key = 'LAYER' then
-            begin
-                Mech := Stack.LayerObject_V7[ILayer.MechanicalLayer(N)];
-                Mech.MechanicalLayerEnabled := True;
-                if GetFieldFromPipeString(Rec, 2) <> '' then Mech.Name := GetFieldFromPipeString(Rec, 2);
-                Layers.Add('{"index": ' + IntToStr(N) + ', "name": ' + JSONStr(Mech.Name) + '}');
-            end
-            else if Key = 'CLEAR' then
-                Cleared := Cleared + ClearMechanicalLayer(Board, N)
-            else if Key = 'TRACK' then
-            begin
-                Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
-                Track.Layer := ILayer.MechanicalLayer(N);
-                Track.x1 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
-                Track.y1 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
-                Track.x2 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
-                Track.y2 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 5)));
-                Track.Width := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 6)));
-                Board.AddPCBObject(Track);
-                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
-                Tracks := Tracks + 1;
-            end
-            else if Key = 'ARC' then
-            begin
-                Arc := PCBServer.PCBObjectFactory(eArcObject, eNoDimension, eCreate_Default);
-                Arc.Layer := ILayer.MechanicalLayer(N);
-                Arc.XCenter := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
-                Arc.YCenter := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
-                Arc.Radius := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
-                Arc.StartAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 5));
-                Arc.EndAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 6));
-                Arc.LineWidth := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 7)));
-                Board.AddPCBObject(Arc);
-                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
-                Arcs := Arcs + 1;
+            try
+                if Key = 'LAYER' then
+                begin
+                    // a name of '-' disables the layer again and restores its default name
+                    Mech := Stack.LayerObject_V7[ILayer.MechanicalLayer(N)];
+                    if GetFieldFromPipeString(Rec, 2) = '-' then
+                    begin
+                        Mech.Name := 'Mechanical ' + IntToStr(N);
+                        Mech.MechanicalLayerEnabled := False;
+                    end
+                    else
+                    begin
+                        Mech.MechanicalLayerEnabled := True;
+                        if GetFieldFromPipeString(Rec, 2) <> '' then Mech.Name := GetFieldFromPipeString(Rec, 2);
+                    end;
+                    Layers.Add('{"index": ' + IntToStr(N) + ', "name": ' + JSONStr(Mech.Name) +
+                               ', "enabled": ' + EnabledJSON(Mech.MechanicalLayerEnabled) + '}');
+                end
+                else if Key = 'CLEAR' then
+                    Cleared := Cleared + ClearMechanicalLayer(Board, N)
+                else if Key = 'TRACK' then
+                begin
+                    Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                    Track.Layer := ILayer.MechanicalLayer(N);
+                    Track.x1 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
+                    Track.y1 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
+                    Track.x2 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
+                    Track.y2 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 5)));
+                    Track.Width := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 6)));
+                    Board.AddPCBObject(Track);
+                    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                    Tracks := Tracks + 1;
+                end
+                else if Key = 'ARC' then
+                begin
+                    Arc := PCBServer.PCBObjectFactory(eArcObject, eNoDimension, eCreate_Default);
+                    Arc.Layer := ILayer.MechanicalLayer(N);
+                    Arc.XCenter := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
+                    Arc.YCenter := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
+                    Arc.Radius := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
+                    Arc.StartAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 5));
+                    Arc.EndAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 6));
+                    Arc.LineWidth := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 7)));
+                    Board.AddPCBObject(Arc);
+                    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
+                    Arcs := Arcs + 1;
+                end;
+            except
+                PcbDocWarn('record failed: ' + Rec);
             end;
         end;
         PCBServer.PostProcess;
@@ -814,7 +850,8 @@ var
     Project  : IProject;
     Rate     : Integer;
     Size     : Integer;
-    F        : TSearchRec;
+    Stream   : TFileStream;
+    Ok       : String;
 begin
     Board := OpenBoardAtPath(PcbPath);
     if Board = nil then
@@ -828,7 +865,8 @@ begin
         Result := PcbDocError('the PCB server has no 3D model exporter');
         Exit;
     end;
-    Rate := StrToIntDef(FoldRate, 100);
+    Rate := 100;
+    if Trim(FoldRate) <> '' then Rate := Round(SafeStrToFloat(FoldRate));
     if Rate < 0 then Rate := 0;
     if Rate > 100 then Rate := 100;
     Project := GetWorkspace.DM_FocusedProject;
@@ -842,17 +880,18 @@ begin
     if FileExists(OutputPath) then DeleteFile(OutputPath);
     Exporter.ExportBoard3DModel(OutputPath, eBoard3DModelExportFormat_Step, Board, Project);
     Size := -1;
-    if FindFirst(OutputPath, faAnyFile, F) = 0 then
+    if FileExists(OutputPath) then
     begin
-        Size := F.Size;
-        FindClose(F);
+        Stream := TFileStream.Create(OutputPath, fmOpenRead);
+        Size := Stream.Size;
+        Stream.Free;
     end;
-    Result := '{"success": ' + BoolToStr(Size > 0, True) + ', "path": ' + JSONStr(OutputPath) +
+    Ok := 'false';
+    if Size > 0 then Ok := 'true';
+    Result := '{"success": ' + Ok + ', "path": ' + JSONStr(OutputPath) +
               ', "size_bytes": ' + IntToStr(Size) +
-              ', "folded": ' + BoolToStr(Exporter.GetState_ExportFoldedBoard, True) +
-              ', "fold_rate": ' + IntToStr(Exporter.GetState_ExportFoldedBoardRate) + '}';
-    Result := StringReplace(Result, 'True', 'true', REPLACEALL);
-    Result := StringReplace(Result, 'False', 'false', REPLACEALL);
+              ', "folded": ' + LowerCase(Folded) +
+              ', "fold_rate": ' + IntToStr(Rate) + '}';
 end;
 
 // ---------------------------------------------------------------------------
