@@ -1843,6 +1843,11 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         PROJECT|<path .PrjPcb>          open it (created first when missing)
         NEWSHEET|<path .SchDoc>|width|height   create, size, save a sheet
         ADDTOPROJECT|<path .SchDoc>  SAVEPROJECT
+        REMOVEFROMPROJECT|<path>        take a document out of the PROJECT
+                                        (the file stays; save the project
+                                        afterwards)
+        CLOSE_DOCUMENT|<path>           close an open document without
+                                        saving it
         LIBRARY|<path .SchLib>          symbol source for PART records
         PART|designator|symbol|x|y|orientation|mirror
         COMMENT|text  DESCRIPTION|text  FOOTPRINT|model  PARAM|name|value

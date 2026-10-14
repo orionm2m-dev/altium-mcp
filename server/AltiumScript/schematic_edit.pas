@@ -770,6 +770,50 @@ begin
     EditSheet.SchIterator_Destroy(Iter);
 end;
 
+// REMOVEFROMPROJECT|path : take a document out of the PROJECT (the file
+// stays). Needed when a document was added under a path it could not be
+// saved to, such as a board on a network share.
+procedure EditRemoveFromProject(Path: String);
+var
+    i : Integer;
+begin
+    if EditProject = nil then
+    begin
+        EditWarn('REMOVEFROMPROJECT before any PROJECT: ' + Path);
+        Exit;
+    end;
+    for i := EditProject.DM_LogicalDocumentCount - 1 downto 0 do
+        if SameText(EditProject.DM_LogicalDocuments(i).DM_FullPath, Path) then
+        begin
+            EditProject.DM_RemoveSourceDocument(Path);
+            EditCount('documents_removed');
+            Exit;
+        end;
+    EditWarn('REMOVEFROMPROJECT: not a document of the project: ' + Path);
+end;
+
+// CLOSE_DOCUMENT|path : close an open document WITHOUT saving it (its
+// modified flag is cleared first, so no question is asked).
+procedure EditCloseDocument(Path: String);
+var
+    Doc : IServerDocument;
+begin
+    Doc := Client.GetDocumentByPath(Path);
+    if Doc = nil then
+    begin
+        EditWarn('CLOSE_DOCUMENT: no open document at ' + Path);
+        Exit;
+    end;
+    if (EditDoc <> nil) and SameText(EditDoc.FileName, Path) then
+    begin
+        EditSheet := nil;
+        EditDoc := nil;
+    end;
+    Doc.Modified := False;
+    Client.CloseDocument(Doc);
+    EditCount('documents_closed');
+end;
+
 procedure EditApplyRecord(Rec: String);
 var
     Kind : String;
@@ -814,6 +858,18 @@ begin
     if Kind = 'FOOTPRINT_LINKS' then
     begin
         EditFootprintLinks(GetFieldFromPipeString(Rec, 1));
+        Exit;
+    end;
+
+    if Kind = 'REMOVEFROMPROJECT' then
+    begin
+        EditRemoveFromProject(GetFieldFromPipeString(Rec, 1));
+        Exit;
+    end;
+
+    if Kind = 'CLOSE_DOCUMENT' then
+    begin
+        EditCloseDocument(GetFieldFromPipeString(Rec, 1));
         Exit;
     end;
 
