@@ -1,6 +1,7 @@
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.utilities.types import Image as MCPImage
 import json
+import math
 import os
 import time
 import asyncio
@@ -2300,35 +2301,129 @@ async def set_pcb_layer_stack(ctx: Context, pcb_path: str, layers: list, solder_
     return _script_result(response)
 
 
+def _outline_vertex(pt, name: str) -> str:
+    """One outline vertex as spec fields: 'x|y' for a straight edge to the next
+    vertex, 'x|y|cx|cy|r|a1|a2' for an arc to it. An arc is given as
+    [x, y, cx, cy, r, sweep_deg] (sweep positive counter-clockwise); Altium
+    stores an arc as its counter-clockwise run from a1 to a2, so a clockwise
+    sweep swaps the two angles."""
+    if len(pt) == 2:
+        return "{}|{}".format(_spec_number(pt[0], f"{name} x"), _spec_number(pt[1], f"{name} y"))
+    if len(pt) != 6:
+        raise ValueError(f"{name}: a vertex is [x, y] or [x, y, cx, cy, r, sweep_deg], got {pt!r}")
+    x, y, cx, cy, r, sweep = (float(v) for v in pt)
+    a_start = math.degrees(math.atan2(y - cy, x - cx))
+    a_end = a_start + sweep
+    a1, a2 = (a_start, a_end) if sweep > 0 else (a_end, a_start)
+    return "{}|{}|{}|{}|{}|{}|{}".format(
+        _spec_number(x, f"{name} x"), _spec_number(y, f"{name} y"), _spec_number(cx, f"{name} cx"),
+        _spec_number(cy, f"{name} cy"), _spec_number(r, f"{name} r"), repr(a1 % 360.0), repr(a2 % 360.0))
+
+
 @mcp.tool()
-async def set_board_outline(ctx: Context, pcb_path: str, points: list, origin: list = None) -> str:
+async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, origin: list = None,
+                            cutouts: list = None, clear_cutouts: bool = False) -> str:
     """
-    Redefine the board shape as a closed polygon of straight edges, in mm
-    relative to the board origin, and save the board. Use it on a new board
-    to replace the default rectangle. Arcs are not supported yet; a rounded
-    corner is approximated with a few vertices.
+    Redefine the board shape as a closed outline of straight edges and arcs,
+    in mm relative to the board origin, add board cutouts, and save the
+    board. Use it on a new board to replace the default rectangle, or with
+    points omitted to change only the cutouts.
 
     Args:
         pcb_path (str): Full path of the .PcbDoc (opened if needed).
-        points (list): [[x_mm, y_mm], ...] vertices in order, at least three,
-            without repeating the first point at the end.
+        points (list): the outline vertices in order, at least three, without
+            repeating the first point at the end. A vertex is [x_mm, y_mm]
+            for a straight edge to the next vertex, or
+            [x_mm, y_mm, cx_mm, cy_mm, r_mm, sweep_deg] for an arc to the
+            next vertex around the centre (cx, cy) with radius r, sweeping
+            sweep_deg degrees (positive counter-clockwise); the next vertex
+            must be the end point of that arc.
         origin (list, optional): [x_mm, y_mm] - set the board origin first,
             in absolute board coordinates; the points are relative to it.
+        cutouts (list, optional): dicts with name and points (the same
+            vertex format) - each becomes a board cutout region through all
+            layers, the way Design » Board Shape » Define Board Cutout does.
+        clear_cutouts (bool): remove every existing board cutout first.
 
     Returns:
-        str: JSON with points, width_mm, height_mm and origin_mm.
+        str: JSON with points, arcs, cutouts added and removed, vertices_mm,
+             width_mm, height_mm, origin_mm and warnings.
     """
-    logger.info(f"set_board_outline {pcb_path}: {len(points)} points")
+    logger.info(f"set_board_outline {pcb_path}: {len(points or [])} points, {len(cutouts or [])} cutouts")
     lines = [f"PCB|{pcb_path}"]
     try:
         if origin:
             lines.append("ORIGIN|{}|{}".format(_spec_number(origin[0], "origin x"), _spec_number(origin[1], "origin y")))
-        for pt in points:
-            lines.append("POINT|{}|{}".format(_spec_number(pt[0], "x"), _spec_number(pt[1], "y")))
-    except (IndexError, TypeError, ValueError) as e:
+        if points and len(points) < 3:
+            raise ValueError("an outline needs at least three vertices")
+        for pt in points or []:
+            fields = _outline_vertex(pt, "outline")
+            lines.append(("ARC|" if fields.count("|") == 6 else "POINT|") + fields)
+        if clear_cutouts:
+            lines.append("CLEAR_CUTOUTS")
+        for c in cutouts or []:
+            if len(c["points"]) < 3:
+                raise ValueError(f"cutout {c.get('name', '?')} needs at least three vertices")
+            lines.append("CUTOUT|{}|{}".format(
+                _spec_field(str(c.get("name", ""))),
+                ";".join(_outline_vertex(pt, f"cutout {c.get('name', '?')}").replace("|", ",") for pt in c["points"])))
+    except (KeyError, IndexError, TypeError, ValueError) as e:
         return json.dumps({"success": False, "error": f"bad outline: {e}"})
     PCB_OUTLINE_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
     response = await altium_bridge.execute_command("set_board_outline", {})
+    return _script_result(response)
+
+
+PCB_MECHANICAL_SPEC = EXCHANGE_DIR / "pcb_mechanical_spec.txt"
+
+
+@mcp.tool()
+async def draw_pcb_mechanical(ctx: Context, pcb_path: str, layers: list = None, clear: list = None,
+                              tracks: list = None, arcs: list = None) -> str:
+    """
+    Draw reference geometry on mechanical layers of a board and save it:
+    enable and name mechanical layers, clear them, and place tracks and arcs
+    (a circle is an arc from 0 to 360). Coordinates are mm from the board
+    origin. Meant for geometry imported from MCAD - rigid/flex boundaries,
+    bend zones, reference holes, notes - that must stay visible on the
+    board without becoming copper, outline or drill.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        layers (list): dicts with index (mechanical layer 1..32) and an
+            optional name; the layer is enabled (and renamed).
+        clear (list): mechanical layer indices whose tracks and arcs are
+            removed first.
+        tracks (list): dicts with layer (index), from [x, y], to [x, y] and
+            optional width_mm (default 0.1).
+        arcs (list): dicts with layer (index), center [x, y], radius_mm,
+            optional start_deg and end_deg (default 0 and 360) and width_mm.
+
+    Returns:
+        str: JSON with layers[] (index, name), tracks, arcs, cleared and
+             warnings.
+    """
+    logger.info(f"draw_pcb_mechanical {pcb_path}: {len(tracks or [])} tracks, {len(arcs or [])} arcs")
+    lines = [f"PCB|{pcb_path}"]
+    try:
+        for l in layers or []:
+            lines.append("LAYER|{}|{}".format(int(l["index"]), _spec_field(str(l.get("name", "")))))
+        for n in clear or []:
+            lines.append("CLEAR|{}".format(int(n)))
+        for t in tracks or []:
+            lines.append("TRACK|{}|{}|{}|{}|{}|{}".format(
+                int(t["layer"]), _spec_number(t["from"][0], "from x"), _spec_number(t["from"][1], "from y"),
+                _spec_number(t["to"][0], "to x"), _spec_number(t["to"][1], "to y"),
+                _spec_number(t.get("width_mm", 0.1), "width_mm")))
+        for a in arcs or []:
+            lines.append("ARC|{}|{}|{}|{}|{}|{}|{}".format(
+                int(a["layer"]), _spec_number(a["center"][0], "center x"), _spec_number(a["center"][1], "center y"),
+                _spec_number(a["radius_mm"], "radius_mm"), _spec_number(a.get("start_deg", 0), "start_deg"),
+                _spec_number(a.get("end_deg", 360), "end_deg"), _spec_number(a.get("width_mm", 0.1), "width_mm")))
+    except (KeyError, IndexError, TypeError, ValueError) as e:
+        return json.dumps({"success": False, "error": f"bad mechanical spec: {e}"})
+    PCB_MECHANICAL_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    response = await altium_bridge.execute_command("draw_pcb_mechanical", {})
     return _script_result(response)
 
 

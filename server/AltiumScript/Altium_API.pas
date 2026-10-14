@@ -1156,6 +1156,8 @@ begin
             Result := SetBoardOutlineReport(ROOT_DIR + 'pcb_outline_spec.txt');
         'set_pcb_regions':
             Result := SetPcbRegionsReport(ROOT_DIR + 'pcb_regions_spec.txt');
+        'draw_pcb_mechanical':
+            Result := DrawPcbMechanicalReport(ROOT_DIR + 'pcb_mechanical_spec.txt');
         'update_pcb_from_project':
             Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
         'export_pcb_step':

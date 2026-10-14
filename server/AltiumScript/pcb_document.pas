@@ -4,7 +4,10 @@
 //                               project (an existing file is opened and added)
 //   * set_pcb_layer_stack     - the copper layers and dielectrics of a board from
 //                               a spec file, top to bottom
-//   * set_board_outline       - the board shape from a list of vertices (mm)
+//   * set_board_outline       - the board shape from a list of vertices (mm),
+//                               straight edges and arcs, and board cutouts
+//   * draw_pcb_mechanical     - tracks and arcs on named mechanical layers:
+//                               reference geometry from MCAD
 //   * set_pcb_regions         - sub-stacks, split lines, board regions and
 //                               bending lines of a rigid-flex board
 //   * update_pcb_from_project - Design » Import Changes From <project>: the ECO
@@ -477,15 +480,102 @@ end;
 //   POINT|<x_mm>|<y_mm>        vertices of the closed outline, in order
 // ---------------------------------------------------------------------------
 
+// A segment of a board outline or a cutout from the fields of a spec record,
+// starting at FirstField: x|y for a straight edge to the next vertex, or
+// x|y|cx|cy|r|a1|a2 for an arc to the next vertex - centre, radius and the
+// angles (degrees) of the counter-clockwise run Altium stores an arc as.
+function SegmentFromFields(Board: IPCB_Board; Rec: String; FirstField: Integer): TPolySegment;
+var
+    Seg : TPolySegment;
+begin
+    Seg := TPolySegment;
+    Seg.vx := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField)));
+    Seg.vy := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 1)));
+    if Trim(GetFieldFromPipeString(Rec, FirstField + 6)) <> '' then
+    begin
+        Seg.Kind := ePolySegmentArc;
+        Seg.cx := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 2)));
+        Seg.cy := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 3)));
+        Seg.Radius := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 4)));
+        Seg.Angle1 := SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 5));
+        Seg.Angle2 := SafeStrToFloat(GetFieldFromPipeString(Rec, FirstField + 6));
+    end
+    else
+        Seg.Kind := ePolySegmentLine;
+    Result := Seg;
+end;
+
+// Every board cutout region of the board is removed, one at a time, since the
+// iterator does not survive a removal.
+function RemoveBoardCutouts(Board: IPCB_Board): Integer;
+var
+    Iter   : IPCB_BoardIterator;
+    R, Hit : IPCB_Region;
+begin
+    Result := 0;
+    repeat
+        Hit := nil;
+        Iter := Board.BoardIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        R := Iter.FirstPCBObject;
+        while (R <> nil) and (Hit = nil) do
+        begin
+            if R.Kind = eRegionKind_BoardCutout then Hit := R;
+            R := Iter.NextPCBObject;
+        end;
+        Board.BoardIterator_Destroy(Iter);
+        if Hit <> nil then
+        begin
+            Board.RemovePCBObject(Hit);
+            Result := Result + 1;
+        end;
+    until Hit = nil;
+end;
+
+// A board cutout region from 'x,y;x,y,cx,cy,r,a1,a2;...' (the same vertex
+// records as the outline, comma separated, vertices separated by semicolons).
+function AddBoardCutout(Board: IPCB_Board; Shape: String): Integer;
+var
+    Region  : IPCB_Region;
+    Vertices, Vertex : String;
+    i, N    : Integer;
+begin
+    Result := 0;
+    Vertices := StringReplace(Shape, ';', '|', REPLACEALL);
+    N := 0;
+    for i := 0 to 1023 do
+    begin
+        if Trim(GetFieldFromPipeString(Vertices, i)) = '' then Break;
+        N := N + 1;
+    end;
+    if N < 3 then Exit;
+    Region := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+    Region.Kind := eRegionKind_BoardCutout;
+    Region.Layer := eMultiLayer;
+    Region.ShapeSegmentCount := N;
+    for i := 0 to N - 1 do
+    begin
+        Vertex := StringReplace(GetFieldFromPipeString(Vertices, i), ',', '|', REPLACEALL);
+        Region.ShapeSegments[i] := SegmentFromFields(Board, Vertex, 0);
+    end;
+    Region.UpdateContourFromShape(True);
+    Board.AddPCBObject(Region);
+    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Region.I_ObjectAddress);
+    Result := N;
+end;
+
 function SetBoardOutlineReport(SpecPath: String): String;
 var
     Spec    : TStringList;
-    Xs, Ys  : TStringList;
+    Verts, Cuts : TStringList;
     PcbPath, Key, Rec, OriginRec : String;
     Board   : IPCB_Board;
     Seg     : TPolySegment;
-    i       : Integer;
+    i, Arcs, Removed : Integer;
     MinX, MaxX, MinY, MaxY : Integer;
+    ClearCutouts : Boolean;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -494,10 +584,13 @@ begin
     end;
     Spec := TStringList.Create;
     Spec.LoadFromFile(SpecPath);
-    Xs := TStringList.Create;
-    Ys := TStringList.Create;
+    Verts := TStringList.Create;
+    Cuts := TStringList.Create;
     PcbPath := '';
     OriginRec := '';
+    ClearCutouts := False;
+    Arcs := 0;
+    Removed := 0;
     try
         for i := 0 to Spec.Count - 1 do
         begin
@@ -505,15 +598,13 @@ begin
             Key := GetFieldFromPipeString(Rec, 0);
             if Key = 'PCB' then PcbPath := GetFieldFromPipeString(Rec, 1)
             else if Key = 'ORIGIN' then OriginRec := Rec
-            else if Key = 'POINT' then
-            begin
-                Xs.Add(GetFieldFromPipeString(Rec, 1));
-                Ys.Add(GetFieldFromPipeString(Rec, 2));
-            end;
+            else if (Key = 'POINT') or (Key = 'ARC') then Verts.Add(Rec)
+            else if Key = 'CUTOUT' then Cuts.Add(Rec)
+            else if Key = 'CLEAR_CUTOUTS' then ClearCutouts := True;
         end;
-        if Xs.Count < 3 then
+        if (Verts.Count > 0) and (Verts.Count < 3) then
         begin
-            Result := PcbDocError('an outline needs at least three POINT records');
+            Result := PcbDocError('an outline needs at least three POINT or ARC records');
             Exit;
         end;
         Board := OpenBoardAtPath(PcbPath);
@@ -528,24 +619,29 @@ begin
             Board.XOrigin := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(OriginRec, 1)));
             Board.YOrigin := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(OriginRec, 2)));
         end;
-        Board.BoardOutline.Invalidate;
-        Board.BoardOutline.PointCount := Xs.Count;
-        for i := 0 to Xs.Count - 1 do
+        if Verts.Count >= 3 then
         begin
-            Seg := TPolySegment;
-            Seg.Kind := ePolySegmentLine;
-            Seg.vx := Board.XOrigin + MMsToCoord(SafeStrToFloat(Xs[i]));
-            Seg.vy := Board.YOrigin + MMsToCoord(SafeStrToFloat(Ys[i]));
-            Board.BoardOutline.Segments[i] := Seg;
+            Board.BoardOutline.Invalidate;
+            Board.BoardOutline.PointCount := Verts.Count;
+            for i := 0 to Verts.Count - 1 do
+            begin
+                Seg := SegmentFromFields(Board, Verts[i], 1);
+                if Seg.Kind = ePolySegmentArc then Arcs := Arcs + 1;
+                Board.BoardOutline.Segments[i] := Seg;
+            end;
+            Board.BoardOutline.Validate;
+            Board.BoardOutline.Rebuild;
         end;
-        Board.BoardOutline.Validate;
-        Board.BoardOutline.Rebuild;
+        if ClearCutouts then Removed := RemoveBoardCutouts(Board);
+        for i := 0 to Cuts.Count - 1 do
+            if AddBoardCutout(Board, GetFieldFromPipeString(Cuts[i], 2)) = 0 then
+                PcbDocWarn('cutout ' + GetFieldFromPipeString(Cuts[i], 1) + ' needs at least three vertices');
         PCBServer.PostProcess;
         Board.GraphicallyInvalidate;
         Board.ViewManager_FullUpdate;
         SaveBoardDocument(PcbPath);
         // BoundingRectangle lags behind a rebuilt outline; the extent comes from the vertices.
-        Xs.Clear;
+        Verts.Clear;
         for i := 0 to Board.BoardOutline.PointCount - 1 do
         begin
             Seg := Board.BoardOutline.Segments[i];
@@ -553,20 +649,151 @@ begin
             if (i = 0) or (Seg.vx > MaxX) then MaxX := Seg.vx;
             if (i = 0) or (Seg.vy < MinY) then MinY := Seg.vy;
             if (i = 0) or (Seg.vy > MaxY) then MaxY := Seg.vy;
-            Xs.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
-                   PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ']');
+            Verts.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                      PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ']');
         end;
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
                   ', "points": ' + IntToStr(Board.BoardOutline.PointCount) +
-                  ', ' + BuildJSONArray(Xs, 'vertices_mm') +
+                  ', "arcs": ' + IntToStr(Arcs) +
+                  ', "cutouts_added": ' + IntToStr(Cuts.Count) +
+                  ', "cutouts_removed": ' + IntToStr(Removed) +
+                  ', ' + BuildJSONArray(Verts, 'vertices_mm') +
                   ', "width_mm": ' + PcbDocNum('0.###', CoordToMMs(MaxX - MinX)) +
                   ', "height_mm": ' + PcbDocNum('0.###', CoordToMMs(MaxY - MinY)) +
                   ', "origin_mm": [' + PcbDocNum('0.###', CoordToMMs(Board.XOrigin)) + ', ' +
-                  PcbDocNum('0.###', CoordToMMs(Board.YOrigin)) + ']}';
+                  PcbDocNum('0.###', CoordToMMs(Board.YOrigin)) + ']' +
+                  ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
     finally
         Spec.Free;
-        Xs.Free;
-        Ys.Free;
+        Verts.Free;
+        Cuts.Free;
+    end;
+end;
+
+// ---------------------------------------------------------------------------
+// draw_pcb_mechanical
+// ---------------------------------------------------------------------------
+
+// Tracks and arcs of one mechanical layer are removed, one at a time.
+function ClearMechanicalLayer(Board: IPCB_Board; LayerIndex: Integer): Integer;
+var
+    Iter : IPCB_BoardIterator;
+    P, Hit : IPCB_Primitive;
+begin
+    Result := 0;
+    repeat
+        Hit := nil;
+        Iter := Board.BoardIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
+        Iter.AddFilter_LayerSet(MkSet(ILayer.MechanicalLayer(LayerIndex)));
+        Iter.AddFilter_Method(eProcessAll);
+        Hit := Iter.FirstPCBObject;
+        Board.BoardIterator_Destroy(Iter);
+        if Hit <> nil then
+        begin
+            Board.RemovePCBObject(Hit);
+            Result := Result + 1;
+        end;
+    until Hit = nil;
+end;
+
+function DrawPcbMechanicalReport(SpecPath: String): String;
+var
+    Spec     : TStringList;
+    Layers   : TStringList;
+    PcbPath, Key, Rec : String;
+    Board    : IPCB_Board;
+    Stack    : IPCB_LayerStack_V7;
+    Mech     : IPCB_MechanicalLayer;
+    Track    : IPCB_Track;
+    Arc      : IPCB_Arc;
+    i, N, Tracks, Arcs, Cleared : Integer;
+begin
+    if not FileExists(SpecPath) then
+    begin
+        Result := PcbDocError('spec file not found: ' + SpecPath);
+        Exit;
+    end;
+    Spec := TStringList.Create;
+    Spec.LoadFromFile(SpecPath);
+    Layers := TStringList.Create;
+    PcbDocWarnings := TStringList.Create;
+    PcbPath := '';
+    Tracks := 0;
+    Arcs := 0;
+    Cleared := 0;
+    try
+        for i := 0 to Spec.Count - 1 do
+            if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
+        Board := OpenBoardAtPath(PcbPath);
+        if Board = nil then
+        begin
+            Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+            Exit;
+        end;
+        Stack := Board.LayerStack_V7;
+        PCBServer.PreProcess;
+        for i := 0 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i];
+            Key := GetFieldFromPipeString(Rec, 0);
+            N := StrToIntDef(GetFieldFromPipeString(Rec, 1), 0);
+            if (Key <> 'PCB') and ((N < 1) or (N > 32)) then
+            begin
+                PcbDocWarn('mechanical layer index out of range in ' + Rec);
+                Continue;
+            end;
+            if Key = 'LAYER' then
+            begin
+                Mech := Stack.LayerObject_V7[ILayer.MechanicalLayer(N)];
+                Mech.MechanicalLayerEnabled := True;
+                if GetFieldFromPipeString(Rec, 2) <> '' then Mech.Name := GetFieldFromPipeString(Rec, 2);
+                Layers.Add('{"index": ' + IntToStr(N) + ', "name": ' + JSONStr(Mech.Name) + '}');
+            end
+            else if Key = 'CLEAR' then
+                Cleared := Cleared + ClearMechanicalLayer(Board, N)
+            else if Key = 'TRACK' then
+            begin
+                Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                Track.Layer := ILayer.MechanicalLayer(N);
+                Track.x1 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
+                Track.y1 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
+                Track.x2 := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
+                Track.y2 := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 5)));
+                Track.Width := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 6)));
+                Board.AddPCBObject(Track);
+                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                Tracks := Tracks + 1;
+            end
+            else if Key = 'ARC' then
+            begin
+                Arc := PCBServer.PCBObjectFactory(eArcObject, eNoDimension, eCreate_Default);
+                Arc.Layer := ILayer.MechanicalLayer(N);
+                Arc.XCenter := Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2)));
+                Arc.YCenter := Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3)));
+                Arc.Radius := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)));
+                Arc.StartAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 5));
+                Arc.EndAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 6));
+                Arc.LineWidth := MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 7)));
+                Board.AddPCBObject(Arc);
+                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
+                Arcs := Arcs + 1;
+            end;
+        end;
+        PCBServer.PostProcess;
+        Board.GraphicallyInvalidate;
+        Board.ViewManager_FullUpdate;
+        SaveBoardDocument(PcbPath);
+        Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
+                  ', ' + BuildJSONArray(Layers, 'layers') +
+                  ', "tracks": ' + IntToStr(Tracks) + ', "arcs": ' + IntToStr(Arcs) +
+                  ', "cleared": ' + IntToStr(Cleared) +
+                  ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
+    finally
+        Spec.Free;
+        Layers.Free;
+        PcbDocWarnings.Free;
+        PcbDocWarnings := nil;
     end;
 end;
 
@@ -577,7 +804,6 @@ end;
 // command opens the Engineering Change Order dialog and this script waits in
 // it; the server answers the dialog (Execute Changes, Close) from outside.
 // ---------------------------------------------------------------------------
-
 function CountBoardObjects(Board: IPCB_Board; ObjectId: Integer): Integer;
 var
     Iter : IPCB_BoardIterator;
