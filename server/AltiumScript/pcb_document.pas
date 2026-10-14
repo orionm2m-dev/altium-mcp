@@ -102,21 +102,71 @@ begin
     end;
 end;
 
-function DielectricJSON(D: IPCB_DielectricObject): String;
-begin
-    if (D = nil) or (D.DielectricType = eNoDielectric) then
-    begin
-        Result := 'null';
-        Exit;
-    end;
-    Result := '{"type": ' + JSONStr(DielectricTypeName(D.DielectricType)) +
-              ', "height_um": ' + PcbDocNum('0.#', CoordToMMs(D.DielectricHeight) * 1000) +
-              ', "material": ' + JSONStr(D.DielectricMaterial) +
-              ', "dk": ' + PcbDocNum('0.###', D.DielectricConstant) + '}';
-end;
 
 // The copper layers of the board top to bottom, each with the dielectric below
 // it, and the surface dielectrics; the body of every report of this unit.
+function IsCopperLayerId(Id: Integer): Boolean;
+begin
+    Result := ((Id >= 1) and (Id <= 32)) or ((Id >= 39) and (Id <= 54));
+end;
+
+// Whether a layer of the master stack is one of its dielectric-class layers
+// (core, prepreg, surface finish). Overlay and other physical layers have no
+// dielectric properties, and reading one would stop the script.
+function IsDielectricLayer(Master: IPCB_MasterLayerStack; L: IPCB_LayerObject): Boolean;
+var
+    D : IPCB_LayerObject;
+begin
+    Result := False;
+    D := Master.First(eLayerClass_Dielectric);
+    while D <> nil do
+    begin
+        if D.I_ObjectAddress = L.I_ObjectAddress then Result := True;
+        D := Master.Next(eLayerClass_Dielectric, D);
+    end;
+end;
+
+// Every physical layer of the master layer stack top to bottom: copper with
+// its thickness, dielectrics (cores, prepregs, surface finishes) with height,
+// material and Dk, anything else by name. This is the stack Altium's Layer
+// Stack Manager holds; the older LayerStack_V7 accessors see no dielectrics
+// on a current board.
+function PhysicalLayersJSON(Board: IPCB_Board): String;
+var
+    Master : IPCB_MasterLayerStack;
+    L      : IPCB_LayerObject;
+    Items  : TStringList;
+    Total  : Double;
+begin
+    Items := TStringList.Create;
+    Total := 0;
+    Master := Board.MasterLayerStack;
+    L := Master.First(eLayerClass_Physical);
+    while L <> nil do
+    begin
+        if IsCopperLayerId(L.V6_LayerID) then
+        begin
+            Total := Total + CoordToMMs(L.CopperThickness);
+            Items.Add('{"name": ' + JSONStr(L.Name) + ', "kind": "copper", "layer_id": ' + IntToStr(L.V6_LayerID) +
+                      ', "copper_um": ' + PcbDocNum('0.#', CoordToMMs(L.CopperThickness) * 1000) + '}');
+        end
+        else if IsDielectricLayer(Master, L) then
+        begin
+            Total := Total + CoordToMMs(L.DielectricHeight);
+            Items.Add('{"name": ' + JSONStr(L.Name) + ', "kind": ' + JSONStr(DielectricTypeName(L.DielectricType)) +
+                      ', "height_um": ' + PcbDocNum('0.#', CoordToMMs(L.DielectricHeight) * 1000) +
+                      ', "material": ' + JSONStr(L.DielectricMaterial) +
+                      ', "dk": ' + PcbDocNum('0.###', L.DielectricConstant) + '}');
+        end
+        else
+            Items.Add('{"name": ' + JSONStr(L.Name) + ', "kind": "other", "layer_id": ' + IntToStr(L.V6_LayerID) + '}');
+        L := Master.Next(eLayerClass_Physical, L);
+    end;
+    Result := '"physical_count": ' + IntToStr(Items.Count) + ', "total_thickness_mm": ' + PcbDocNum('0.###', Total) +
+              ', ' + BuildJSONArray(Items, 'physical');
+    Items.Free;
+end;
+
 function LayerStackJSON(Board: IPCB_Board): String;
 var
     Stack  : IPCB_LayerStack_V7;
@@ -124,21 +174,15 @@ var
     Master : IPCB_MasterLayerStack;
     Layers, Subs : TStringList;
     i      : Integer;
-    Total  : Double;
 begin
     Layers := TStringList.Create;
     Subs := TStringList.Create;
-    Total := 0;
     Stack := Board.LayerStack_V7;
     L := Stack.FirstLayer;
     while L <> nil do
     begin
-        Total := Total + CoordToMMs(L.CopperThickness);
-        if (L.Dielectric <> nil) and (L.Dielectric.DielectricType <> eNoDielectric) then
-            Total := Total + CoordToMMs(L.Dielectric.DielectricHeight);
         Layers.Add('{"name": ' + JSONStr(L.Name) + ', "layer_id": ' + IntToStr(L.V6_LayerID) +
-                   ', "copper_um": ' + PcbDocNum('0.#', CoordToMMs(L.CopperThickness) * 1000) +
-                   ', "dielectric_below": ' + DielectricJSON(L.Dielectric) + '}');
+                   ', "copper_um": ' + PcbDocNum('0.#', CoordToMMs(L.CopperThickness) * 1000) + '}');
         L := Stack.NextLayer(L);
     end;
     Master := Board.MasterLayerStack;
@@ -147,10 +191,8 @@ begin
             Subs.Add('{"name": ' + JSONStr(Master.Substacks[i].Name) +
                      ', "is_flex": ' + JSONBool(Master.Substacks[i].IsFlex) + '}');
     Result := '"copper_layers": ' + IntToStr(Stack.LayersInStackCount) +
-              ', "copper_and_dielectric_mm": ' + PcbDocNum('0.###', Total) +
-              ', "solder_mask_top": ' + DielectricJSON(Stack.DielectricTop) +
-              ', "solder_mask_bottom": ' + DielectricJSON(Stack.DielectricBottom) +
               ', ' + BuildJSONArray(Layers, 'layers') +
+              ', ' + PhysicalLayersJSON(Board) +
               ', ' + BuildJSONArray(Subs, 'substacks');
     Layers.Free;
     Subs.Free;
@@ -214,11 +256,8 @@ begin
     if LowerCase(Units) = 'mm' then Board.DisplayUnit := eMetric
     else Board.DisplayUnit := eImperial;
     Added := not ProjectHasDocument(Project, PcbPath);
-    if Added then
-    begin
-        Project.DM_AddSourceDocument(PcbPath);
-        SaveProjectFile(Project);
-    end;
+    if Added then Project.DM_AddSourceDocument(PcbPath);
+    SaveProjectFile(Project);
     SaveBoardDocument(PcbPath);
     Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "project": ' + JSONStr(ProjectPath) +
               ', "existed": ' + JSONBool(Existed) + ', "added_to_project": ' + JSONBool(Added) +
@@ -249,7 +288,7 @@ begin
     end;
 end;
 
-procedure ApplyDielectricSpec(D: IPCB_DielectricObject; Kind: String; Rec: String; HeightField: Integer);
+procedure ApplyDielectricSpec(D: IPCB_DielectricLayer; Kind: String; Rec: String; HeightField: Integer);
 var
     Tangent : Double;
 begin
@@ -281,9 +320,10 @@ var
     PcbPath, Key, Rec : String;
     Board   : IPCB_Board;
     Stack   : IPCB_LayerStack_V7;
+    Master  : IPCB_MasterLayerStack;
     L       : IPCB_LayerObject_V7;
-    i, Count, Target, LayerId : Integer;
-    Order   : TStringList;
+    P       : IPCB_LayerObject;
+    i, Count, Target, LayerId, Coppers, Gap : Integer;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -331,6 +371,7 @@ begin
             Exit;
         end;
         Stack := Board.LayerStack_V7;
+        Master := Board.MasterLayerStack;
         PCBServer.PreProcess;
         // Bring the number of copper layers to the spec: mid layers are added
         // in index order and the unused ones removed from the bottom up.
@@ -358,35 +399,56 @@ begin
             Stack.RemoveFromStack(L);
             Count := Count - 1;
         end;
-        // Names, copper and the dielectric below each layer, top to bottom.
-        Order := TStringList.Create;
+        // Names and copper top to bottom.
         L := Stack.FirstLayer;
         i := 0;
         while (L <> nil) and (i < Names.Count) do
         begin
             L.Name := Names[i];
             L.CopperThickness := MMsToCoord(SafeStrToFloat(Copper[i]) / 1000);
-            if Below[i] <> '' then
-                ApplyDielectricSpec(L.Dielectric, GetFieldFromPipeString(Below[i], 1), Below[i], 2)
-            else if (L.Dielectric <> nil) and (Stack.NextLayer(L) <> nil) then
-                PcbDocWarn('no DIELECTRIC under layer ' + Names[i] + '; its dielectric is left as it was');
-            Order.Add(L.Name);
             L := Stack.NextLayer(L);
             i := i + 1;
         end;
-        for i := 0 to Masks.Count - 1 do
+        // Dielectrics in the physical order of the master stack: the layers
+        // above the first copper are the top surface, those below the last
+        // copper the bottom surface, the rest the gap under copper N.
+        Coppers := 0;
+        Gap := 0;
+        P := Master.First(eLayerClass_Physical);
+        while P <> nil do
         begin
-            if GetFieldFromPipeString(Masks[i], 1) = 'top' then
+            if IsCopperLayerId(P.V6_LayerID) then
             begin
-                ApplyDielectricSpec(Stack.DielectricTop, 'surface', Masks[i], 2);
-                Stack.ShowDielectricTop := True;
+                Coppers := Coppers + 1;
+                Gap := 0;
             end
-            else if GetFieldFromPipeString(Masks[i], 1) = 'bottom' then
+            else if IsDielectricLayer(Master, P) then
             begin
-                ApplyDielectricSpec(Stack.DielectricBottom, 'surface', Masks[i], 2);
-                Stack.ShowDielectricBottom := True;
-            end
-            else PcbDocWarn('MASK side must be top or bottom: ' + Masks[i]);
+                Gap := Gap + 1;
+                if Coppers = 0 then
+                begin
+                    for i := 0 to Masks.Count - 1 do
+                        if (GetFieldFromPipeString(Masks[i], 1) = 'top') and (Gap = 1) then
+                            ApplyDielectricSpec(P, 'surface', Masks[i], 2);
+                end
+                else if Coppers >= Target then
+                begin
+                    for i := 0 to Masks.Count - 1 do
+                        if (GetFieldFromPipeString(Masks[i], 1) = 'bottom') and (Gap = 1) then
+                            ApplyDielectricSpec(P, 'surface', Masks[i], 2);
+                end
+                else if Below[Coppers - 1] <> '' then
+                begin
+                    if Gap = 1 then
+                        ApplyDielectricSpec(P, GetFieldFromPipeString(Below[Coppers - 1], 1), Below[Coppers - 1], 2)
+                    else
+                        PcbDocWarn('a second dielectric layer "' + P.Name + '" sits under ' + Names[Coppers - 1] +
+                                   '; the spec gives one, this one is left as it was');
+                end
+                else
+                    PcbDocWarn('no DIELECTRIC under layer ' + Names[Coppers - 1] + '; "' + P.Name + '" is left as it was');
+            end;
+            P := Master.Next(eLayerClass_Physical, P);
         end;
         PCBServer.PostProcess;
         Board.ViewManager_UpdateLayerTabs;
@@ -395,7 +457,6 @@ begin
         SaveBoardDocument(PcbPath);
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "layers_requested": ' + IntToStr(Target) +
                   ', ' + LayerStackJSON(Board) + ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
-        Order.Free;
     finally
         Spec.Free;
         Names.Free;
