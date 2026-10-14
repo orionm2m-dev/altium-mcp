@@ -163,6 +163,7 @@ python -m unittest discover -s server/tests -p test_step_export.py -v
 - `add_sheet_symbols`: Place hierarchical sheet symbols with their sheet entries (plus wires, net labels, notes and frame lines) on a sheet - the active block diagram of a project.
 - `compile_project`: Validate a `.PrjPcb` with Altium's own command, return the Messages panel it filled (errors, warnings), the project's violation list and, on request, the net of every pin - the proof that an edit connected what it should.
 - `open_project`: Open a project of any kind (`.PrjPcb`, `.PrjMbd`, ...) and list its logical documents - the check for a project a tool wrote.
+- `open_document`: Open a document (`.PcbDoc`, `.SchDoc`, libraries, `.OutJob`) or bring an open one to the front - the step that makes a file the current document for the PCB, net and screenshot tools.
 - `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
 
 ### Multi-board Design

@@ -1145,6 +1145,8 @@ begin
             Result := ExecuteSaveDocuments(RequestData);
         'open_project':
             Result := OpenProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'project_report.json');
+        'open_document':
+            Result := OpenDocumentReport(ParamValueOf('path'));
         'export_pcb_step':
             Result := ExportPCBStepJob(ParamValueOf('project_path'), ParamValueOf('export_project_path'),
                                       ParamValueOf('pcb_path'),

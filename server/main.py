@@ -2159,6 +2159,32 @@ async def open_project(ctx: Context, project_path: str) -> str:
     return json.dumps(data, indent=1, ensure_ascii=False)
 
 
+@mcp.tool()
+async def open_document(ctx: Context, path: str) -> str:
+    """
+    Open a document (.PcbDoc, .SchDoc, .PcbLib, .SchLib, .OutJob) in Altium,
+    or bring an already open one to the front, so that the tools working on
+    the current document - the PCB layer, rule, component and net tools, the
+    screenshot - see it.
+
+    open_project brings a project into the workspace but leaves the active
+    document as it was; this is the step that makes a given file current.
+    Projects themselves go through open_project.
+
+    Args:
+        path (str): Full path of the document.
+
+    Returns:
+        str: JSON with success, path, kind and was_open.
+    """
+    logger.info(f"open_document {path}")
+    response = await altium_bridge.execute_command("open_document", {"path": path})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    result = response.get("result", {})
+    return json.dumps(result, indent=2, ensure_ascii=False) if not isinstance(result, str) else result
+
+
 def _project_ini(document_paths: list) -> str:
     """Minimal project file: the keys the hierarchy depends on plus the document
     list. Altium fills in the rest when it saves the project."""

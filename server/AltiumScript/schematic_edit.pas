@@ -1549,6 +1549,46 @@ end;
 // save_documents: save already-open documents by path (SchDoc, SchLib, PcbLib, PcbDoc)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// open_document: open a document by path, or bring an open one to the front,
+// so that the tools working on the current document see it
+// ---------------------------------------------------------------------------
+function OpenDocumentReport(Path: String): String;
+var
+    Doc  : IServerDocument;
+    Ext, Kind : String;
+    WasOpen : Boolean;
+begin
+    if not FileExists(Path) then
+    begin
+        Result := '{"success": false, "error": ' + JSONStr('file not found: ' + Path) + '}';
+        Exit;
+    end;
+    Ext := LowerCase(ExtractFileExt(Path));
+    if      Ext = '.pcbdoc' then Kind := 'PCB'
+    else if Ext = '.schdoc' then Kind := 'SCH'
+    else if Ext = '.pcblib' then Kind := 'PCBLIB'
+    else if Ext = '.schlib' then Kind := 'SCHLIB'
+    else if Ext = '.outjob' then Kind := 'OUTPUTJOB'
+    else
+    begin
+        Result := '{"success": false, "error": ' + JSONStr('not a document kind this tool opens (projects go through open_project): ' + Path) + '}';
+        Exit;
+    end;
+    Doc := Client.GetDocumentByPath(Path);
+    WasOpen := Doc <> nil;
+    if Doc = nil then Doc := Client.OpenDocument(Kind, Path);
+    if Doc = nil then
+    begin
+        Result := '{"success": false, "error": ' + JSONStr('cannot open ' + Path) + '}';
+        Exit;
+    end;
+    Client.ShowDocument(Doc);
+    Doc.Focus;
+    Result := '{"success": true, "path": ' + JSONStr(Path) + ', "kind": ' + JSONStr(Kind) +
+              ', "was_open": ' + JSONBool(WasOpen) + '}';
+end;
+
 function SaveDocumentsFromList(Paths: TStringList): String;
 var
     Doc  : IServerDocument;
