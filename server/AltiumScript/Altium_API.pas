@@ -1147,6 +1147,15 @@ begin
             Result := OpenProjectReport(ParamValueOf('project_path'), ROOT_DIR + 'project_report.json');
         'open_document':
             Result := OpenDocumentReport(ParamValueOf('path'));
+        'create_pcb_document':
+            Result := CreatePcbDocumentReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'),
+                                              ParamValueOf('units'));
+        'set_pcb_layer_stack':
+            Result := SetPcbLayerStackReport(ROOT_DIR + 'pcb_stack_spec.txt');
+        'set_board_outline':
+            Result := SetBoardOutlineReport(ROOT_DIR + 'pcb_outline_spec.txt');
+        'update_pcb_from_project':
+            Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
         'export_pcb_step':
             Result := ExportPCBStepJob(ParamValueOf('project_path'), ParamValueOf('export_project_path'),
                                       ParamValueOf('pcb_path'),

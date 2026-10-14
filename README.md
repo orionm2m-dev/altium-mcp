@@ -166,6 +166,12 @@ python -m unittest discover -s server/tests -p test_step_export.py -v
 - `open_document`: Open a document (`.PcbDoc`, `.SchDoc`, libraries, `.OutJob`) or bring an open one to the front - the step that makes a file the current document for the PCB, net and screenshot tools.
 - `save_documents`: Save open documents by path, including libraries left unsaved by the creation tools.
 
+### PCB Documents (a board built by data)
+- `create_pcb_document`: Create a `.PcbDoc` under a path and add it to a project (or add an existing board), with the display unit set - the first step of a board built by data.
+- `set_pcb_layer_stack`: Set the copper layers and dielectrics of a board top to bottom from a list (names, copper thickness, core / prepreg under each layer, solder masks); mid layers are added or removed to match the count. The report reads the stack back from the board; rigid-flex sub-stacks are reported, not edited.
+- `set_board_outline`: Redefine the board shape as a polygon of straight edges in mm, setting the board origin on request.
+- `update_pcb_from_project`: Design » Import Changes From <project> - Altium's own ECO brings the components and nets of the compiled schematics onto the board. The Engineering Change Order dialog the command opens is answered by the server (Execute Changes, then Close), so every change it lists is executed; the dialog log is part of the report.
+
 ### Multi-board Design
 - `create_multiboard_project`: Write a Multi-board Design project (`.PrjMbd`) with a Multi-board Schematic (`.MbsDoc`) whose modules reference child PCB projects; the files are written directly, as that editor has no scripting interface; `link_multiboard_modules` then imports the connectors and connects them.
 - `link_multiboard_modules`: Import the connectors of the child projects into a Multi-board Schematic as module entries and connect them pin by pin, as Design » Import From Child Projects and Place » Direct Connection do. The child projects are opened and only read; a later run refreshes the nets and designators of connectors already imported, keeps the entry and connection of a connector placed again in the child project (same designator, new unique id), and reports what it does not rebuild.

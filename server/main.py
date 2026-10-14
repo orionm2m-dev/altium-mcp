@@ -26,6 +26,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from step_export import export_step
+import dialogs
 
 # Configure logging
 logging.basicConfig(
@@ -270,12 +271,12 @@ class AltiumBridge:
         # concurrent tool calls must be serialized or they clobber each other
         self._command_lock = asyncio.Lock()
 
-    async def execute_command(self, command: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_command(self, command: str, params: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
         """Execute a command in Altium via the bridge script"""
         async with self._command_lock:
-            return await self._execute_command_locked(command, params)
+            return await self._execute_command_locked(command, params, timeout)
 
-    async def _execute_command_locked(self, command: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_command_locked(self, command: str, params: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
         try:
             # Clean up any existing response file
             if RESPONSE_FILE.exists():
@@ -297,7 +298,6 @@ class AltiumBridge:
             
             # Wait for the response file
             logger.info(f"Waiting for response file to appear...")
-            timeout = 120  # seconds
             start_time = time.time()
             while not RESPONSE_FILE.exists() and time.time() - start_time < timeout:
                 await asyncio.sleep(0.5)
@@ -2183,6 +2183,172 @@ async def open_document(ctx: Context, path: str) -> str:
         return json.dumps({"success": False, "error": response.get("error", "unknown error")})
     result = response.get("result", {})
     return json.dumps(result, indent=2, ensure_ascii=False) if not isinstance(result, str) else result
+
+
+def _script_result(response: dict, extra: dict = None) -> str:
+    """The JSON a script function returned, with extra fields merged in."""
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error"), **(extra or {})})
+    result = response.get("result", {})
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            return result
+    if extra:
+        result.update(extra)
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+def _spec_number(value, name: str) -> str:
+    try:
+        return repr(float(value))
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number, got {value!r}")
+
+
+PCB_STACK_SPEC = EXCHANGE_DIR / "pcb_stack_spec.txt"
+PCB_OUTLINE_SPEC = EXCHANGE_DIR / "pcb_outline_spec.txt"
+
+
+@mcp.tool()
+async def create_pcb_document(ctx: Context, project_path: str, pcb_path: str, units: str = "mm") -> str:
+    """
+    Create a PCB document (.PcbDoc) saved under pcb_path and add it to a
+    project, or add an existing board to the project. The board is left as
+    the current document, so set_pcb_layer_stack, set_board_outline and
+    update_pcb_from_project can follow.
+
+    Args:
+        project_path (str): Full path of the .PrjPcb (opened if needed).
+        pcb_path (str): Full path the board is saved under.
+        units (str): "mm" or "mil" - the display unit of the board.
+
+    Returns:
+        str: JSON with path, existed, added_to_project and the layer stack
+             the board has (layers[], solder masks, substacks[]).
+    """
+    logger.info(f"create_pcb_document {pcb_path} in {project_path}")
+    response = await altium_bridge.execute_command(
+        "create_pcb_document", {"project_path": project_path, "pcb_path": pcb_path, "units": units})
+    return _script_result(response)
+
+
+@mcp.tool()
+async def set_pcb_layer_stack(ctx: Context, pcb_path: str, layers: list, solder_mask: dict = None) -> str:
+    """
+    Set the copper layers and dielectrics of a board, top to bottom, and save
+    it. Mid layers are added or removed so the count matches (a mid layer
+    carrying objects is kept and reported); then the name, copper thickness
+    and the dielectric under each layer are set in order. The report reads
+    the stack back from the board. Sub-stacks of a rigid-flex board are
+    reported, not edited.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        layers (list): One dict per copper layer, top first:
+            - name (str, required): e.g. "L1 Top"
+            - copper_um (float, required): copper thickness in um (35 = 1 oz)
+            - dielectric_below (dict, optional; none under the bottom layer):
+              type "core" | "prepreg", height_um, material, dk, loss_tangent
+        solder_mask (dict, optional): {"top": {...}, "bottom": {...}}, each
+            with height_um, material, dk - the surface dielectrics.
+
+    Example:
+        layers=[{"name": "L1 Top", "copper_um": 35,
+                 "dielectric_below": {"type": "core", "height_um": 314, "material": "FR-4", "dk": 4.4}},
+                {"name": "L2", "copper_um": 18,
+                 "dielectric_below": {"type": "prepreg", "height_um": 80, "material": "FR-4", "dk": 4.2}},
+                {"name": "L3", "copper_um": 18,
+                 "dielectric_below": {"type": "core", "height_um": 314, "material": "FR-4", "dk": 4.4}},
+                {"name": "L4 Bottom", "copper_um": 35}]
+
+    Returns:
+        str: JSON with copper_layers, layers[] (name, copper_um,
+             dielectric_below), solder masks, substacks[] and warnings.
+    """
+    logger.info(f"set_pcb_layer_stack {pcb_path}: {len(layers)} layers")
+    lines = [f"PCB|{pcb_path}"]
+    try:
+        for layer in layers:
+            lines.append("LAYER|{}|{}".format(_spec_field(layer["name"]), _spec_number(layer["copper_um"], "copper_um")))
+            d = layer.get("dielectric_below")
+            if d:
+                lines.append("DIELECTRIC|{}|{}|{}|{}|{}".format(
+                    d.get("type", "prepreg"), _spec_number(d["height_um"], "height_um"),
+                    _spec_field(d.get("material", "")), d.get("dk", ""), d.get("loss_tangent", "")))
+        for side, d in (solder_mask or {}).items():
+            lines.append("MASK|{}|{}|{}|{}".format(
+                side, _spec_number(d["height_um"], "height_um"), _spec_field(d.get("material", "")), d.get("dk", "")))
+    except (KeyError, TypeError, ValueError) as e:
+        return json.dumps({"success": False, "error": f"bad layer spec: {e}"})
+    PCB_STACK_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    response = await altium_bridge.execute_command("set_pcb_layer_stack", {})
+    return _script_result(response)
+
+
+@mcp.tool()
+async def set_board_outline(ctx: Context, pcb_path: str, points: list, origin: list = None) -> str:
+    """
+    Redefine the board shape as a closed polygon of straight edges, in mm
+    relative to the board origin, and save the board. Use it on a new board
+    to replace the default rectangle. Arcs are not supported yet; a rounded
+    corner is approximated with a few vertices.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        points (list): [[x_mm, y_mm], ...] vertices in order, at least three,
+            without repeating the first point at the end.
+        origin (list, optional): [x_mm, y_mm] - set the board origin first,
+            in absolute board coordinates; the points are relative to it.
+
+    Returns:
+        str: JSON with points, width_mm, height_mm and origin_mm.
+    """
+    logger.info(f"set_board_outline {pcb_path}: {len(points)} points")
+    lines = [f"PCB|{pcb_path}"]
+    try:
+        if origin:
+            lines.append("ORIGIN|{}|{}".format(_spec_number(origin[0], "origin x"), _spec_number(origin[1], "origin y")))
+        for pt in points:
+            lines.append("POINT|{}|{}".format(_spec_number(pt[0], "x"), _spec_number(pt[1], "y")))
+    except (IndexError, TypeError, ValueError) as e:
+        return json.dumps({"success": False, "error": f"bad outline: {e}"})
+    PCB_OUTLINE_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    response = await altium_bridge.execute_command("set_board_outline", {})
+    return _script_result(response)
+
+
+@mcp.tool()
+async def update_pcb_from_project(ctx: Context, project_path: str, pcb_path: str, timeout_s: int = 300) -> str:
+    """
+    Design » Import Changes From <project> on the board: Altium's own ECO
+    brings every component, net and class of the compiled schematics onto
+    the board (new components land beside the outline), and later runs
+    apply the differences since. The Engineering Change Order dialog the
+    command opens is answered by the server - Execute Changes, then Close -
+    so every change it lists is executed; review the ECO in Altium first
+    when that is not wanted. The board is saved afterwards.
+
+    Args:
+        project_path (str): Full path of the .PrjPcb.
+        pcb_path (str): Full path of the board, a document of that project.
+        timeout_s (int): How long to wait for the ECO to run.
+
+    Returns:
+        str: JSON with components_before, components, nets and dialog_log.
+    """
+    logger.info(f"update_pcb_from_project {pcb_path} from {project_path}")
+    driver = dialogs.eco_driver(timeout=timeout_s)
+    driver.start()
+    try:
+        response = await altium_bridge.execute_command(
+            "update_pcb_from_project", {"project_path": project_path, "pcb_path": pcb_path}, timeout=timeout_s + 30)
+    finally:
+        driver.stop()
+        driver.join(5)
+    return _script_result(response, {"eco_dialog_seen": driver.seen, "eco_dialog_done": driver.done,
+                                     "dialog_log": driver.log})
 
 
 def _project_ini(document_paths: list) -> str:

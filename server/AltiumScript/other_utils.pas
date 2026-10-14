@@ -167,6 +167,11 @@ begin
        (CommandName = 'get_project_connectors') or
        (CommandName = 'run_multiboard_erc') or
        (CommandName = 'open_project_group') or
+       (CommandName = 'open_document') or
+       (CommandName = 'create_pcb_document') or
+       (CommandName = 'set_pcb_layer_stack') or
+       (CommandName = 'set_board_outline') or
+       (CommandName = 'update_pcb_from_project') or
        (CommandName = 'save_documents') then
     begin
         Result := True;
