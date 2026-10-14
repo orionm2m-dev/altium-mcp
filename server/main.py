@@ -2374,6 +2374,33 @@ async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, or
     return _script_result(response)
 
 
+@mcp.tool()
+async def export_board_3d_model(ctx: Context, pcb_path: str, output_path: str, folded: bool = False,
+                                fold_rate: int = 100) -> str:
+    """
+    Export a board as a STEP model through the PCB server's own 3D exporter
+    (File » Export » STEP 3D): every component as its STEP model, all holes,
+    no copper - and, for a rigid-flex board, flat or folded along its
+    bending lines. Lighter than export_pcb_step (no OutJob, no project
+    copy) and the only way to get the folded state.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        output_path (str): Full path of the .step file to write; an existing
+            file is replaced.
+        folded (bool): export the board folded along its bending lines.
+        fold_rate (int): how far the fold goes, 0..100 % (100 = fully folded).
+
+    Returns:
+        str: JSON with success, path, size_bytes, folded and fold_rate.
+    """
+    logger.info(f"export_board_3d_model {pcb_path} -> {output_path} folded={folded}")
+    response = await altium_bridge.execute_command("export_board_3d_model", {
+        "pcb_path": pcb_path, "output_path": output_path,
+        "folded": "true" if folded else "false", "fold_rate": str(int(fold_rate))}, timeout=600)
+    return _script_result(response)
+
+
 PCB_MECHANICAL_SPEC = EXCHANGE_DIR / "pcb_mechanical_spec.txt"
 
 

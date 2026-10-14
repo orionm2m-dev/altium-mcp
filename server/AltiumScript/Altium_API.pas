@@ -1158,6 +1158,9 @@ begin
             Result := SetPcbRegionsReport(ROOT_DIR + 'pcb_regions_spec.txt');
         'draw_pcb_mechanical':
             Result := DrawPcbMechanicalReport(ROOT_DIR + 'pcb_mechanical_spec.txt');
+        'export_board_3d_model':
+            Result := ExportBoard3DModelReport(ParamValueOf('pcb_path'), ParamValueOf('output_path'),
+                                               ParamValueOf('folded'), ParamValueOf('fold_rate'));
         'update_pcb_from_project':
             Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
         'export_pcb_step':

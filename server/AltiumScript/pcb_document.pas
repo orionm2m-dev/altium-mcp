@@ -8,6 +8,8 @@
 //                               straight edges and arcs, and board cutouts
 //   * draw_pcb_mechanical     - tracks and arcs on named mechanical layers:
 //                               reference geometry from MCAD
+//   * export_board_3d_model   - a STEP of the board, flat or folded along its
+//                               bending lines
 //   * set_pcb_regions         - sub-stacks, split lines, board regions and
 //                               bending lines of a rigid-flex board
 //   * update_pcb_from_project - Design » Import Changes From <project>: the ECO
@@ -795,6 +797,62 @@ begin
         PcbDocWarnings.Free;
         PcbDocWarnings := nil;
     end;
+end;
+
+
+// ---------------------------------------------------------------------------
+// export_board_3d_model
+// ---------------------------------------------------------------------------
+
+// The 3D model export of File » Export » STEP 3D, through the PCB server's
+// exporter: every component as its STEP model, all holes, no copper, and
+// the board flat or folded along its bending lines (rate 0..100 %).
+function ExportBoard3DModelReport(PcbPath, OutputPath, Folded, FoldRate: String): String;
+var
+    Board    : IPCB_Board;
+    Exporter : IPCB_Board3DModelExporter;
+    Project  : IProject;
+    Rate     : Integer;
+    Size     : Integer;
+    F        : TSearchRec;
+begin
+    Board := OpenBoardAtPath(PcbPath);
+    if Board = nil then
+    begin
+        Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+        Exit;
+    end;
+    Exporter := PCBServer.Board3DModelExporter;
+    if Exporter = nil then
+    begin
+        Result := PcbDocError('the PCB server has no 3D model exporter');
+        Exit;
+    end;
+    Rate := StrToIntDef(FoldRate, 100);
+    if Rate < 0 then Rate := 0;
+    if Rate > 100 then Rate := 100;
+    Project := GetWorkspace.DM_FocusedProject;
+    Exporter.SetState_ExportComponentOptions(eBoard3DModelExportComponentOptions_AllComponents);
+    Exporter.SetState_ExportHolesOption(eBoard3DModelExportHolesOptions_AllHoles);
+    Exporter.SetState_ExportModelsOption(eBoard3DModelExportModelsOptions_AsStep);
+    Exporter.SetState_ExportCopperOption(eBoard3DModelExportCopperOptions_CopperNone);
+    Exporter.SetState_ComponentSuffixType(eBoard3DModelExportComponentSuffix_None);
+    Exporter.SetState_ExportFoldedBoard(LowerCase(Folded) = 'true');
+    Exporter.SetState_ExportFoldedBoardRate(Rate);
+    if FileExists(OutputPath) then DeleteFile(OutputPath);
+    Exporter.ExportBoard3DModel(OutputPath, eBoard3DModelExportFormat_Step, Board, Project);
+    Size := -1;
+    if FindFirst(OutputPath, faAnyFile, F) = 0 then
+    begin
+        Size := F.Size;
+        FindClose(F);
+    end;
+    Result := '{"success": ' + BoolToStr(Size > 0, True) + ', "path": ' + JSONStr(OutputPath) +
+              ', "size_bytes": ' + IntToStr(Size) +
+              ', "folded": ' + BoolToStr(Exporter.GetState_ExportFoldedBoard, True) +
+              ', "fold_rate": ' + IntToStr(Exporter.GetState_ExportFoldedBoardRate) + '}';
+    Result := StringReplace(Result, 'True', 'true', REPLACEALL);
+    Result := StringReplace(Result, 'False', 'false', REPLACEALL);
 end;
 
 // ---------------------------------------------------------------------------

@@ -173,6 +173,7 @@ begin
        (CommandName = 'set_board_outline') or
        (CommandName = 'set_pcb_regions') or
        (CommandName = 'draw_pcb_mechanical') or
+       (CommandName = 'export_board_3d_model') or
        (CommandName = 'update_pcb_from_project') or
        (CommandName = 'save_documents') then
     begin
