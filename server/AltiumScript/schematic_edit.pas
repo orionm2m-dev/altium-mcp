@@ -340,6 +340,43 @@ begin
     EditLib.SchIterator_Destroy(Iter);
 end;
 
+// Electrical type of one pin of a placed component. TypeName is a short name
+// (Input, IO, Output, OpenCollector, Passive, HiZ, OpenEmitter, Power) or the
+// eElectric... constant name the symbol tools use.
+function EditSetPinType(Comp: ISch_Component; PinNumber, TypeName: String): Boolean;
+var
+    Iter : ISch_Iterator;
+    Pin  : ISch_Pin;
+    T    : Integer;
+    Name : String;
+begin
+    Result := False;
+    Name := UpperCase(TypeName);
+    if Copy(Name, 1, 9) = 'EELECTRIC' then Name := Copy(Name, 10, Length(Name));
+    if Name = 'INPUT' then T := eElectricInput
+    else if Name = 'IO' then T := eElectricIO
+    else if Name = 'OUTPUT' then T := eElectricOutput
+    else if Name = 'OPENCOLLECTOR' then T := eElectricOpenCollector
+    else if Name = 'PASSIVE' then T := eElectricPassive
+    else if Name = 'HIZ' then T := eElectricHiZ
+    else if Name = 'OPENEMITTER' then T := eElectricOpenEmitter
+    else if Name = 'POWER' then T := eElectricPower
+    else Exit;
+    Iter := Comp.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(ePin));
+    Pin := Iter.FirstSchObject;
+    while Pin <> nil do
+    begin
+        if Pin.Designator = PinNumber then
+        begin
+            Pin.Electrical := T;
+            Result := True;
+        end;
+        Pin := Iter.NextSchObject;
+    end;
+    Comp.SchIterator_Destroy(Iter);
+end;
+
 function EditFindPart(Designator: String): ISch_Component;
 var
     Iter : ISch_Iterator;
@@ -801,6 +838,19 @@ begin
             else EditAddFootprint(Comp, GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3));
             EditCount('parts_updated');
         end;
+    end
+
+    // SET_PIN_TYPE|designator|pin|type
+    else if Kind = 'SET_PIN_TYPE' then
+    begin
+        Comp := EditFindPart(GetFieldFromPipeString(Rec, 1));
+        if Comp = nil then
+            EditWarn('SET_PIN_TYPE: designator not found ' + GetFieldFromPipeString(Rec, 1))
+        else if EditSetPinType(Comp, GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3)) then
+            EditCount('pins_retyped')
+        else
+            EditWarn('SET_PIN_TYPE: no such pin or type ' + GetFieldFromPipeString(Rec, 1) + '-' +
+                     GetFieldFromPipeString(Rec, 2) + ' ' + GetFieldFromPipeString(Rec, 3));
     end
 
     // DELETE_PART|designator
@@ -1401,11 +1451,11 @@ function CompileProjectReport(ProjectPath: String; OutPath: String; IncludePins:
 var
     Prj   : IProject;
     Doc   : IDocument;
-    Part, Pin, Viol;          // IPart / IPin / IViolation are not script type names
+    Part, Pin, Viol, MM, Msg; // IPart / IPin / IViolation are not script type names
     Compiled : Boolean;
-    Viols, Pins, Props : TStringList;
+    Viols, Msgs, Pins, Props : TStringList;
     OutList   : TStringList;
-    i, j, k : Integer;
+    i, j, k, Errors, Warnings : Integer;
 begin
     // DM_OpenProject on a missing path silently creates a new empty project.
     if not FileExists(ProjectPath) then
@@ -1421,10 +1471,35 @@ begin
         Exit;
     end;
     Prj.DM_SetAsCurrentProject;
+    // DM_Compile refreshes the nets but not DM_Violations: that list stays as
+    // the last validation left it (the one Altium ran when the project was
+    // opened), so a sheet edited since then keeps reporting what it used to.
+    // Altium's own Validate command is what re-runs the ERC on the sheets as
+    // they are now; it works on the current project.
+    MM := GetWorkspace.DM_MessagesManager;
+    MM.ClearMessages;
+    ResetParameters;
+    AddStringParameter('Action', 'Compile');
+    AddStringParameter('ObjectKind', 'Project');
+    RunProcess('WorkspaceManager:Compile');
     Compiled := Prj.DM_Compile;
 
     Viols := TStringList.Create;
+    Msgs := TStringList.Create;
     Pins := TStringList.Create;
+    // The Messages panel is what the validation just produced; DM_Violations
+    // is reported too, but it can lag behind until the project is reopened.
+    Errors := 0;
+    Warnings := 0;
+    for i := 0 to MM.MessagesCount - 1 do
+    begin
+        Msg := MM.Messages(i);
+        Msgs.Add('{"class": ' + JSONStr(Msg.MsgClass) + ', "text": ' + JSONStr(Msg.Text) +
+                 ', "document": ' + JSONStr(ExtractFileName(Msg.Document)) + '}');
+        // '[Error]' and '[Fatal Error]' both count as errors
+        if Pos('Error]', Msg.MsgClass) > 0 then Errors := Errors + 1
+        else if Pos('[Warning]', Msg.MsgClass) > 0 then Warnings := Warnings + 1;
+    end;
     for i := 0 to Prj.DM_ViolationCount - 1 do
     begin
         Viol := Prj.DM_Violations(i);
@@ -1452,6 +1527,10 @@ begin
     AddJSONProperty(Props, 'project', Prj.DM_ProjectFileName);
     AddJSONInteger(Props, 'logical_documents', Prj.DM_LogicalDocumentCount);
     AddJSONInteger(Props, 'physical_documents', Prj.DM_PhysicalDocumentCount);
+    AddJSONInteger(Props, 'errors', Errors);
+    AddJSONInteger(Props, 'warnings', Warnings);
+    AddJSONInteger(Props, 'message_count', MM.MessagesCount);
+    Props.Add(BuildJSONArray(Msgs, 'messages', 1));
     AddJSONInteger(Props, 'violation_count', Prj.DM_ViolationCount);
     Props.Add(BuildJSONArray(Viols, 'violations', 1));
     Props.Add(BuildJSONArray(Pins, 'pins', 1));
@@ -1459,9 +1538,11 @@ begin
     OutList.Text := BuildJSONObject(Props);
     OutList.SaveToFile(OutPath);
 
-    Result := '{"success": true, "compiled": ' + JSONBool(Compiled) + ', "violation_count": ' + IntToStr(Prj.DM_ViolationCount) +
+    Result := '{"success": true, "compiled": ' + JSONBool(Compiled) + ', "errors": ' + IntToStr(Errors) +
+              ', "warnings": ' + IntToStr(Warnings) + ', "message_count": ' + IntToStr(MM.MessagesCount) +
+              ', "violation_count": ' + IntToStr(Prj.DM_ViolationCount) +
               ', "pins": ' + IntToStr(Pins.Count) + ', "file": ' + JSONStr(OutPath) + '}';
-    OutList.Free; Props.Free; Viols.Free; Pins.Free;
+    OutList.Free; Props.Free; Viols.Free; Msgs.Free; Pins.Free;
 end;
 
 // ---------------------------------------------------------------------------

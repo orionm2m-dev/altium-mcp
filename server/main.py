@@ -1859,6 +1859,10 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
                                         datafile link; library = .PcbLib
                                         file name, empty = any project
                                         library)
+        SET_PIN_TYPE|designator|pin|type   electrical type of one pin of a
+                                        placed part: Input, IO, Output,
+                                        OpenCollector, Passive, HiZ,
+                                        OpenEmitter or Power
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new
@@ -2089,20 +2093,25 @@ async def get_schematic_sheet(ctx: Context, sheet_path: str) -> str:
 @mcp.tool()
 async def compile_project(ctx: Context, project_path: str, include_pins: bool = False) -> str:
     """
-    Compile a project and report its violations (ERC) and, optionally, the net
-    of every pin in the flattened design.
+    Validate a project and report what the check found and, optionally, the
+    net of every pin in the flattened design.
 
-    The violation list is Altium's own: level, kind ("Nets with no driving
-    source", ...), detail with the pins involved. include_pins gives the
-    verified netlist - the check that proves a wire or net label actually
-    connected what it was meant to.
+    The tool runs Altium's own Validate command, so the report is for the
+    sheets as they are now: messages[] is the Messages panel it filled (class
+    "[Error]" / "[Warning]" / "[Info]", text, document), errors and warnings
+    count them. violations[] is the project's DM_Violations list with level
+    and kind ("Nets with no driving source", ...); Altium refreshes that list
+    only when the project is opened, so after an edit it can lag behind the
+    messages. include_pins gives the verified netlist - the check that
+    proves a wire or net label actually connected what it was meant to.
 
     Args:
         project_path (str): Full path of the .PrjPcb (opened if needed).
         include_pins (bool): Also list designator / pin / net for every pin.
 
     Returns:
-        str: JSON with compiled, document counts, violations[] and pins[].
+        str: JSON with compiled, document counts, errors, warnings, messages[],
+             violations[] and pins[].
     """
     logger.info(f"compile_project {project_path}")
     if COMPILE_REPORT.exists():

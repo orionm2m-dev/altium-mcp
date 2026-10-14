@@ -533,17 +533,13 @@ end;
 
 // Get all available output job containers from the first open OutJob
 // TIniFile goes through the Windows private-profile API, which cannot read a
-// file on a network share such as \\server\share. Give it a local copy.
+// file on a network share such as \\server\share, nor on a drive letter
+// mapped to one. Every job file is read through a local copy.
 function OpenOutJobIni(OutJobPath: String; ROOT_DIR: String): TIniFile;
 var
     Lines : TStringList;
     LocalPath : String;
 begin
-    if Copy(OutJobPath, 1, 2) <> '\\' then
-    begin
-        Result := TIniFile.Create(OutJobPath);
-        Exit;
-    end;
     LocalPath := ROOT_DIR + 'outjob_copy.ini';
     Lines := TStringList.Create;
     try
