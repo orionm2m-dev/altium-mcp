@@ -21,7 +21,9 @@ try:
 except AttributeError:  # not Windows
     _user32 = None
 
-BM_CLICK = 0x00F5
+WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
+MK_LBUTTON = 0x0001
 ECO_TITLE = "Engineering Change Order"
 
 _EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
@@ -81,9 +83,10 @@ def _plain(caption: str) -> str:
 
 
 def find_button(hwnd, caption: str):
+    """A button of the window by caption; Altium's buttons are TXPBitBtn, TBitBtn or TButton."""
     want = _plain(caption)
     for child, cls, text in children(hwnd):
-        if "button" in cls.lower() and _plain(text) == want:
+        if ("button" in cls.lower() or "btn" in cls.lower()) and _plain(text) == want:
             return child
     return None
 
@@ -93,7 +96,14 @@ def is_enabled(hwnd) -> bool:
 
 
 def click(hwnd) -> None:
-    _user32.PostMessageW(hwnd, BM_CLICK, 0, 0)
+    """Press a button with a mouse-down / mouse-up at its centre. BM_CLICK is
+    not enough: Altium's TXPBitBtn is painted by the VCL, not a Windows button."""
+    rect = wintypes.RECT()
+    _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    at = ((rect.bottom - rect.top) // 2) << 16 | ((rect.right - rect.left) // 2)
+    _user32.PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, at)
+    time.sleep(0.05)
+    _user32.PostMessageW(hwnd, WM_LBUTTONUP, 0, at)
 
 
 class DialogDriver(threading.Thread):
@@ -115,16 +125,16 @@ class DialogDriver(threading.Thread):
         self.log = []
         self.seen = False
         self.done = False
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()  # not _stop: threading.Thread uses that name
 
     def _note(self, message: str) -> None:
         self.log.append(f"{time.strftime('%H:%M:%S')} {message}")
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def _wait_button(self, hwnd, caption: str, enabled: bool = True):
-        while not self._stop.is_set() and time.time() < self._deadline:
+        while not self._stop_event.is_set() and time.time() < self._deadline:
             if not _user32.IsWindow(hwnd):
                 return None
             button = find_button(hwnd, caption)
@@ -139,7 +149,7 @@ class DialogDriver(threading.Thread):
             return
         self._deadline = time.time() + self.timeout
         hwnd = None
-        while not self._stop.is_set() and time.time() < self._deadline:
+        while not self._stop_event.is_set() and time.time() < self._deadline:
             hwnd = find_window(self.title)
             if hwnd:
                 break
@@ -163,7 +173,7 @@ class DialogDriver(threading.Thread):
                 self._note(f'"{wait_for}" enabled')
         self.done = True
         # The window may outlive the last click for a moment; wait for it to go.
-        while not self._stop.is_set() and time.time() < self._deadline and _user32.IsWindow(hwnd):
+        while not self._stop_event.is_set() and time.time() < self._deadline and _user32.IsWindow(hwnd):
             time.sleep(self.poll)
         self._note(f'"{self.title}" closed')
 

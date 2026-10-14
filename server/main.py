@@ -1863,6 +1863,14 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
                                         placed part: Input, IO, Output,
                                         OpenCollector, Passive, HiZ,
                                         OpenEmitter or Power
+        FOOTPRINT_LINKS|[library]       make every PCBLIB model of every part
+                                        on the SHEET resolve through the
+                                        project libraries (clears
+                                        UseComponentLibrary and the link
+                                        locks, adds a datafile link to
+                                        library when there is none) - what
+                                        Design » Import Changes needs to add
+                                        the part to the board
         DELETE_PART|designator  DELETE_AT|kind|x|y  (kind: wire netlabel label
                                                       noerc junction port power)
         SHEETSYMBOL_RENAME|old|new
@@ -2323,27 +2331,30 @@ PCB_REGIONS_SPEC = EXCHANGE_DIR / "pcb_regions_spec.txt"
 
 
 @mcp.tool()
-async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, split_lines: list = None,
-                          regions: list = None, bending_lines: list = None) -> str:
+async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, regions: list = None,
+                          bending_lines: list = None) -> str:
     """
     Give a board its rigid-flex structure and save it: sub-stacks of the
-    layer stack, split lines that cut the outline into board regions, the
-    sub-stack of each region, and bending lines - what Board Planning Mode
-    does by hand. Coordinates are mm from the board origin. Run it after
-    set_pcb_layer_stack and set_board_outline; every part is optional, so a
-    later call can add bending lines alone. The report reads the structure
-    back from the board.
+    layer stack, board regions as polygons with the sub-stack of each, and
+    bending lines - what Board Planning Mode does by hand. Coordinates are
+    mm from the board origin. Run it after set_pcb_layer_stack and
+    set_board_outline; every part is optional, so a later call can add
+    bending lines alone. The report reads the structure back from the board.
+
+    The regions must tile the board outline (every point of the board in
+    exactly one region); the first region of the first call takes over the
+    single region a new board starts with, and a region named again is
+    reshaped. Split lines are not used: on Altium 26 the scripting call
+    that draws one leaves nothing behind.
 
     Args:
         pcb_path (str): Full path of the .PcbDoc (opened if needed).
         substacks (list): dicts with name, flex (bool) and layers - the
             names of the copper layers the sub-stack holds (omit for all).
-            An existing sub-stack of that name is updated.
-        split_lines (list): [[x1, y1, x2, y2], ...] lines from one outline
-            edge to another; the regions between them are rebuilt.
-        regions (list): dicts with name, at [x, y] (a point inside the
-            region) and substack (its name) - the region holding the point
-            gets the name and the sub-stack.
+            An existing sub-stack of that name is updated; the first
+            sub-stack of a new board takes over its unnamed one.
+        regions (list): dicts with name, polygon [[x, y], ...] (vertices in
+            order, at least three) and substack (its name).
         bending_lines (list): dicts with region, from [x, y], to [x, y],
             radius_mm (inner bend radius), angle_deg (fold angle, 90 for a
             right angle) and fold_index (order of folding, from 1).
@@ -2351,16 +2362,17 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, s
     Example:
         substacks=[{"name": "Rigid", "flex": False},
                    {"name": "Flex", "flex": True, "layers": ["L2", "L3"]}]
-        split_lines=[[7, 50.5, 17, 50.5], [7, 55.5, 17, 55.5]]
-        regions=[{"name": "MCU_RF", "at": [12, 25], "substack": "Rigid"},
-                 {"name": "F1", "at": [12, 53], "substack": "Flex"}]
+        regions=[{"name": "MCU_RF", "substack": "Rigid",
+                  "polygon": [[0, 0], [24, 0], [24, 50.5], [0, 50.5]]},
+                 {"name": "F1", "substack": "Flex",
+                  "polygon": [[7, 50.5], [17, 50.5], [17, 55.5], [7, 55.5]]}]
         bending_lines=[{"region": "F1", "from": [7, 53], "to": [17, 53],
                         "radius_mm": 1.9, "angle_deg": 90, "fold_index": 1}]
 
     Returns:
         str: JSON with substacks[] (name, is_flex, layers), regions[] (name,
-             substack, area_mm2, bending_lines), split and bending line
-             counts and warnings.
+             substack, area_mm2, bending_lines), the bending line count and
+             warnings.
     """
     logger.info(f"set_pcb_regions {pcb_path}")
     lines = [f"PCB|{pcb_path}"]
@@ -2370,12 +2382,12 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, s
             lines.append("SUBSTACK|{}|{}|{}".format(
                 _spec_field(s["name"]), "flex" if s.get("flex") else "rigid",
                 "*" if not names else ",".join(_spec_field(n).replace(",", " ") for n in names)))
-        for sl in split_lines or []:
-            lines.append("SPLIT|{}|{}|{}|{}".format(*[_spec_number(v, "split line") for v in sl[:4]]))
         for r in regions or []:
-            lines.append("REGION|{}|{}|{}|{}".format(
-                _spec_field(r["name"]), _spec_number(r["at"][0], "at x"), _spec_number(r["at"][1], "at y"),
-                _spec_field(r.get("substack", ""))))
+            if len(r["polygon"]) < 3:
+                raise ValueError(f"region {r['name']} needs at least three vertices")
+            lines.append("REGION|{}|{}|{}".format(
+                _spec_field(r["name"]), _spec_field(r.get("substack", "")),
+                ";".join("{},{}".format(_spec_number(pt[0], "x"), _spec_number(pt[1], "y")) for pt in r["polygon"])))
         for b in bending_lines or []:
             lines.append("BEND|{}|{}|{}|{}|{}|{}|{}|{}".format(
                 _spec_field(b["region"]), _spec_number(b["from"][0], "from x"), _spec_number(b["from"][1], "from y"),
@@ -2405,8 +2417,13 @@ async def update_pcb_from_project(ctx: Context, project_path: str, pcb_path: str
         pcb_path (str): Full path of the board, a document of that project.
         timeout_s (int): How long to wait for the ECO to run.
 
+    A part whose footprint model carries UseComponentLibrary (a symbol placed
+    from a SchLib) is skipped by the ECO without a message; run
+    edit_schematic_sheet with FOOTPRINT_LINKS on the sheets first.
+
     Returns:
-        str: JSON with components_before, components, nets and dialog_log.
+        str: JSON with components_before, components, nets, errors, the
+             error and warning messages of the run and dialog_log.
     """
     logger.info(f"update_pcb_from_project {pcb_path} from {project_path}")
     driver = dialogs.eco_driver(timeout=timeout_s)

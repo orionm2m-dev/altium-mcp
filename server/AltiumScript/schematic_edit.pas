@@ -721,6 +721,55 @@ begin
     EditSheet.SchIterator_Destroy(Iter);
 end;
 
+// FOOTPRINT_LINKS|[library] : make every PCBLIB model of every part on the
+// SHEET resolve through the project libraries. A part placed from a SchLib
+// carries its model with UseComponentLibrary = True and locked links, which
+// sends Altium to the symbol's library for the footprint; the ECO of Design
+// » Import Changes then adds nothing for the part, silently. The flag is
+// cleared, the locks released and a model without a datafile link gets one
+// to LibName (a .PcbLib file name; empty = any library of the project).
+procedure EditFootprintLinks(LibName: String);   // 'library' is a reserved word
+var
+    Iter, ImplIter : ISch_Iterator;
+    Comp : ISch_Component;
+    Impl : ISch_Implementation;
+begin
+    if EditSheet = nil then
+    begin
+        EditWarn('FOOTPRINT_LINKS before any SHEET');
+        Exit;
+    end;
+    Iter := EditSheet.SchIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Comp := Iter.FirstSchObject;
+    while Comp <> nil do
+    begin
+        ImplIter := Comp.SchIterator_Create;
+        ImplIter.AddFilter_ObjectSet(MkSet(eImplementation));
+        Impl := ImplIter.FirstSchObject;
+        while Impl <> nil do
+        begin
+            if UpperCase(Impl.ModelType) = 'PCBLIB' then
+            begin
+                if Impl.UseComponentLibrary or Impl.DatalinksLocked or Impl.DatabaseDatalinksLocked or
+                   (Impl.DatafileLinkCount = 0) then
+                begin
+                    Impl.UseComponentLibrary := False;
+                    Impl.DatalinksLocked := False;
+                    Impl.DatabaseDatalinksLocked := False;
+                    if Impl.DatafileLinkCount = 0 then
+                        Impl.AddDataFileLink(Impl.ModelName, LibName, 'PCBLIB');
+                    EditCount('footprint_links_fixed');
+                end;
+            end;
+            Impl := ImplIter.NextSchObject;
+        end;
+        Comp.SchIterator_Destroy(ImplIter);
+        Comp := Iter.NextSchObject;
+    end;
+    EditSheet.SchIterator_Destroy(Iter);
+end;
+
 procedure EditApplyRecord(Rec: String);
 var
     Kind : String;
@@ -759,6 +808,12 @@ begin
     if Kind = 'PROJECT' then
     begin
         EditOpenProject(GetFieldFromPipeString(Rec, 1));
+        Exit;
+    end;
+
+    if Kind = 'FOOTPRINT_LINKS' then
+    begin
+        EditFootprintLinks(GetFieldFromPipeString(Rec, 1));
         Exit;
     end;
 

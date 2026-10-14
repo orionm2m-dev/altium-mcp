@@ -485,7 +485,7 @@ var
     Board   : IPCB_Board;
     Seg     : TPolySegment;
     i       : Integer;
-    Rect    : TCoordRect;
+    MinX, MaxX, MinY, MaxY : Integer;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -544,11 +544,23 @@ begin
         Board.GraphicallyInvalidate;
         Board.ViewManager_FullUpdate;
         SaveBoardDocument(PcbPath);
-        Rect := Board.BoardOutline.BoundingRectangle;
+        // BoundingRectangle lags behind a rebuilt outline; the extent comes from the vertices.
+        Xs.Clear;
+        for i := 0 to Board.BoardOutline.PointCount - 1 do
+        begin
+            Seg := Board.BoardOutline.Segments[i];
+            if (i = 0) or (Seg.vx < MinX) then MinX := Seg.vx;
+            if (i = 0) or (Seg.vx > MaxX) then MaxX := Seg.vx;
+            if (i = 0) or (Seg.vy < MinY) then MinY := Seg.vy;
+            if (i = 0) or (Seg.vy > MaxY) then MaxY := Seg.vy;
+            Xs.Add('[' + PcbDocNum('0.###', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                   PcbDocNum('0.###', CoordToMMs(Seg.vy - Board.YOrigin)) + ']');
+        end;
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
                   ', "points": ' + IntToStr(Board.BoardOutline.PointCount) +
-                  ', "width_mm": ' + PcbDocNum('0.###', CoordToMMs(Rect.Right - Rect.Left)) +
-                  ', "height_mm": ' + PcbDocNum('0.###', CoordToMMs(Rect.Top - Rect.Bottom)) +
+                  ', ' + BuildJSONArray(Xs, 'vertices_mm') +
+                  ', "width_mm": ' + PcbDocNum('0.###', CoordToMMs(MaxX - MinX)) +
+                  ', "height_mm": ' + PcbDocNum('0.###', CoordToMMs(MaxY - MinY)) +
                   ', "origin_mm": [' + PcbDocNum('0.###', CoordToMMs(Board.XOrigin)) + ', ' +
                   PcbDocNum('0.###', CoordToMMs(Board.YOrigin)) + ']}';
     finally
@@ -589,7 +601,10 @@ function UpdatePcbFromProjectReport(ProjectPath, PcbPath: String): String;
 var
     Project : IProject;
     Board   : IPCB_Board;
-    Before  : Integer;
+    MM      : IDXPMessagesManager;
+    Msg     : IDXPMessage;
+    Msgs    : TStringList;
+    Before, Errors, i : Integer;
 begin
     Project := OpenProjectAtPath(ProjectPath);
     if Project = nil then
@@ -610,10 +625,27 @@ begin
     end;
     Before := CountBoardObjects(Board, eComponentObject);
     Project.DM_SetAsCurrentProject;
+    // The Messages panel receives what the ECO could not do (a footprint not
+    // found, a pin missing); cleared first so the report holds only this run.
+    MM := GetWorkspace.DM_MessagesManager;
+    MM.ClearMessages;
     ResetParameters;
     AddStringParameter('ObjectKind', 'Project');
     AddStringParameter('Action', 'UpdateMe');
     RunProcess('WorkspaceManager:Compare');
+    // The panel also lists every difference the comparison found (one line
+    // per component, pin and class member); only errors and warnings are
+    // reported, the rest is counted.
+    Msgs := TStringList.Create;
+    Errors := 0;
+    for i := 0 to MM.MessagesCount - 1 do
+    begin
+        Msg := MM.Messages(i);
+        if (Pos('Error]', Msg.MsgClass) > 0) or (Pos('[Warning]', Msg.MsgClass) > 0) then
+            Msgs.Add('{"class": ' + JSONStr(Msg.MsgClass) + ', "text": ' + JSONStr(Msg.Text) +
+                     ', "document": ' + JSONStr(ExtractFileName(Msg.Document)) + '}');
+        if Pos('Error]', Msg.MsgClass) > 0 then Errors := Errors + 1;
+    end;
     Board := OpenBoardAtPath(PcbPath);
     if Board = nil then
     begin
@@ -625,7 +657,10 @@ begin
     Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "project": ' + JSONStr(ProjectPath) +
               ', "components_before": ' + IntToStr(Before) +
               ', "components": ' + IntToStr(CountBoardObjects(Board, eComponentObject)) +
-              ', "nets": ' + IntToStr(CountBoardObjects(Board, eNetObject)) + '}';
+              ', "nets": ' + IntToStr(CountBoardObjects(Board, eNetObject)) +
+              ', "errors": ' + IntToStr(Errors) + ', "messages_total": ' + IntToStr(MM.MessagesCount) +
+              ', ' + BuildJSONArray(Msgs, 'messages') + '}';
+    Msgs.Free;
 end;
 
 // ---------------------------------------------------------------------------
@@ -636,9 +671,13 @@ end;
 // Spec:
 //   PCB|<path>
 //   SUBSTACK|<name>|<rigid|flex>|<copper layer names in it, comma separated; * = all>
-//   SPLIT|<x1>|<y1>|<x2>|<y2>              a split line across the outline (mm from the origin)
-//   REGION|<name>|<x>|<y>|<substack>       the region holding the point gets the name and sub-stack
+//   REGION|<name>|<substack>|<x1,y1;x2,y2;...>   a board region by its polygon (mm from the origin);
+//                                                the regions must tile the board outline
 //   BEND|<region>|<x1>|<y1>|<x2>|<y2>|<radius_mm>|<angle_deg>|<fold_index>
+//
+// Regions are given as polygons, not as split lines: on Altium 26 the split
+// line of IPCB_BoardOutline.CreateSplitLine leaves no split line behind. The
+// first REGION of a spec takes over the single region every board starts with.
 // ---------------------------------------------------------------------------
 
 function CoordPointMM(Board: IPCB_Board; XMm, YMm: Double): TCoordPoint;
@@ -657,18 +696,19 @@ begin
         if SameText(Master.Substacks[i].Name, Name) then Result := Master.Substacks[i];
 end;
 
+// Whether Name is one of the comma-separated names in List ('*' = every name).
+// Names may hold spaces, so the list is split on commas alone.
 function NameInList(Name, List: String): Boolean;
 var
-    Items : TStringList;
+    Piped : String;
     i     : Integer;
 begin
     Result := (List = '*');
     if Result then Exit;
-    Items := TStringList.Create;
-    Items.CommaText := List;
-    for i := 0 to Items.Count - 1 do
-        if SameText(Trim(Items[i]), Name) then Result := True;
-    Items.Free;
+    Piped := StringReplace(List, ',', '|', REPLACEALL);
+    for i := 0 to 63 do
+        if (GetFieldFromPipeString(Piped, i) <> '') and SameText(Trim(GetFieldFromPipeString(Piped, i)), Name) then
+            Result := True;
 end;
 
 function SubstackLayersJSON(Master: IPCB_MasterLayerStack; Sub: IPCB_LayerStack): String;
@@ -713,10 +753,27 @@ begin
                     ', "bending_lines": ' + IntToStr(R.BendingLinesCount) + '}');
     end;
     Result := BuildJSONArray(Subs, 'substacks') + ', ' + BuildJSONArray(Regions, 'regions') +
-              ', "split_lines": ' + IntToStr(Board.BoardOutline.GetState_SplitLineCount) +
               ', "bending_lines": ' + IntToStr(Board.BoardOutline.GetState_BendingLinesCount);
     Subs.Free;
     Regions.Free;
+end;
+
+// A contour (absolute coordinates) from 'x1,y1;x2,y2;...' in mm from the board origin.
+function ContourFromSpec(Board: IPCB_Board; Poly: String): IPCB_Contour;
+var
+    Pairs, Pair : String;
+    i : Integer;
+begin
+    Result := PCBServer.PCBContourFactory;
+    Pairs := StringReplace(Poly, ';', '|', REPLACEALL);
+    for i := 0 to 1023 do
+    begin
+        Pair := Trim(GetFieldFromPipeString(Pairs, i));
+        if Pair = '' then Break;
+        Pair := StringReplace(Pair, ',', '|', REPLACEALL);
+        Result.AddPoint(Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Pair, 0))),
+                        Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Pair, 1))));
+    end;
 end;
 
 function SetPcbRegionsReport(SpecPath: String): String;
@@ -725,10 +782,12 @@ var
     PcbPath, Key, Rec, Kind : String;
     Board   : IPCB_Board;
     Master  : IPCB_MasterLayerStack;
+    Manager : IPCB_BoardRegionsManager;
     Sub     : IPCB_LayerStack;
     L       : IPCB_LayerObject;
     R       : IPCB_BoardRegion;
-    i, Splits : Integer;
+    Contour : IPCB_Contour;
+    i, Regions : Integer;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -739,7 +798,7 @@ begin
     Spec.LoadFromFile(SpecPath);
     PcbDocWarnings := TStringList.Create;
     PcbPath := '';
-    Splits := 0;
+    Regions := 0;
     try
         for i := 0 to Spec.Count - 1 do
             if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
@@ -750,8 +809,9 @@ begin
             Exit;
         end;
         Master := Board.MasterLayerStack;
+        Manager := Board.GetState_BoardRegionManager;
         PCBServer.PreProcess;
-        // Sub-stacks first, then the cuts, then the regions the cuts made.
+        // Sub-stacks first, then the regions, then the bending lines of the regions.
         for i := 0 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
@@ -759,6 +819,10 @@ begin
             if Key = 'SUBSTACK' then
             begin
                 Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 1));
+                // A new board has one unnamed sub-stack; the first sub-stack of
+                // the spec takes it over instead of leaving it beside the others.
+                if (Sub = nil) and (Master.SubstackCount = 1) and (Master.Substacks[0].Name = 'Board Layer Stack') then
+                    Sub := Master.Substacks[0];
                 if Sub = nil then Sub := Master.CreateSubstack;
                 Sub.Name := GetFieldFromPipeString(Rec, 1);
                 Kind := LowerCase(GetFieldFromPipeString(Rec, 2));
@@ -771,39 +835,37 @@ begin
                     L := Master.Next(eLayerClass_Electrical, L);
                 end;
             end
-            else if Key = 'SPLIT' then
+            else if Key = 'REGION' then
             begin
-                Board.BoardOutline.CreateSplitLine(
-                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 1)), SafeStrToFloat(GetFieldFromPipeString(Rec, 2))),
-                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 3)), SafeStrToFloat(GetFieldFromPipeString(Rec, 4))));
-                Splits := Splits + 1;
+                // An existing region of that name is reshaped; the first new
+                // region of the spec takes over the single region of a new board.
+                R := Manager.GetProperty_BoardRegionByName(GetFieldFromPipeString(Rec, 1));
+                if (R = nil) and (Regions = 0) and (Manager.BoardRegionCount = 1) then
+                    R := Manager.BoardRegion[0];
+                if R = nil then R := Manager.CreateBoardRegion;
+                Regions := Regions + 1;
+                R.Name := GetFieldFromPipeString(Rec, 1);
+                Contour := ContourFromSpec(Board, GetFieldFromPipeString(Rec, 3));
+                if Contour.Count < 3 then
+                    PcbDocWarn('region ' + R.Name + ' needs at least three vertices')
+                else
+                    R.SetOutlineContour(Contour);
+                if GetFieldFromPipeString(Rec, 2) <> '' then
+                begin
+                    Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 2));
+                    if Sub = nil then PcbDocWarn('no sub-stack named ' + GetFieldFromPipeString(Rec, 2) + ' for region ' + R.Name)
+                    else R.LayerStack := Sub;
+                end;
             end;
         end;
-        if Splits > 0 then Board.RebuildSplitBoardRegions(True);
+        if Regions > 0 then Board.BoardOutline.InvalidateBoardRegions;
         for i := 0 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
             Key := GetFieldFromPipeString(Rec, 0);
-            if Key = 'REGION' then
+            if Key = 'BEND' then
             begin
-                R := Board.GetBoardRegionAtPoint(Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2))),
-                                                 Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3))));
-                if R = nil then
-                begin
-                    PcbDocWarn('no board region at the point of ' + Rec);
-                    Continue;
-                end;
-                R.Name := GetFieldFromPipeString(Rec, 1);
-                if GetFieldFromPipeString(Rec, 4) <> '' then
-                begin
-                    Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 4));
-                    if Sub = nil then PcbDocWarn('no sub-stack named ' + GetFieldFromPipeString(Rec, 4) + ' for region ' + R.Name)
-                    else R.LayerStack := Sub;
-                end;
-            end
-            else if Key = 'BEND' then
-            begin
-                R := Board.GetState_BoardRegionManager.GetProperty_BoardRegionByName(GetFieldFromPipeString(Rec, 1));
+                R := Manager.GetProperty_BoardRegionByName(GetFieldFromPipeString(Rec, 1));
                 if R = nil then
                 begin
                     PcbDocWarn('no board region named ' + GetFieldFromPipeString(Rec, 1) + ' for ' + Rec);
