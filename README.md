@@ -170,6 +170,7 @@ python -m unittest discover -s server/tests -p test_step_export.py -v
 - `create_pcb_document`: Create a `.PcbDoc` under a path and add it to a project (or add an existing board), with the display unit set - the first step of a board built by data.
 - `set_pcb_layer_stack`: Set the copper layers and dielectrics of a board top to bottom from a list (names, copper thickness, core / prepreg under each layer, solder masks); mid layers are added or removed to match the count. The report reads the stack back from the board; rigid-flex sub-stacks are reported, not edited.
 - `set_board_outline`: Redefine the board shape as a polygon of straight edges in mm, setting the board origin on request.
+- `set_pcb_regions`: The rigid-flex structure of a board: sub-stacks of the layer stack (rigid or flex, with the copper layers each holds), split lines that cut the outline into board regions, the sub-stack of each region and its bending lines (radius, angle, fold order) - what Board Planning Mode does by hand.
 - `update_pcb_from_project`: Design » Import Changes From <project> - Altium's own ECO brings the components and nets of the compiled schematics onto the board. The Engineering Change Order dialog the command opens is answered by the server (Execute Changes, then Close), so every change it lists is executed; the dialog log is part of the report.
 
 ### Multi-board Design

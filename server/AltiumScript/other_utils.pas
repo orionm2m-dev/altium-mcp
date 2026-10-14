@@ -171,6 +171,7 @@ begin
        (CommandName = 'create_pcb_document') or
        (CommandName = 'set_pcb_layer_stack') or
        (CommandName = 'set_board_outline') or
+       (CommandName = 'set_pcb_regions') or
        (CommandName = 'update_pcb_from_project') or
        (CommandName = 'save_documents') then
     begin

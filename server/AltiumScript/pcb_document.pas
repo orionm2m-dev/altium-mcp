@@ -5,6 +5,8 @@
 //   * set_pcb_layer_stack     - the copper layers and dielectrics of a board from
 //                               a spec file, top to bottom
 //   * set_board_outline       - the board shape from a list of vertices (mm)
+//   * set_pcb_regions         - sub-stacks, split lines, board regions and
+//                               bending lines of a rigid-flex board
 //   * update_pcb_from_project - Design » Import Changes From <project>: the ECO
 //                               that brings the components and nets of the
 //                               schematics onto the board
@@ -563,4 +565,206 @@ begin
               ', "components_before": ' + IntToStr(Before) +
               ', "components": ' + IntToStr(CountBoardObjects(Board, eComponentObject)) +
               ', "nets": ' + IntToStr(CountBoardObjects(Board, eNetObject)) + '}';
+end;
+
+// ---------------------------------------------------------------------------
+// set_pcb_regions: the rigid-flex structure of a board - sub-stacks of the
+// layer stack, split lines that cut the outline into board regions, the
+// sub-stack of each region and its bending lines.
+//
+// Spec:
+//   PCB|<path>
+//   SUBSTACK|<name>|<rigid|flex>|<copper layer names in it, comma separated; * = all>
+//   SPLIT|<x1>|<y1>|<x2>|<y2>              a split line across the outline (mm from the origin)
+//   REGION|<name>|<x>|<y>|<substack>       the region holding the point gets the name and sub-stack
+//   BEND|<region>|<x1>|<y1>|<x2>|<y2>|<radius_mm>|<angle_deg>|<fold_index>
+// ---------------------------------------------------------------------------
+
+function CoordPointMM(Board: IPCB_Board; XMm, YMm: Double): TCoordPoint;
+begin
+    Result := TCoordPoint;
+    Result.x := Board.XOrigin + MMsToCoord(XMm);
+    Result.y := Board.YOrigin + MMsToCoord(YMm);
+end;
+
+function FindSubstack(Master: IPCB_MasterLayerStack; Name: String): IPCB_LayerStack;
+var
+    i : Integer;
+begin
+    Result := nil;
+    for i := 0 to Master.SubstackCount - 1 do
+        if SameText(Master.Substacks[i].Name, Name) then Result := Master.Substacks[i];
+end;
+
+function NameInList(Name, List: String): Boolean;
+var
+    Items : TStringList;
+    i     : Integer;
+begin
+    Result := (List = '*');
+    if Result then Exit;
+    Items := TStringList.Create;
+    Items.CommaText := List;
+    for i := 0 to Items.Count - 1 do
+        if SameText(Trim(Items[i]), Name) then Result := True;
+    Items.Free;
+end;
+
+function SubstackLayersJSON(Master: IPCB_MasterLayerStack; Sub: IPCB_LayerStack): String;
+var
+    L     : IPCB_LayerObject;
+    Names : TStringList;
+begin
+    Names := TStringList.Create;
+    L := Master.First(eLayerClass_Electrical);
+    while L <> nil do
+    begin
+        if Sub.LayerEnabled(L) then Names.Add(JSONStr(L.Name));
+        L := Master.Next(eLayerClass_Electrical, L);
+    end;
+    Result := BuildJSONArray(Names, 'layers');
+    Names.Free;
+end;
+
+function RegionsJSON(Board: IPCB_Board): String;
+var
+    Master  : IPCB_MasterLayerStack;
+    Manager : IPCB_BoardRegionsManager;
+    R       : IPCB_BoardRegion;
+    Subs, Regions : TStringList;
+    i       : Integer;
+    SubName : String;
+begin
+    Subs := TStringList.Create;
+    Regions := TStringList.Create;
+    Master := Board.MasterLayerStack;
+    for i := 0 to Master.SubstackCount - 1 do
+        Subs.Add('{"name": ' + JSONStr(Master.Substacks[i].Name) + ', "is_flex": ' + JSONBool(Master.Substacks[i].IsFlex) +
+                 ', ' + SubstackLayersJSON(Master, Master.Substacks[i]) + '}');
+    Manager := Board.GetState_BoardRegionManager;
+    for i := 0 to Manager.BoardRegionCount - 1 do
+    begin
+        R := Manager.BoardRegion[i];
+        SubName := '';
+        if R.LayerStack <> nil then SubName := R.LayerStack.Name;
+        Regions.Add('{"name": ' + JSONStr(R.Name) + ', "substack": ' + JSONStr(SubName) +
+                    ', "area_mm2": ' + PcbDocNum('0.#', R.Area * 0.0254 * 0.0254 / 100000000) +
+                    ', "bending_lines": ' + IntToStr(R.BendingLinesCount) + '}');
+    end;
+    Result := BuildJSONArray(Subs, 'substacks') + ', ' + BuildJSONArray(Regions, 'regions') +
+              ', "split_lines": ' + IntToStr(Board.BoardOutline.GetState_SplitLineCount) +
+              ', "bending_lines": ' + IntToStr(Board.BoardOutline.GetState_BendingLinesCount);
+    Subs.Free;
+    Regions.Free;
+end;
+
+function SetPcbRegionsReport(SpecPath: String): String;
+var
+    Spec    : TStringList;
+    PcbPath, Key, Rec, Kind : String;
+    Board   : IPCB_Board;
+    Master  : IPCB_MasterLayerStack;
+    Sub     : IPCB_LayerStack;
+    L       : IPCB_LayerObject;
+    R       : IPCB_BoardRegion;
+    i, Splits : Integer;
+begin
+    if not FileExists(SpecPath) then
+    begin
+        Result := PcbDocError('spec file not found: ' + SpecPath);
+        Exit;
+    end;
+    Spec := TStringList.Create;
+    Spec.LoadFromFile(SpecPath);
+    PcbDocWarnings := TStringList.Create;
+    PcbPath := '';
+    Splits := 0;
+    try
+        for i := 0 to Spec.Count - 1 do
+            if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
+        Board := OpenBoardAtPath(PcbPath);
+        if Board = nil then
+        begin
+            Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+            Exit;
+        end;
+        Master := Board.MasterLayerStack;
+        PCBServer.PreProcess;
+        // Sub-stacks first, then the cuts, then the regions the cuts made.
+        for i := 0 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i];
+            Key := GetFieldFromPipeString(Rec, 0);
+            if Key = 'SUBSTACK' then
+            begin
+                Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 1));
+                if Sub = nil then Sub := Master.CreateSubstack;
+                Sub.Name := GetFieldFromPipeString(Rec, 1);
+                Kind := LowerCase(GetFieldFromPipeString(Rec, 2));
+                Sub.IsFlex := (Kind = 'flex');
+                L := Master.First(eLayerClass_Electrical);
+                while L <> nil do
+                begin
+                    if NameInList(L.Name, GetFieldFromPipeString(Rec, 3)) then Master.EnableLayer(Sub, L)
+                    else Master.DisableLayer(Sub, L);
+                    L := Master.Next(eLayerClass_Electrical, L);
+                end;
+            end
+            else if Key = 'SPLIT' then
+            begin
+                Board.BoardOutline.CreateSplitLine(
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 1)), SafeStrToFloat(GetFieldFromPipeString(Rec, 2))),
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 3)), SafeStrToFloat(GetFieldFromPipeString(Rec, 4))));
+                Splits := Splits + 1;
+            end;
+        end;
+        if Splits > 0 then Board.RebuildSplitBoardRegions(True);
+        for i := 0 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i];
+            Key := GetFieldFromPipeString(Rec, 0);
+            if Key = 'REGION' then
+            begin
+                R := Board.GetBoardRegionAtPoint(Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 2))),
+                                                 Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3))));
+                if R = nil then
+                begin
+                    PcbDocWarn('no board region at the point of ' + Rec);
+                    Continue;
+                end;
+                R.Name := GetFieldFromPipeString(Rec, 1);
+                if GetFieldFromPipeString(Rec, 4) <> '' then
+                begin
+                    Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 4));
+                    if Sub = nil then PcbDocWarn('no sub-stack named ' + GetFieldFromPipeString(Rec, 4) + ' for region ' + R.Name)
+                    else R.LayerStack := Sub;
+                end;
+            end
+            else if Key = 'BEND' then
+            begin
+                R := Board.GetState_BoardRegionManager.GetProperty_BoardRegionByName(GetFieldFromPipeString(Rec, 1));
+                if R = nil then
+                begin
+                    PcbDocWarn('no board region named ' + GetFieldFromPipeString(Rec, 1) + ' for ' + Rec);
+                    Continue;
+                end;
+                R.AddBendingLine(
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 2)), SafeStrToFloat(GetFieldFromPipeString(Rec, 3))),
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Rec, 4)), SafeStrToFloat(GetFieldFromPipeString(Rec, 5))),
+                    StrToInt(GetFieldFromPipeString(Rec, 8)),
+                    MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 6))),
+                    SafeStrToFloat(GetFieldFromPipeString(Rec, 7)));
+            end;
+        end;
+        PCBServer.PostProcess;
+        Board.GraphicallyInvalidate;
+        Board.ViewManager_FullUpdate;
+        SaveBoardDocument(PcbPath);
+        Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', ' + RegionsJSON(Board) +
+                  ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
+    finally
+        Spec.Free;
+        PcbDocWarnings.Free;
+        PcbDocWarnings := nil;
+    end;
 end;

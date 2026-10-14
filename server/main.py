@@ -2319,6 +2319,76 @@ async def set_board_outline(ctx: Context, pcb_path: str, points: list, origin: l
     return _script_result(response)
 
 
+PCB_REGIONS_SPEC = EXCHANGE_DIR / "pcb_regions_spec.txt"
+
+
+@mcp.tool()
+async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, split_lines: list = None,
+                          regions: list = None, bending_lines: list = None) -> str:
+    """
+    Give a board its rigid-flex structure and save it: sub-stacks of the
+    layer stack, split lines that cut the outline into board regions, the
+    sub-stack of each region, and bending lines - what Board Planning Mode
+    does by hand. Coordinates are mm from the board origin. Run it after
+    set_pcb_layer_stack and set_board_outline; every part is optional, so a
+    later call can add bending lines alone. The report reads the structure
+    back from the board.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        substacks (list): dicts with name, flex (bool) and layers - the
+            names of the copper layers the sub-stack holds (omit for all).
+            An existing sub-stack of that name is updated.
+        split_lines (list): [[x1, y1, x2, y2], ...] lines from one outline
+            edge to another; the regions between them are rebuilt.
+        regions (list): dicts with name, at [x, y] (a point inside the
+            region) and substack (its name) - the region holding the point
+            gets the name and the sub-stack.
+        bending_lines (list): dicts with region, from [x, y], to [x, y],
+            radius_mm (inner bend radius), angle_deg (fold angle, 90 for a
+            right angle) and fold_index (order of folding, from 1).
+
+    Example:
+        substacks=[{"name": "Rigid", "flex": False},
+                   {"name": "Flex", "flex": True, "layers": ["L2", "L3"]}]
+        split_lines=[[7, 50.5, 17, 50.5], [7, 55.5, 17, 55.5]]
+        regions=[{"name": "MCU_RF", "at": [12, 25], "substack": "Rigid"},
+                 {"name": "F1", "at": [12, 53], "substack": "Flex"}]
+        bending_lines=[{"region": "F1", "from": [7, 53], "to": [17, 53],
+                        "radius_mm": 1.9, "angle_deg": 90, "fold_index": 1}]
+
+    Returns:
+        str: JSON with substacks[] (name, is_flex, layers), regions[] (name,
+             substack, area_mm2, bending_lines), split and bending line
+             counts and warnings.
+    """
+    logger.info(f"set_pcb_regions {pcb_path}")
+    lines = [f"PCB|{pcb_path}"]
+    try:
+        for s in substacks or []:
+            names = s.get("layers")
+            lines.append("SUBSTACK|{}|{}|{}".format(
+                _spec_field(s["name"]), "flex" if s.get("flex") else "rigid",
+                "*" if not names else ",".join(_spec_field(n).replace(",", " ") for n in names)))
+        for sl in split_lines or []:
+            lines.append("SPLIT|{}|{}|{}|{}".format(*[_spec_number(v, "split line") for v in sl[:4]]))
+        for r in regions or []:
+            lines.append("REGION|{}|{}|{}|{}".format(
+                _spec_field(r["name"]), _spec_number(r["at"][0], "at x"), _spec_number(r["at"][1], "at y"),
+                _spec_field(r.get("substack", ""))))
+        for b in bending_lines or []:
+            lines.append("BEND|{}|{}|{}|{}|{}|{}|{}|{}".format(
+                _spec_field(b["region"]), _spec_number(b["from"][0], "from x"), _spec_number(b["from"][1], "from y"),
+                _spec_number(b["to"][0], "to x"), _spec_number(b["to"][1], "to y"),
+                _spec_number(b["radius_mm"], "radius_mm"), _spec_number(b.get("angle_deg", 90), "angle_deg"),
+                int(b.get("fold_index", 1))))
+    except (KeyError, IndexError, TypeError, ValueError) as e:
+        return json.dumps({"success": False, "error": f"bad region spec: {e}"})
+    PCB_REGIONS_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    response = await altium_bridge.execute_command("set_pcb_regions", {})
+    return _script_result(response)
+
+
 @mcp.tool()
 async def update_pcb_from_project(ctx: Context, project_path: str, pcb_path: str, timeout_s: int = 300) -> str:
     """
