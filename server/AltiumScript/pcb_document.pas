@@ -979,6 +979,7 @@ begin
                     ', "bending_lines": ' + IntToStr(R.BendingLinesCount) + '}');
     end;
     Result := BuildJSONArray(Subs, 'substacks') + ', ' + BuildJSONArray(Regions, 'regions') +
+              ', "split_lines": ' + IntToStr(Board.BoardOutline.GetState_SplitLineCount) +
               ', "bending_lines": ' + IntToStr(Board.BoardOutline.GetState_BendingLinesCount);
     Subs.Free;
     Regions.Free;
@@ -1002,6 +1003,28 @@ begin
     end;
 end;
 
+// Ray casting over the vertices of a contour; the coordinates are taken as
+// doubles so the products of board coordinates cannot overflow.
+function PointInContour(C: IPCB_Contour; X, Y: Integer): Boolean;
+var
+    i, j : Integer;
+    xi, yi, xj, yj, px, py : Double;
+begin
+    Result := False;
+    if C = nil then Exit;
+    px := X;
+    py := Y;
+    j := C.Count - 1;
+    for i := 0 to C.Count - 1 do
+    begin
+        xi := C.x[i]; yi := C.y[i];
+        xj := C.x[j]; yj := C.y[j];
+        if ((yi > py) <> (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi) then
+            Result := not Result;
+        j := i;
+    end;
+end;
+
 function SetPcbRegionsReport(SpecPath: String): String;
 var
     Spec    : TStringList;
@@ -1013,7 +1036,8 @@ var
     L       : IPCB_LayerObject;
     R       : IPCB_BoardRegion;
     Contour : IPCB_Contour;
-    i, Regions : Integer;
+    i, j, Regions, Splits : Integer;
+    Hit     : IPCB_BoardRegion;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -1025,6 +1049,7 @@ begin
     PcbDocWarnings := TStringList.Create;
     PcbPath := '';
     Regions := 0;
+    Splits := 0;
     try
         for i := 0 to Spec.Count - 1 do
             if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
@@ -1037,7 +1062,22 @@ begin
         Master := Board.MasterLayerStack;
         Manager := Board.GetState_BoardRegionManager;
         PCBServer.PreProcess;
-        // Sub-stacks first, then the regions, then the bending lines of the regions.
+        // Split lines first: Altium derives the board regions from them, with the
+        // arcs of the outline, once the board is asked to rebuild them.
+        for i := 0 to Spec.Count - 1 do
+            if GetFieldFromPipeString(Spec[i], 0) = 'SPLIT' then
+            begin
+                Board.BoardOutline.CreateSplitLine(
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Spec[i], 1)), SafeStrToFloat(GetFieldFromPipeString(Spec[i], 2))),
+                    CoordPointMM(Board, SafeStrToFloat(GetFieldFromPipeString(Spec[i], 3)), SafeStrToFloat(GetFieldFromPipeString(Spec[i], 4))));
+                Splits := Splits + 1;
+            end;
+        if Splits > 0 then
+        begin
+            Board.RebuildSplitBoardRegions(True);
+            Board.BoardOutline.InvalidateBoardRegions;
+        end;
+        // Sub-stacks, then the regions, then the bending lines of the regions.
         for i := 0 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
@@ -1081,6 +1121,29 @@ begin
                     Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 2));
                     if Sub = nil then PcbDocWarn('no sub-stack named ' + GetFieldFromPipeString(Rec, 2) + ' for region ' + R.Name)
                     else R.LayerStack := Sub;
+                end;
+            end
+            else if Key = 'REGION_AT' then
+            begin
+                // The region holding the point gets the name and the sub-stack.
+                Hit := nil;
+                for j := 0 to Manager.BoardRegionCount - 1 do
+                    if PointInContour(Manager.BoardRegion[j].MainContour,
+                                      Board.XOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 3))),
+                                      Board.YOrigin + MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Rec, 4)))) then
+                        Hit := Manager.BoardRegion[j];
+                if Hit = nil then
+                    PcbDocWarn('no board region holds the point of ' + Rec)
+                else
+                begin
+                    Hit.Name := GetFieldFromPipeString(Rec, 1);
+                    Regions := Regions + 1;
+                    if GetFieldFromPipeString(Rec, 2) <> '' then
+                    begin
+                        Sub := FindSubstack(Master, GetFieldFromPipeString(Rec, 2));
+                        if Sub = nil then PcbDocWarn('no sub-stack named ' + GetFieldFromPipeString(Rec, 2) + ' for region ' + Hit.Name)
+                        else Hit.LayerStack := Sub;
+                    end;
                 end;
             end;
         end;

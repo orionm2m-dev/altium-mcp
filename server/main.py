@@ -2431,8 +2431,8 @@ PCB_REGIONS_SPEC = EXCHANGE_DIR / "pcb_regions_spec.txt"
 
 
 @mcp.tool()
-async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, regions: list = None,
-                          bending_lines: list = None) -> str:
+async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, split_lines: list = None,
+                          regions: list = None, bending_lines: list = None) -> str:
     """
     Give a board its rigid-flex structure and save it: sub-stacks of the
     layer stack, board regions as polygons with the sub-stack of each, and
@@ -2441,11 +2441,12 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, r
     set_board_outline; every part is optional, so a later call can add
     bending lines alone. The report reads the structure back from the board.
 
-    The regions must tile the board outline (every point of the board in
-    exactly one region); the first region of the first call takes over the
-    single region a new board starts with, and a region named again is
-    reshaped. Split lines are not used: on Altium 26 the scripting call
-    that draws one leaves nothing behind.
+    Regions come from split lines: each line runs from one outline edge to
+    another across a rigid/flex transition, Altium rebuilds the regions
+    between them (keeping the arcs of the outline), and a region is then
+    named by a point inside it. A region given as a polygon instead is
+    reshaped by hand; the first polygon region of a new board takes over
+    its single region.
 
     Args:
         pcb_path (str): Full path of the .PcbDoc (opened if needed).
@@ -2453,8 +2454,11 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, r
             names of the copper layers the sub-stack holds (omit for all).
             An existing sub-stack of that name is updated; the first
             sub-stack of a new board takes over its unnamed one.
-        regions (list): dicts with name, polygon [[x, y], ...] (vertices in
-            order, at least three) and substack (its name).
+        split_lines (list): [[x1, y1, x2, y2], ...] lines from one outline
+            edge to another; the board regions are rebuilt from them.
+        regions (list): dicts with name, substack (its name) and either
+            at [x, y] (a point inside the region to name) or polygon
+            [[x, y], ...] (vertices in order, at least three) to reshape.
         bending_lines (list): dicts with region, from [x, y], to [x, y],
             radius_mm (inner bend radius), angle_deg (fold angle, 90 for a
             right angle) and fold_index (order of folding, from 1).
@@ -2462,17 +2466,16 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, r
     Example:
         substacks=[{"name": "Rigid", "flex": False},
                    {"name": "Flex", "flex": True, "layers": ["L2", "L3"]}]
-        regions=[{"name": "MCU_RF", "substack": "Rigid",
-                  "polygon": [[0, 0], [24, 0], [24, 50.5], [0, 50.5]]},
-                 {"name": "F1", "substack": "Flex",
-                  "polygon": [[7, 50.5], [17, 50.5], [17, 55.5], [7, 55.5]]}]
+        split_lines=[[7, 50.5, 17, 50.5], [7, 55.5, 17, 55.5]]
+        regions=[{"name": "MCU_RF", "substack": "Rigid", "at": [12, 25]},
+                 {"name": "F1", "substack": "Flex", "at": [12, 53]}]
         bending_lines=[{"region": "F1", "from": [7, 53], "to": [17, 53],
                         "radius_mm": 1.9, "angle_deg": 90, "fold_index": 1}]
 
     Returns:
         str: JSON with substacks[] (name, is_flex, layers), regions[] (name,
-             substack, area_mm2, bending_lines), the bending line count and
-             warnings.
+             substack, area_mm2, bending_lines), the split and bending line
+             counts and warnings.
     """
     logger.info(f"set_pcb_regions {pcb_path}")
     lines = [f"PCB|{pcb_path}"]
@@ -2482,7 +2485,14 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, r
             lines.append("SUBSTACK|{}|{}|{}".format(
                 _spec_field(s["name"]), "flex" if s.get("flex") else "rigid",
                 "*" if not names else ",".join(_spec_field(n).replace(",", " ") for n in names)))
+        for s in split_lines or []:
+            lines.append("SPLIT|{}|{}|{}|{}".format(*(_spec_number(v, "split line") for v in s[:4])))
         for r in regions or []:
+            if "at" in r:
+                lines.append("REGION_AT|{}|{}|{}|{}".format(
+                    _spec_field(r["name"]), _spec_field(r.get("substack", "")),
+                    _spec_number(r["at"][0], "at x"), _spec_number(r["at"][1], "at y")))
+                continue
             if len(r["polygon"]) < 3:
                 raise ValueError(f"region {r['name']} needs at least three vertices")
             lines.append("REGION|{}|{}|{}".format(
