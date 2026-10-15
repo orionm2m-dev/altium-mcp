@@ -1163,6 +1163,8 @@ begin
                                                ParamValueOf('folded'), ParamValueOf('fold_rate'));
         'update_pcb_from_project':
             Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
+        'set_pcb_footprints':
+            Result := SetPcbFootprintsReport(ROOT_DIR + 'pcb_footprints_spec.txt');
         'export_pcb_step':
             Result := ExportPCBStepJob(ParamValueOf('project_path'), ParamValueOf('export_project_path'),
                                       ParamValueOf('pcb_path'),

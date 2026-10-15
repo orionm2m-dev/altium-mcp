@@ -1860,11 +1860,11 @@ async def edit_schematic_sheet(ctx: Context, spec_file: str) -> str:
         NOTE|x|y|text[|font_size[|font_name]]
         TEXT_REPLACE|old|new  TEXT_MOVE|text|x|y  TEXT_DELETE|text
         SET_PARAM|designator|name|value  SET_COMMENT|designator|text
-        SET_FOOTPRINT|designator|model[|library]   (renames the current
-                                        PCBLIB model or adds one with a
-                                        datafile link; library = .PcbLib
-                                        file name, empty = any project
-                                        library)
+        SET_FOOTPRINT|designator|model[|library]   (points the current
+                                        PCBLIB model and its datafile link
+                                        at model, or adds one; library =
+                                        .PcbLib file name, empty = any
+                                        project library)
         SET_PIN_TYPE|designator|pin|type   electrical type of one pin of a
                                         placed part: Input, IO, Output,
                                         OpenCollector, Passive, HiZ,
@@ -2451,6 +2451,41 @@ async def draw_pcb_mechanical(ctx: Context, pcb_path: str, layers: list = None, 
         return json.dumps({"success": False, "error": f"bad mechanical spec: {e}"})
     PCB_MECHANICAL_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
     response = await altium_bridge.execute_command("draw_pcb_mechanical", {})
+    return _script_result(response)
+
+
+PCB_FOOTPRINTS_SPEC = EXCHANGE_DIR / "pcb_footprints_spec.txt"
+
+
+@mcp.tool()
+async def set_pcb_footprints(ctx: Context, pcb_path: str, components: list, library: str = "") -> str:
+    """
+    Replace the footprint of placed components on a board with another
+    pattern of a PCB library and save the board: position, side, rotation,
+    designator, comment, pad nets (by pad name) and the link to the
+    schematic component are kept - the change Design » Import Changes makes
+    when the comparator reports a new footprint, for the cases where it does
+    not (a model renamed on the sheet after the first import).
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        components (list): dicts with designator and footprint (the pattern
+            name); an optional library overrides the default per part.
+        library (str): Full path of the .PcbLib holding the patterns.
+
+    Returns:
+        str: JSON with changed, components and warnings (a part not on the
+             board, a pattern not in the library, a part already on it).
+    """
+    lines = ["PCB|" + pcb_path]
+    try:
+        for c in components:
+            lines.append("FOOTPRINT|{}|{}|{}".format(c["designator"], c["footprint"], c.get("library", library)))
+    except (KeyError, TypeError) as e:
+        return json.dumps({"success": False, "error": f"bad footprint spec: {e}"})
+    PCB_FOOTPRINTS_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    logger.info(f"set_pcb_footprints {pcb_path}: {len(components)} parts")
+    response = await altium_bridge.execute_command("set_pcb_footprints", {}, timeout=600)
     return _script_result(response)
 
 

@@ -458,10 +458,20 @@ begin
         Found := Comp.AddSchImplementation;
         Found.ModelType := 'PCBLIB';
         Found.AddDataFileLink(Model, Lib, 'PCBLIB');
+    end
+    else
+    begin
+        // The datafile link names the footprint the ECO and the comparator
+        // resolve (its entity is not readable through the API), so the link
+        // is rebuilt: renaming the model alone leaves the board on the old one.
+        Found.ClearAllDatafileLinks;
+        Found.AddDataFileLink(Model, Lib, 'PCBLIB');
     end;
     Found.ModelName := Model;
     Found.IsCurrent := True;
     Found.UseComponentLibrary := False;
+    Found.DatalinksLocked := False;
+    Found.DatabaseDatalinksLocked := False;
 end;
 
 // Record the absolute connection point of every pin of a component.
