@@ -1443,8 +1443,10 @@ begin
         SetPadNet(Board, NewComp, PadNames[i], PadNets[i]);
     PadNames.Free;
     PadNets.Free;
+    // the old component is only taken off the board: destroying it while the
+    // undo buffer and the connectivity still refer to it crashed Altium 26
+    // during the next ECO
     Board.RemovePCBObject(Old);
-    PCBServer.DestroyPCBObject(Old);
     Result := True;
 end;
 
