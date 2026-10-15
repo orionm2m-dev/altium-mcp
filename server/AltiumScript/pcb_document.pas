@@ -1421,6 +1421,16 @@ begin
     NewComp.ChannelOffset := Old.ChannelOffset;
     NewComp.ComponentKind := Old.ComponentKind;
     Board.AddPCBObject(NewComp);
+    // the link to the schematic component once more, now that the part is
+    // on the board (set before the add it did not survive on Altium 26)
+    NewComp.SourceUniqueId := Old.SourceUniqueId;
+    NewComp.SourceDesignator := Old.SourceDesignator;
+    NewComp.SourceHierarchicalPath := Old.SourceHierarchicalPath;
+    NewComp.SourceLibReference := Old.SourceLibReference;
+    NewComp.SourceDescription := Old.SourceDescription;
+    NewComp.SourceComponentLibrary := Old.SourceComponentLibrary;
+    NewComp.SourceCompDesignItemID := Old.SourceCompDesignItemID;
+    NewComp.ChannelOffset := Old.ChannelOffset;
     NewComp.Layer := Old.Layer;
     NewComp.Rotation := Old.Rotation;
     NewComp.MoveToXY(Old.x, Old.y);
