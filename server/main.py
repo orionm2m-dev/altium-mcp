@@ -2468,12 +2468,13 @@ async def set_pcb_regions(ctx: Context, pcb_path: str, substacks: list = None, s
     set_board_outline; every part is optional, so a later call can add
     bending lines alone. The report reads the structure back from the board.
 
-    Regions come from split lines: each line runs from one outline edge to
-    another across a rigid/flex transition, Altium rebuilds the regions
-    between them (keeping the arcs of the outline), and a region is then
-    named by a point inside it. A region given as a polygon instead is
-    reshaped by hand; the first polygon region of a new board takes over
-    its single region.
+    Regions come from split lines drawn across the rigid/flex transitions;
+    a region is then named by a point inside it. On Altium 26 the scripting
+    calls that draw a split line or create a region leave nothing behind,
+    so draw the split lines in Board Planning Mode (Design > Define Split
+    Line) and let this tool name the regions, assign the sub-stacks and add
+    the bending lines. A region given as a polygon reshapes the single
+    region of a new board only.
 
     Args:
         pcb_path (str): Full path of the .PcbDoc (opened if needed).
