@@ -2470,7 +2470,9 @@ async def set_pcb_footprints(ctx: Context, pcb_path: str, components: list, libr
     Args:
         pcb_path (str): Full path of the .PcbDoc (opened if needed).
         components (list): dicts with designator and footprint (the pattern
-            name); an optional library overrides the default per part.
+            name); an optional library overrides the default per part, an
+            optional nets dict {pad: net} sets pad nets afterwards (a dict
+            without footprint only sets nets).
         library (str): Full path of the .PcbLib holding the patterns.
 
     Returns:
@@ -2480,7 +2482,10 @@ async def set_pcb_footprints(ctx: Context, pcb_path: str, components: list, libr
     lines = ["PCB|" + pcb_path]
     try:
         for c in components:
-            lines.append("FOOTPRINT|{}|{}|{}".format(c["designator"], c["footprint"], c.get("library", library)))
+            if c.get("footprint"):
+                lines.append("FOOTPRINT|{}|{}|{}".format(c["designator"], c["footprint"], c.get("library", library)))
+            for pad, net in (c.get("nets") or {}).items():
+                lines.append("NET|{}|{}|{}".format(c["designator"], pad, net))
     except (KeyError, TypeError) as e:
         return json.dumps({"success": False, "error": f"bad footprint spec: {e}"})
     PCB_FOOTPRINTS_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")

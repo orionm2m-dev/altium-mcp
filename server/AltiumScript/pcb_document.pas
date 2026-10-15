@@ -1287,6 +1287,7 @@ end;
 // Spec:
 //   PCB|<path>
 //   FOOTPRINT|<designator>|<pattern>|<.PcbLib path>
+//   NET|<designator>|<pad>|<net>        a pad net by name (empty = none)
 // ---------------------------------------------------------------------------
 
 function FindBoardComponent(Board: IPCB_Board; Designator: String): IPCB_Component;
@@ -1312,64 +1313,128 @@ begin
     Board.BoardIterator_Destroy(Iter);
 end;
 
-function ReplaceComponentFootprint(Board: IPCB_Board; Old: IPCB_Component; Pattern, LibPath: String): Boolean;
+function FindBoardNet(Board: IPCB_Board; NetName: String): IPCB_Net;
 var
-    New     : IPCB_Component;
-    Iter    : IPCB_GroupIterator;
-    Pad     : IPCB_Pad;
-    Nets    : TStringList;
-    i       : Integer;
-    NameOn, CommentOn : Boolean;
+    Iter : IPCB_BoardIterator;
+    Net  : IPCB_Net;
+begin
+    Result := nil;
+    Iter := Board.BoardIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eNetObject));
+    Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+    Iter.AddFilter_Method(eProcessAll);
+    Net := Iter.FirstPCBObject;
+    while Net <> nil do
+    begin
+        if Net.Name = NetName then
+        begin
+            Result := Net;
+            Break;
+        end;
+        Net := Iter.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(Iter);
+end;
+
+// The pad of a component by name gets the net (empty = none).
+function SetPadNet(Board: IPCB_Board; Comp: IPCB_Component; PadName, NetName: String): Boolean;
+var
+    Iter : IPCB_GroupIterator;
+    Pad  : IPCB_Pad;
 begin
     Result := False;
-    New := PCBServer.LoadCompFromLibrary(Pattern, LibPath);
-    if New = nil then Exit;
-    // nets of the old pads by pad name
-    Nets := TStringList.Create;
+    Iter := Comp.GroupIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+    Pad := Iter.FirstPCBObject;
+    while Pad <> nil do
+    begin
+        if Pad.Name = PadName then
+        begin
+            PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+            if NetName = '' then Pad.Net := nil
+            else Pad.Net := FindBoardNet(Board, NetName);
+            PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+            Result := True;
+            Break;
+        end;
+        Pad := Iter.NextPCBObject;
+    end;
+    Comp.GroupIterator_Destroy(Iter);
+end;
+
+// A new component is built from the primitives of the library pattern and
+// takes over position, side, rotation, designator, comment, the pad nets (by
+// pad name) and the link to the schematic component of the old one, which is
+// then removed - the change the ECO makes for a changed footprint.
+function ReplaceComponentFootprint(Board: IPCB_Board; Old: IPCB_Component; Pattern, LibPath: String): Boolean;
+var
+    Lib     : IPCB_Library;
+    LibComp : IPCB_LibComponent;
+    NewComp     : IPCB_Component;
+    Iter    : IPCB_GroupIterator;
+    Prim    : IPCB_Primitive;
+    Pad     : IPCB_Pad;
+    PadNames, PadNets : TStringList;
+    i       : Integer;
+begin
+    Result := False;
+    Lib := PCBServer.GetPCBLibraryByPath(LibPath);
+    if Lib = nil then Lib := PCBServer.LoadPCBLibraryByPath(LibPath);
+    if Lib = nil then Exit;
+    LibComp := Lib.GetComponentByName(Pattern);
+    if LibComp = nil then Exit;
+    PadNames := TStringList.Create;
+    PadNets := TStringList.Create;
     Iter := Old.GroupIterator_Create;
     Iter.AddFilter_ObjectSet(MkSet(ePadObject));
     Pad := Iter.FirstPCBObject;
     while Pad <> nil do
     begin
-        if Pad.Net <> nil then Nets.Add(Pad.Name + '=' + Pad.Net.Name);
+        if Pad.Net <> nil then
+        begin
+            PadNames.Add(Pad.Name);
+            PadNets.Add(Pad.Net.Name);
+        end;
         Pad := Iter.NextPCBObject;
     end;
     Old.GroupIterator_Destroy(Iter);
-    NameOn := Old.NameOn;
-    CommentOn := Old.CommentOn;
-    New.Name.Text := Old.Name.Text;
-    New.Comment.Text := Old.Comment.Text;
-    New.SourceDesignator := Old.SourceDesignator;
-    New.SourceUniqueId := Old.SourceUniqueId;
-    New.SourceHierarchicalPath := Old.SourceHierarchicalPath;
-    New.SourceLibReference := Old.SourceLibReference;
-    New.SourceDescription := Old.SourceDescription;
-    New.SourceComponentLibrary := Old.SourceComponentLibrary;
-    New.SourceCompDesignItemID := Old.SourceCompDesignItemID;
-    New.SourceFootprintLibrary := Old.SourceFootprintLibrary;
-    New.ChannelOffset := Old.ChannelOffset;
-    New.ComponentKind := Old.ComponentKind;
-    Board.AddPCBObject(New);
-    New.Layer := Old.Layer;
-    New.Rotation := Old.Rotation;
-    New.MoveToXY(Old.x, Old.y);
-    New.NameOn := NameOn;
-    New.CommentOn := CommentOn;
-    New.NameAutoPosition := Old.NameAutoPosition;
-    New.CommentAutoPosition := Old.CommentAutoPosition;
-    Iter := New.GroupIterator_Create;
-    Iter.AddFilter_ObjectSet(MkSet(ePadObject));
-    Pad := Iter.FirstPCBObject;
-    while Pad <> nil do
+    NewComp := PCBServer.PCBObjectFactory(eComponentObject, eNoDimension, eCreate_Default);
+    NewComp.Pattern := Pattern;
+    Iter := LibComp.GroupIterator_Create;
+    Prim := Iter.FirstPCBObject;
+    while Prim <> nil do
     begin
-        i := Nets.IndexOfName(Pad.Name);
-        if i >= 0 then Pad.Net := Board.FindNet(Nets.ValueFromIndex[i])
-        else Pad.Net := nil;
-        Pad := Iter.NextPCBObject;
+        NewComp.AddPCBObject(Prim.Replicate);
+        Prim := Iter.NextPCBObject;
     end;
-    New.GroupIterator_Destroy(Iter);
-    Nets.Free;
+    LibComp.GroupIterator_Destroy(Iter);
+    NewComp.Name.Text := Old.Name.Text;
+    NewComp.Comment.Text := Old.Comment.Text;
+    NewComp.SourceDesignator := Old.SourceDesignator;
+    NewComp.SourceUniqueId := Old.SourceUniqueId;
+    NewComp.SourceHierarchicalPath := Old.SourceHierarchicalPath;
+    NewComp.SourceLibReference := Old.SourceLibReference;
+    NewComp.SourceDescription := Old.SourceDescription;
+    NewComp.SourceComponentLibrary := Old.SourceComponentLibrary;
+    NewComp.SourceCompDesignItemID := Old.SourceCompDesignItemID;
+    NewComp.SourceFootprintLibrary := ExtractFileName(LibPath);
+    NewComp.ChannelOffset := Old.ChannelOffset;
+    NewComp.ComponentKind := Old.ComponentKind;
+    Board.AddPCBObject(NewComp);
+    NewComp.Layer := Old.Layer;
+    NewComp.Rotation := Old.Rotation;
+    NewComp.MoveToXY(Old.x, Old.y);
+    NewComp.NameOn := Old.NameOn;
+    NewComp.CommentOn := Old.CommentOn;
+    NewComp.NameAutoPosition := Old.NameAutoPosition;
+    NewComp.CommentAutoPosition := Old.CommentAutoPosition;
+    // one iterator per pad: a group iterator does not survive a net change
+    for i := 0 to PadNames.Count - 1 do
+        SetPadNet(Board, NewComp, PadNames[i], PadNets[i]);
+    PadNames.Free;
+    PadNets.Free;
     Board.RemovePCBObject(Old);
+    PCBServer.DestroyPCBObject(Old);
     Result := True;
 end;
 
@@ -1398,6 +1463,14 @@ begin
         for i := 0 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
+            if GetFieldFromPipeString(Rec, 0) = 'NET' then
+            begin
+                Comp := FindBoardComponent(Board, GetFieldFromPipeString(Rec, 1));
+                if Comp = nil then PcbDocWarn('no component ' + GetFieldFromPipeString(Rec, 1) + ' on the board')
+                else if SetPadNet(Board, Comp, GetFieldFromPipeString(Rec, 2), GetFieldFromPipeString(Rec, 3)) then Changed := Changed + 1
+                else PcbDocWarn('no pad ' + GetFieldFromPipeString(Rec, 2) + ' on ' + GetFieldFromPipeString(Rec, 1));
+                Continue;
+            end;
             if GetFieldFromPipeString(Rec, 0) <> 'FOOTPRINT' then Continue;
             Designator := GetFieldFromPipeString(Rec, 1);
             Pattern := GetFieldFromPipeString(Rec, 2);
@@ -1408,18 +1481,13 @@ begin
                 PcbDocWarn('no component ' + Designator + ' on the board');
                 Continue;
             end;
-            if Comp.Pattern = Pattern then
-            begin
-                PcbDocWarn(Designator + ' already has footprint ' + Pattern);
-                Continue;
-            end;
             if ReplaceComponentFootprint(Board, Comp, Pattern, LibPath) then Changed := Changed + 1
             else PcbDocWarn('footprint ' + Pattern + ' not found in ' + LibPath + ' for ' + Designator);
         end;
         PCBServer.PostProcess;
         Board.GraphicallyInvalidate;
         Board.ViewManager_FullUpdate;
-        SaveBoardDocument(PcbPath);
+        if Changed > 0 then SaveBoardDocument(PcbPath);
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "changed": ' + IntToStr(Changed) +
                   ', "components": ' + IntToStr(CountBoardObjects(Board, eComponentObject)) +
                   ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
