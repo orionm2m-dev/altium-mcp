@@ -1266,8 +1266,8 @@ var
     Board  : IPCB_Board;
     Iter   : IPCB_BoardIterator;
     V      : IPCB_Violation;
-    Items, Rules : TStringList;
-    RuleName, Key : String;
+    Items, Rules, Counts : TStringList;
+    RuleName : String;
     i, N, Waived, Kept : Integer;
     Ran    : Boolean;
 begin
@@ -1285,6 +1285,7 @@ begin
     end;
     Items := TStringList.Create;
     Rules := TStringList.Create;
+    Counts := TStringList.Create;
     N := 0;
     Waived := 0;
     Kept := 0;
@@ -1298,9 +1299,14 @@ begin
         RuleName := '';
         if V.Rule <> nil then RuleName := V.Rule.Name;
         if V.IsWaived then Waived := Waived + 1;
-        Key := RuleName;
-        i := Rules.IndexOf(Key);
-        if i < 0 then Rules.AddObject(Key, TObject(1)) else Rules.Objects[i] := TObject(Integer(Rules.Objects[i]) + 1);
+        i := Rules.IndexOf(RuleName);
+        if i < 0 then
+        begin
+            Rules.Add(RuleName);
+            Counts.Add('1');
+        end
+        else
+            Counts[i] := IntToStr(StrToInt(Counts[i]) + 1);
         if Kept < 500 then
         begin
             Items.Add('{"rule": ' + JSONStr(RuleName) + ', "description": ' + JSONStr(V.Description) +
@@ -1314,7 +1320,7 @@ begin
     end;
     Board.BoardIterator_Destroy(Iter);
     for i := 0 to Rules.Count - 1 do
-        Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + IntToStr(Integer(Rules.Objects[i])) + '}';
+        Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + Counts[i] + '}';
     Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "ran": ' + JSONBool(Ran) +
               ', "violations": ' + IntToStr(N) + ', "waived": ' + IntToStr(Waived) +
               ', "listed": ' + IntToStr(Kept) +
@@ -1322,6 +1328,7 @@ begin
               ', ' + BuildJSONArray(Items, 'violation_list') + '}';
     Items.Free;
     Rules.Free;
+    Counts.Free;
 end;
 
 // A contour (absolute coordinates) from 'x1,y1;x2,y2;...' in mm from the board origin.
