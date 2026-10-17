@@ -568,6 +568,105 @@ begin
     Result := N;
 end;
 
+// A vertex of an outline or a cutout for a report: [x, y] for a straight edge
+// to the next vertex, [x, y, "arc", cx, cy, r, a1, a2] for an arc - the
+// centre, radius and the angles (degrees) of the counter-clockwise run Altium
+// stores an arc as; coordinates in mm from the board origin.
+function OutlineSegmentJSON(Board: IPCB_Board; Seg: TPolySegment): String;
+begin
+    if Seg.Kind = ePolySegmentArc then
+        Result := '[' + PcbDocNum('0.####', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                  PcbDocNum('0.####', CoordToMMs(Seg.vy - Board.YOrigin)) + ', "arc", ' +
+                  PcbDocNum('0.####', CoordToMMs(Seg.cx - Board.XOrigin)) + ', ' +
+                  PcbDocNum('0.####', CoordToMMs(Seg.cy - Board.YOrigin)) + ', ' +
+                  PcbDocNum('0.####', CoordToMMs(Seg.Radius)) + ', ' +
+                  PcbDocNum('0.####', Seg.Angle1) + ', ' + PcbDocNum('0.####', Seg.Angle2) + ']'
+    else
+        Result := '[' + PcbDocNum('0.####', CoordToMMs(Seg.vx - Board.XOrigin)) + ', ' +
+                  PcbDocNum('0.####', CoordToMMs(Seg.vy - Board.YOrigin)) + ']';
+end;
+
+// Every board cutout region of the board as a JSON object: its index in the
+// board's order, bounding box and shape vertices (mm from the origin).
+function BoardCutoutsJSON(Board: IPCB_Board): String;
+var
+    Iter : IPCB_BoardIterator;
+    R    : IPCB_Region;
+    Cuts, Segs : TStringList;
+    Rect : TCoordRect;
+    i, N : Integer;
+begin
+    Cuts := TStringList.Create;
+    N := 0;
+    Iter := Board.BoardIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+    Iter.AddFilter_LayerSet(AllLayers);
+    Iter.AddFilter_Method(eProcessAll);
+    R := Iter.FirstPCBObject;
+    while R <> nil do
+    begin
+        if R.Kind = eRegionKind_BoardCutout then
+        begin
+            Segs := TStringList.Create;
+            for i := 0 to R.ShapeSegmentCount - 1 do
+                Segs.Add(OutlineSegmentJSON(Board, R.ShapeSegments[i]));
+            Rect := R.BoundingRectangle;
+            Cuts.Add('{"index": ' + IntToStr(N) +
+                     ', "bbox_mm": [' + PcbDocNum('0.####', CoordToMMs(Rect.Left - Board.XOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Bottom - Board.YOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Right - Board.XOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Top - Board.YOrigin)) + ']' +
+                     ', "shape_segments": ' + IntToStr(R.ShapeSegmentCount) +
+                     ', ' + BuildJSONArray(Segs, 'vertices_mm') + '}');
+            Segs.Free;
+            N := N + 1;
+        end;
+        R := Iter.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(Iter);
+    Result := '"cutouts": ' + IntToStr(N) + ', ' + BuildJSONArray(Cuts, 'cutout_list');
+    Cuts.Free;
+end;
+
+// Board cutout regions whose bounding box lies inside the rectangle (mm from
+// the origin) are removed, one at a time, like RemoveBoardCutouts.
+function RemoveBoardCutoutsWithin(Board: IPCB_Board; X1, Y1, X2, Y2: Double): Integer;
+var
+    Iter   : IPCB_BoardIterator;
+    R, Hit : IPCB_Region;
+    Rect   : TCoordRect;
+    L, B, Rt, T : TCoord;
+begin
+    Result := 0;
+    L := Board.XOrigin + MMsToCoord(X1);
+    B := Board.YOrigin + MMsToCoord(Y1);
+    Rt := Board.XOrigin + MMsToCoord(X2);
+    T := Board.YOrigin + MMsToCoord(Y2);
+    repeat
+        Hit := nil;
+        Iter := Board.BoardIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        R := Iter.FirstPCBObject;
+        while (R <> nil) and (Hit = nil) do
+        begin
+            if R.Kind = eRegionKind_BoardCutout then
+            begin
+                Rect := R.BoundingRectangle;
+                if (Rect.Left >= L) and (Rect.Right <= Rt) and (Rect.Bottom >= B) and (Rect.Top <= T) then Hit := R;
+            end;
+            R := Iter.NextPCBObject;
+        end;
+        Board.BoardIterator_Destroy(Iter);
+        if Hit <> nil then
+        begin
+            Board.RemovePCBObject(Hit);
+            Result := Result + 1;
+        end;
+    until Hit = nil;
+end;
+
 function SetBoardOutlineReport(SpecPath: String): String;
 var
     Spec    : TStringList;
@@ -578,6 +677,7 @@ var
     i, Arcs, Removed : Integer;
     MinX, MaxX, MinY, MaxY : Integer;
     ClearCutouts : Boolean;
+    WithinRec : String;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -591,6 +691,7 @@ begin
     PcbDocWarnings := TStringList.Create;
     PcbPath := '';
     OriginRec := '';
+    WithinRec := '';
     ClearCutouts := False;
     Arcs := 0;
     Removed := 0;
@@ -603,7 +704,8 @@ begin
             else if Key = 'ORIGIN' then OriginRec := Rec
             else if (Key = 'POINT') or (Key = 'ARC') then Verts.Add(Rec)
             else if Key = 'CUTOUT' then Cuts.Add(Rec)
-            else if Key = 'CLEAR_CUTOUTS' then ClearCutouts := True;
+            else if Key = 'CLEAR_CUTOUTS' then ClearCutouts := True
+            else if Key = 'REMOVE_CUTOUTS_WITHIN' then WithinRec := Rec;
         end;
         if (Verts.Count > 0) and (Verts.Count < 3) then
         begin
@@ -636,6 +738,10 @@ begin
             Board.BoardOutline.Rebuild;
         end;
         if ClearCutouts then Removed := RemoveBoardCutouts(Board);
+        if WithinRec <> '' then
+            Removed := Removed + RemoveBoardCutoutsWithin(Board,
+                SafeStrToFloat(GetFieldFromPipeString(WithinRec, 1)), SafeStrToFloat(GetFieldFromPipeString(WithinRec, 2)),
+                SafeStrToFloat(GetFieldFromPipeString(WithinRec, 3)), SafeStrToFloat(GetFieldFromPipeString(WithinRec, 4)));
         for i := 0 to Cuts.Count - 1 do
             if AddBoardCutout(Board, GetFieldFromPipeString(Cuts[i], 2)) = 0 then
                 PcbDocWarn('cutout ' + GetFieldFromPipeString(Cuts[i], 1) + ' needs at least three vertices');
@@ -671,6 +777,7 @@ begin
                   ', "height_mm": ' + PcbDocNum('0.###', CoordToMMs(MaxY - MinY)) +
                   ', "origin_mm": [' + PcbDocNum('0.###', CoordToMMs(Board.XOrigin)) + ', ' +
                   PcbDocNum('0.###', CoordToMMs(Board.YOrigin)) + ']' +
+                  ', ' + BoardCutoutsJSON(Board) +
                   ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
     finally
         Spec.Free;
@@ -1080,6 +1187,51 @@ begin
               ', "bending_lines": ' + IntToStr(Board.BoardOutline.GetState_BendingLinesCount);
     Subs.Free;
     Regions.Free;
+end;
+
+// The board shape read back without changing the board: origin, outline
+// vertices with their arcs, every board cutout and the rigid-flex structure.
+function GetBoardOutlineReport(PcbPath: String): String;
+var
+    Board : IPCB_Board;
+    Seg   : TPolySegment;
+    Verts : TStringList;
+    i, Arcs : Integer;
+    MinX, MaxX, MinY, MaxY : Integer;
+begin
+    Board := OpenBoardAtPath(PcbPath);
+    if Board = nil then
+    begin
+        Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+        Exit;
+    end;
+    Verts := TStringList.Create;
+    Arcs := 0;
+    MinX := 0;
+    MaxX := 0;
+    MinY := 0;
+    MaxY := 0;
+    for i := 0 to Board.BoardOutline.PointCount - 1 do
+    begin
+        Seg := Board.BoardOutline.Segments[i];
+        if Seg.Kind = ePolySegmentArc then Arcs := Arcs + 1;
+        if (i = 0) or (Seg.vx < MinX) then MinX := Seg.vx;
+        if (i = 0) or (Seg.vx > MaxX) then MaxX := Seg.vx;
+        if (i = 0) or (Seg.vy < MinY) then MinY := Seg.vy;
+        if (i = 0) or (Seg.vy > MaxY) then MaxY := Seg.vy;
+        Verts.Add(OutlineSegmentJSON(Board, Seg));
+    end;
+    Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
+              ', "origin_mm": [' + PcbDocNum('0.####', CoordToMMs(Board.XOrigin)) + ', ' +
+              PcbDocNum('0.####', CoordToMMs(Board.YOrigin)) + ']' +
+              ', "points": ' + IntToStr(Board.BoardOutline.PointCount) +
+              ', "arcs": ' + IntToStr(Arcs) +
+              ', ' + BuildJSONArray(Verts, 'vertices_mm') +
+              ', "width_mm": ' + PcbDocNum('0.####', CoordToMMs(MaxX - MinX)) +
+              ', "height_mm": ' + PcbDocNum('0.####', CoordToMMs(MaxY - MinY)) +
+              ', ' + BoardCutoutsJSON(Board) +
+              ', ' + RegionsJSON(Board) + '}';
+    Verts.Free;
 end;
 
 // A contour (absolute coordinates) from 'x1,y1;x2,y2;...' in mm from the board origin.

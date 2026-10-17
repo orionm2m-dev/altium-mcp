@@ -2322,7 +2322,8 @@ def _outline_vertex(pt, name: str) -> str:
 
 @mcp.tool()
 async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, origin: list = None,
-                            cutouts: list = None, clear_cutouts: bool = False) -> str:
+                            cutouts: list = None, clear_cutouts: bool = False,
+                            remove_cutouts_within: list = None) -> str:
     """
     Redefine the board shape as a closed outline of straight edges and arcs,
     in mm relative to the board origin, add board cutouts, and save the
@@ -2344,10 +2345,15 @@ async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, or
             vertex format) - each becomes a board cutout region through all
             layers, the way Design » Board Shape » Define Board Cutout does.
         clear_cutouts (bool): remove every existing board cutout first.
+        remove_cutouts_within (list, optional): [x1_mm, y1_mm, x2_mm, y2_mm] -
+            remove first the existing board cutouts whose bounding box lies
+            inside this rectangle, so the cutouts of one area can be
+            replaced while the others stay.
 
     Returns:
         str: JSON with points, arcs, cutouts added and removed, vertices_mm,
-             width_mm, height_mm, origin_mm and warnings.
+             width_mm, height_mm, origin_mm, the cutouts the board holds
+             afterwards (cutout_list) and warnings.
     """
     logger.info(f"set_board_outline {pcb_path}: {len(points or [])} points, {len(cutouts or [])} cutouts")
     lines = [f"PCB|{pcb_path}"]
@@ -2361,6 +2367,11 @@ async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, or
             lines.append(("ARC|" if fields.count("|") == 6 else "POINT|") + fields)
         if clear_cutouts:
             lines.append("CLEAR_CUTOUTS")
+        if remove_cutouts_within:
+            if len(remove_cutouts_within) != 4:
+                raise ValueError("remove_cutouts_within is [x1, y1, x2, y2]")
+            lines.append("REMOVE_CUTOUTS_WITHIN|" + "|".join(
+                _spec_number(v, "remove_cutouts_within") for v in remove_cutouts_within))
         for c in cutouts or []:
             if len(c["points"]) < 3:
                 raise ValueError(f"cutout {c.get('name', '?')} needs at least three vertices")
@@ -2372,6 +2383,59 @@ async def set_board_outline(ctx: Context, pcb_path: str, points: list = None, or
     PCB_OUTLINE_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
     response = await altium_bridge.execute_command("set_board_outline", {})
     return _script_result(response)
+
+
+def _vertex_from_report(v):
+    """A report vertex back in the set_board_outline format: [x, y], or for
+    [x, y, "arc", cx, cy, r, a1, a2] the arc as [x, y, cx, cy, r, sweep_deg]
+    with the sweep signed from the vertex (positive counter-clockwise)."""
+    if len(v) != 8 or v[2] != "arc":
+        return [float(v[0]), float(v[1])]
+    x, y, cx, cy, r, a1, a2 = (float(v[i]) for i in (0, 1, 3, 4, 5, 6, 7))
+    span = (a2 - a1) % 360.0 or 360.0
+    at_vertex = math.degrees(math.atan2(y - cy, x - cx)) % 360.0
+    from_a1 = min(abs(at_vertex - a1 % 360.0), 360.0 - abs(at_vertex - a1 % 360.0))
+    from_a2 = min(abs(at_vertex - a2 % 360.0), 360.0 - abs(at_vertex - a2 % 360.0))
+    return [x, y, cx, cy, r, span if from_a1 <= from_a2 else -span]
+
+
+@mcp.tool()
+async def get_board_outline(ctx: Context, pcb_path: str) -> str:
+    """
+    Read the board shape of a PCB back without changing it: the board
+    origin, the outline as vertices with analytic arcs, every board cutout
+    with its bounding box and shape vertices, and the rigid-flex structure
+    (sub-stacks, board regions, split and bending line counts). The vertex
+    format is the one set_board_outline takes, so the result can be edited
+    and written back; the angles Altium stores for each arc are kept in
+    *_raw lists.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+
+    Returns:
+        str: JSON with origin_mm, points, arcs, vertices_mm, vertices_raw,
+             width_mm, height_mm, cutouts, cutout_list[] (index, bbox_mm,
+             shape_segments, vertices_mm, vertices_raw), substacks[],
+             regions[], split_lines and bending_lines.
+    """
+    logger.info(f"get_board_outline {pcb_path}")
+    response = await altium_bridge.execute_command("get_board_outline", {"pcb_path": pcb_path})
+    if not response.get("success", False):
+        return json.dumps({"success": False, "error": response.get("error", "unknown error")})
+    result = response.get("result", {})
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            return result
+    if result.get("success"):
+        result["vertices_raw"] = result.get("vertices_mm", [])
+        result["vertices_mm"] = [_vertex_from_report(v) for v in result["vertices_raw"]]
+        for cut in result.get("cutout_list", []):
+            cut["vertices_raw"] = cut.get("vertices_mm", [])
+            cut["vertices_mm"] = [_vertex_from_report(v) for v in cut["vertices_raw"]]
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @mcp.tool()

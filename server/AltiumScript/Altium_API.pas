@@ -1154,6 +1154,8 @@ begin
             Result := SetPcbLayerStackReport(ROOT_DIR + 'pcb_stack_spec.txt');
         'set_board_outline':
             Result := SetBoardOutlineReport(ROOT_DIR + 'pcb_outline_spec.txt');
+        'get_board_outline':
+            Result := GetBoardOutlineReport(ParamValueOf('pcb_path'));
         'set_pcb_regions':
             Result := SetPcbRegionsReport(ROOT_DIR + 'pcb_regions_spec.txt');
         'draw_pcb_mechanical':
