@@ -736,6 +736,11 @@ begin
             end;
             Board.BoardOutline.Validate;
             Board.BoardOutline.Rebuild;
+            // The board regions of a rigid-flex board keep their old shape until
+            // they are rebuilt from the new outline.
+            Board.BoardOutline.RebuildRegion(True, False, False);
+            Board.RebuildSplitBoardRegions(True);
+            Board.BoardOutline.InvalidateBoardRegions;
         end;
         if ClearCutouts then Removed := RemoveBoardCutouts(Board);
         if WithinRec <> '' then
