@@ -1234,6 +1234,96 @@ begin
     Verts.Free;
 end;
 
+// A primitive of a violation for the report: its kind, the designator of the
+// component it belongs to (if any) and the centre of its bounding box (mm from
+// the board origin).
+function ViolationPrimitiveJSON(Board: IPCB_Board; P: IPCB_Primitive): String;
+var
+    Rect  : TCoordRect;
+    Owner : String;
+begin
+    if P = nil then
+    begin
+        Result := 'null';
+        Exit;
+    end;
+    Owner := '';
+    if P.InComponent then
+        if P.Component <> nil then Owner := P.Component.Name.Text;
+    Rect := P.BoundingRectangle;
+    Result := '{"kind": ' + JSONStr(P.ObjectIDString) + ', "component": ' + JSONStr(Owner) +
+              ', "layer": ' + JSONStr(Layer2String(P.Layer)) +
+              ', "at_mm": [' + PcbDocNum('0.###', CoordToMMs((Rect.Left + Rect.Right) / 2 - Board.XOrigin)) + ', ' +
+              PcbDocNum('0.###', CoordToMMs((Rect.Top + Rect.Bottom) / 2 - Board.YOrigin)) + ']}';
+end;
+
+// Tools > Design Rule Check > Run Design Rule Check as a batch, without the
+// dialog, then every violation left on the board: the rule, the description
+// Altium gives it, the two primitives and whether it is waived. With Run =
+// 'false' the violations already on the board are listed as they are.
+function RunPcbDrcReport(PcbPath, Run: String): String;
+var
+    Board  : IPCB_Board;
+    Iter   : IPCB_BoardIterator;
+    V      : IPCB_Violation;
+    Items, Rules : TStringList;
+    RuleName, Key : String;
+    i, N, Waived, Kept : Integer;
+    Ran    : Boolean;
+begin
+    Board := OpenBoardAtPath(PcbPath);
+    if Board = nil then
+    begin
+        Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+        Exit;
+    end;
+    Ran := False;
+    if LowerCase(Trim(Run)) <> 'false' then
+    begin
+        Board.RunBatchDesignRuleCheck;
+        Ran := True;
+    end;
+    Items := TStringList.Create;
+    Rules := TStringList.Create;
+    N := 0;
+    Waived := 0;
+    Kept := 0;
+    Iter := Board.BoardIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eViolationObject));
+    Iter.AddFilter_LayerSet(AllLayers);
+    Iter.AddFilter_Method(eProcessAll);
+    V := Iter.FirstPCBObject;
+    while V <> nil do
+    begin
+        RuleName := '';
+        if V.Rule <> nil then RuleName := V.Rule.Name;
+        if V.IsWaived then Waived := Waived + 1;
+        Key := RuleName;
+        i := Rules.IndexOf(Key);
+        if i < 0 then Rules.AddObject(Key, TObject(1)) else Rules.Objects[i] := TObject(Integer(Rules.Objects[i]) + 1);
+        if Kept < 500 then
+        begin
+            Items.Add('{"rule": ' + JSONStr(RuleName) + ', "description": ' + JSONStr(V.Description) +
+                      ', "waived": ' + JSONBool(V.IsWaived) +
+                      ', "primitive1": ' + ViolationPrimitiveJSON(Board, V.Primitive1) +
+                      ', "primitive2": ' + ViolationPrimitiveJSON(Board, V.Primitive2) + '}');
+            Kept := Kept + 1;
+        end;
+        N := N + 1;
+        V := Iter.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(Iter);
+    for i := 0 to Rules.Count - 1 do
+        Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + IntToStr(Integer(Rules.Objects[i])) + '}';
+    Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "ran": ' + JSONBool(Ran) +
+              ', "violations": ' + IntToStr(N) + ', "waived": ' + IntToStr(Waived) +
+              ', "listed": ' + IntToStr(Kept) +
+              ', ' + BuildJSONArray(Rules, 'by_rule') +
+              ', ' + BuildJSONArray(Items, 'violation_list') + '}';
+    Items.Free;
+    Rules.Free;
+end;
+
 // A contour (absolute coordinates) from 'x1,y1;x2,y2;...' in mm from the board origin.
 function ContourFromSpec(Board: IPCB_Board; Poly: String): IPCB_Contour;
 var

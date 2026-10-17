@@ -2439,6 +2439,39 @@ async def get_board_outline(ctx: Context, pcb_path: str) -> str:
 
 
 @mcp.tool()
+async def run_pcb_drc(ctx: Context, pcb_path: str, run: bool = True, timeout_s: int = 600) -> str:
+    """
+    Run the batch design rule check of a board (Tools » Design Rule Check »
+    Run, without the dialog) and list the violations it leaves on the board:
+    rule, Altium's description, the two primitives (kind, component, layer,
+    position in mm) and whether each is waived. With run false the
+    violations already on the board are listed as they are. The board is
+    not saved. Should Altium open its Design Rule Checker dialog instead of
+    running at once, the server presses Run Design Rule Check in it.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        run (bool): run the check first (default) or only list.
+        timeout_s (int): how long to wait for the check.
+
+    Returns:
+        str: JSON with ran, violations, waived, listed (at most 500 are
+             listed), by_rule[] (rule, count), violation_list[] and the
+             dialog log.
+    """
+    logger.info(f"run_pcb_drc {pcb_path} run={run}")
+    driver = dialogs.DialogDriver("Design Rule Checker", [("Run Design Rule Check...", None)], timeout=timeout_s)
+    driver.start()
+    try:
+        response = await altium_bridge.execute_command(
+            "run_pcb_drc", {"pcb_path": pcb_path, "run": "true" if run else "false"}, timeout=timeout_s + 30)
+    finally:
+        driver.stop()
+        driver.join(5)
+    return _script_result(response, {"dialog_seen": driver.seen, "dialog_log": driver.log})
+
+
+@mcp.tool()
 async def export_board_3d_model(ctx: Context, pcb_path: str, output_path: str, folded: bool = False,
                                 fold_rate: int = 100) -> str:
     """
