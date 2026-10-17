@@ -1340,6 +1340,293 @@ begin
     Counts.Free;
 end;
 
+// The design rule of the board with this name, or nil.
+function FindRuleByName(Board: IPCB_Board; Name: String): IPCB_Rule;
+var
+    Iter : IPCB_BoardIterator;
+    Rule : IPCB_Rule;
+begin
+    Result := nil;
+    Iter := Board.BoardIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+    Iter.AddFilter_LayerSet(AllLayers);
+    Iter.AddFilter_Method(eProcessAll);
+    Rule := Iter.FirstPCBObject;
+    while Rule <> nil do
+    begin
+        if Rule.Name = Name then
+        begin
+            Result := Rule;
+            Break;
+        end;
+        Rule := Iter.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(Iter);
+end;
+
+// A new rule of the kind the set_pcb_rules tool names, or nil for a kind it
+// does not know.
+function NewRuleOfKind(Kind: String): IPCB_Rule;
+begin
+    Result := nil;
+    if Kind = 'BoardOutlineClearance' then Result := PCBServer.PCBRuleFactory(eRule_BoardOutlineClearance)
+    else if Kind = 'Clearance' then Result := PCBServer.PCBRuleFactory(eRule_Clearance)
+    else if Kind = 'Width' then Result := PCBServer.PCBRuleFactory(eRule_MaxMinWidth)
+    else if Kind = 'RoutingViaStyle' then Result := PCBServer.PCBRuleFactory(eRule_RoutingViaStyle)
+    else if Kind = 'HoleSize' then Result := PCBServer.PCBRuleFactory(eRule_MaxMinHoleSize)
+    else if Kind = 'MinimumAnnularRing' then Result := PCBServer.PCBRuleFactory(eRule_MinimumAnnularRing)
+    else if Kind = 'MinimumSolderMaskSliver' then Result := PCBServer.PCBRuleFactory(eRule_MinimumSolderMaskSliver)
+    else if Kind = 'HoleToHoleClearance' then Result := PCBServer.PCBRuleFactory(eRule_HoleToHoleClearance)
+    else if Kind = 'SilkToSolderMaskClearance' then Result := PCBServer.PCBRuleFactory(eRule_SilkToSolderMaskClearance)
+    else if Kind = 'SilkToSilkClearance' then Result := PCBServer.PCBRuleFactory(eRule_SilkToSilkClearance)
+    else if Kind = 'ComponentClearance' then Result := PCBServer.PCBRuleFactory(eRule_ComponentClearance)
+    else if Kind = 'Height' then Result := PCBServer.PCBRuleFactory(eRule_MaxMinHeight)
+    else if Kind = 'SolderMaskExpansion' then Result := PCBServer.PCBRuleFactory(eRule_SolderMaskExpansion)
+    else if Kind = 'PasteMaskExpansion' then Result := PCBServer.PCBRuleFactory(eRule_PasteMaskExpansion);
+end;
+
+// The kind name the set_pcb_rules tool uses for an existing rule (empty for
+// a kind it does not set values of).
+function KindNameOf(Rule: IPCB_Rule): String;
+begin
+    Result := '';
+    if Rule.RuleKind = eRule_BoardOutlineClearance then Result := 'BoardOutlineClearance'
+    else if Rule.RuleKind = eRule_Clearance then Result := 'Clearance'
+    else if Rule.RuleKind = eRule_MaxMinWidth then Result := 'Width'
+    else if Rule.RuleKind = eRule_RoutingViaStyle then Result := 'RoutingViaStyle'
+    else if Rule.RuleKind = eRule_MaxMinHoleSize then Result := 'HoleSize'
+    else if Rule.RuleKind = eRule_MinimumAnnularRing then Result := 'MinimumAnnularRing'
+    else if Rule.RuleKind = eRule_MinimumSolderMaskSliver then Result := 'MinimumSolderMaskSliver'
+    else if Rule.RuleKind = eRule_HoleToHoleClearance then Result := 'HoleToHoleClearance'
+    else if Rule.RuleKind = eRule_SilkToSolderMaskClearance then Result := 'SilkToSolderMaskClearance'
+    else if Rule.RuleKind = eRule_SilkToSilkClearance then Result := 'SilkToSilkClearance'
+    else if Rule.RuleKind = eRule_ComponentClearance then Result := 'ComponentClearance'
+    else if Rule.RuleKind = eRule_MaxMinHeight then Result := 'Height'
+    else if Rule.RuleKind = eRule_SolderMaskExpansion then Result := 'SolderMaskExpansion'
+    else if Rule.RuleKind = eRule_PasteMaskExpansion then Result := 'PasteMaskExpansion';
+end;
+
+// Set the numbers of a rule from 'key=value;key=value' (mm) the way its kind
+// names them; the keys the kind has no use for are returned, space separated.
+function ApplyRuleValues(Rule: IPCB_Rule; Kind, Values: String): String;
+var
+    Rest, Item, Key, Val : String;
+    p, q  : Integer;
+    V     : TCoord;
+    Known : Boolean;
+begin
+    Result := '';
+    Rest := Values;
+    while Rest <> '' do
+    begin
+        p := Pos(';', Rest);
+        if p = 0 then
+        begin
+            Item := Rest;
+            Rest := '';
+        end
+        else
+        begin
+            Item := Copy(Rest, 1, p - 1);
+            Rest := Copy(Rest, p + 1, Length(Rest));
+        end;
+        q := Pos('=', Item);
+        if q > 0 then
+        begin
+            Key := LowerCase(Trim(Copy(Item, 1, q - 1)));
+            Val := Trim(Copy(Item, q + 1, Length(Item)));
+            V := MMsToCoord(SafeStrToFloat(Val));
+            Known := True;
+            if Kind = 'Width' then
+            begin
+                if Key = 'min' then Rule.MinLimit := V
+                else if Key = 'max' then Rule.MaxLimit := V
+                else if Key = 'preferred' then Rule.PreferedWidth := V
+                else Known := False;
+            end
+            else if Kind = 'RoutingViaStyle' then
+            begin
+                if Key = 'hole_min' then Rule.MinHoleWidth := V
+                else if Key = 'hole_max' then Rule.MaxHoleWidth := V
+                else if Key = 'hole_preferred' then Rule.PreferedHoleWidth := V
+                else if Key = 'pad_min' then Rule.MinWidth := V
+                else if Key = 'pad_max' then Rule.MaxWidth := V
+                else if Key = 'pad_preferred' then Rule.PreferedWidth := V
+                else Known := False;
+            end
+            else if Kind = 'HoleSize' then
+            begin
+                Rule.AbsoluteValues := True;
+                if Key = 'min' then Rule.MinLimit := V
+                else if Key = 'max' then Rule.MaxLimit := V
+                else Known := False;
+            end
+            else if Kind = 'Height' then
+            begin
+                if Key = 'min' then Rule.MinHeight := V
+                else if Key = 'max' then Rule.MaxHeight := V
+                else if Key = 'preferred' then Rule.PreferedHeight := V
+                else Known := False;
+            end
+            else if Kind = 'ComponentClearance' then
+            begin
+                if Key = 'gap' then Rule.Gap := V
+                else if Key = 'vertical_gap' then Rule.VerticalGap := V
+                else Known := False;
+            end
+            else if Kind = 'MinimumAnnularRing' then
+            begin
+                if Key = 'min' then Rule.Minimum := V
+                else Known := False;
+            end
+            else if Kind = 'MinimumSolderMaskSliver' then
+            begin
+                if Key = 'gap' then Rule.MinSolderMaskSliver := V
+                else Known := False;
+            end
+            else if Kind = 'SilkToSolderMaskClearance' then
+            begin
+                if Key = 'gap' then Rule.SilkToMaskGap := V
+                else Known := False;
+            end
+            else if Kind = 'SilkToSilkClearance' then
+            begin
+                if Key = 'gap' then Rule.SilkToSilkClearance := V
+                else Known := False;
+            end
+            else if (Kind = 'SolderMaskExpansion') or (Kind = 'PasteMaskExpansion') then
+            begin
+                if Key = 'expansion' then Rule.Expansion := V
+                else Known := False;
+            end
+            else
+            begin
+                // BoardOutlineClearance, Clearance, HoleToHoleClearance
+                if Key = 'gap' then Rule.Gap := V
+                else Known := False;
+            end;
+            if not Known then Result := Result + Key + ' ';
+        end;
+    end;
+    Result := Trim(Result);
+end;
+
+// Create, update or delete design rules of a board from the spec the
+// set_pcb_rules tool writes (RULE|name|kind|scope1|scope2|priority|enabled|
+// comment|key=value;... and DELETE|name). A rule is found by its name; one
+// that is missing is created of the kind given. The board is saved.
+function SetPcbRulesReport(SpecPath: String): String;
+var
+    Spec, Items : TStringList;
+    PcbPath, Key, Rec, Name, Kind, Field, Action, Unknown : String;
+    Board   : IPCB_Board;
+    Rule    : IPCB_Rule;
+    i, Created, Updated, Deleted : Integer;
+begin
+    if not FileExists(SpecPath) then
+    begin
+        Result := PcbDocError('spec file not found: ' + SpecPath);
+        Exit;
+    end;
+    Spec := TStringList.Create;
+    Spec.LoadFromFile(SpecPath);
+    Items := TStringList.Create;
+    PcbDocWarnings := TStringList.Create;
+    PcbPath := '';
+    Created := 0;
+    Updated := 0;
+    Deleted := 0;
+    try
+        for i := 0 to Spec.Count - 1 do
+            if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
+        Board := OpenBoardAtPath(PcbPath);
+        if Board = nil then
+        begin
+            Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
+            Exit;
+        end;
+        PCBServer.PreProcess;
+        for i := 0 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i];
+            Key := GetFieldFromPipeString(Rec, 0);
+            Name := GetFieldFromPipeString(Rec, 1);
+            if Key = 'DELETE' then
+            begin
+                Rule := FindRuleByName(Board, Name);
+                if Rule = nil then PcbDocWarn('no rule named ' + Name)
+                else
+                begin
+                    Board.RemovePCBObject(Rule);
+                    Deleted := Deleted + 1;
+                    Items.Add('{"name": ' + JSONStr(Name) + ', "action": "deleted"}');
+                end;
+            end
+            else if Key = 'RULE' then
+            begin
+                Kind := GetFieldFromPipeString(Rec, 2);
+                Rule := FindRuleByName(Board, Name);
+                Action := '';
+                if Rule = nil then
+                begin
+                    Rule := NewRuleOfKind(Kind);
+                    if Rule = nil then PcbDocWarn('rule ' + Name + ': unknown kind "' + Kind + '"')
+                    else
+                    begin
+                        Rule.Name := Name;
+                        Board.AddPCBObject(Rule);
+                        Action := 'created';
+                        Created := Created + 1;
+                    end;
+                end
+                else
+                begin
+                    Kind := KindNameOf(Rule);
+                    PCBServer.SendMessageToRobots(Rule.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                    Action := 'updated';
+                    Updated := Updated + 1;
+                end;
+                if Rule <> nil then
+                begin
+                    Field := GetFieldFromPipeString(Rec, 3);
+                    if Field <> '' then Rule.Scope1Expression := Field;
+                    Field := GetFieldFromPipeString(Rec, 4);
+                    if Field <> '' then Rule.Scope2Expression := Field;
+                    Field := GetFieldFromPipeString(Rec, 6);
+                    if Field <> '' then Rule.DRCEnabled := (LowerCase(Field) = 'true');
+                    Field := GetFieldFromPipeString(Rec, 7);
+                    if Field <> '' then Rule.Comment := Field;
+                    Unknown := ApplyRuleValues(Rule, Kind, GetFieldFromPipeString(Rec, 8));
+                    Field := GetFieldFromPipeString(Rec, 5);
+                    if Field <> '' then Rule.SetState_Priority(StrToInt(Field));
+                    if Action = 'updated' then
+                        PCBServer.SendMessageToRobots(Rule.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                    if Unknown <> '' then PcbDocWarn('rule ' + Name + ' (' + Kind + '): keys not used: ' + Unknown);
+                    Items.Add('{"name": ' + JSONStr(Rule.Name) + ', "kind": ' + JSONStr(Kind) +
+                              ', "action": ' + JSONStr(Action) + ', "descriptor": ' + JSONStr(Rule.Descriptor) +
+                              ', "scope1": ' + JSONStr(Rule.Scope1Expression) +
+                              ', "scope2": ' + JSONStr(Rule.Scope2Expression) +
+                              ', "priority": ' + IntToStr(Rule.Priority) +
+                              ', "enabled": ' + JSONBool(Rule.DRCEnabled) + '}');
+                end;
+            end;
+        end;
+        PCBServer.PostProcess;
+        Board.GraphicallyInvalidate;
+        SaveBoardDocument(PcbPath);
+        Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
+                  ', "created": ' + IntToStr(Created) + ', "updated": ' + IntToStr(Updated) +
+                  ', "deleted": ' + IntToStr(Deleted) +
+                  ', ' + BuildJSONArray(Items, 'rules') +
+                  ', ' + BuildJSONArray(PcbDocWarnings, 'warnings') + '}';
+    finally
+        Spec.Free;
+        Items.Free;
+        PcbDocWarnings.Free;
+        PcbDocWarnings := nil;
+    end;
+end;
+
 // A contour (absolute coordinates) from 'x1,y1;x2,y2;...' in mm from the board origin.
 function ContourFromSpec(Board: IPCB_Board; Poly: String): IPCB_Contour;
 var

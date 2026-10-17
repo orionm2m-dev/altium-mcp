@@ -2223,6 +2223,7 @@ def _spec_number(value, name: str) -> str:
 
 PCB_STACK_SPEC = EXCHANGE_DIR / "pcb_stack_spec.txt"
 PCB_OUTLINE_SPEC = EXCHANGE_DIR / "pcb_outline_spec.txt"
+PCB_RULES_SPEC = EXCHANGE_DIR / "pcb_rules_spec.txt"
 
 
 @mcp.tool()
@@ -2469,6 +2470,66 @@ async def run_pcb_drc(ctx: Context, pcb_path: str, run: bool = True, timeout_s: 
         driver.stop()
         driver.join(5)
     return _script_result(response, {"dialog_seen": driver.seen, "dialog_log": driver.log})
+
+
+@mcp.tool()
+async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
+    """
+    Create, update or delete design rules of a board and save it. A rule is
+    found by its name; one that does not exist yet is created of the kind
+    given. Scopes, comment and the enabled flag change only when given.
+
+    Args:
+        pcb_path (str): Full path of the .PcbDoc (opened if needed).
+        rules (list): dicts, one per rule, with
+            name (str): the rule name (required);
+            kind (str): for a new rule - BoardOutlineClearance, Clearance,
+                Width, RoutingViaStyle, HoleSize, MinimumAnnularRing,
+                MinimumSolderMaskSliver, HoleToHoleClearance,
+                SilkToSolderMaskClearance, SilkToSilkClearance,
+                ComponentClearance, Height, SolderMaskExpansion or
+                PasteMaskExpansion;
+            scope1, scope2 (str): query expressions such as All,
+                InNet('GND'), OnLayer('Top Layer'), IsPad;
+            values (dict): the rule numbers in mm - gap (the clearance
+                kinds, mask sliver, silk, component clearance), min / max /
+                preferred (Width, Height; HoleSize min and max;
+                MinimumAnnularRing min), hole_min / hole_max /
+                hole_preferred and pad_min / pad_max / pad_preferred
+                (RoutingViaStyle), vertical_gap (ComponentClearance),
+                expansion (the mask expansion kinds);
+            priority (int): set as given - the other rules of the kind are
+                not renumbered, so keep the numbers distinct;
+            enabled (bool), comment (str): optional;
+            delete (bool): true removes the rule of that name instead.
+
+    Returns:
+        str: JSON with created, updated, deleted, rules[] (name, kind,
+             action, descriptor, scope1, scope2, priority, enabled) and
+             warnings (unknown kinds, keys a kind has no use for).
+    """
+    logger.info(f"set_pcb_rules {pcb_path}: {len(rules or [])} rules")
+    lines = [f"PCB|{pcb_path}"]
+    for r in rules or []:
+        name = _spec_field(r.get("name", "")).strip()
+        if not name:
+            return json.dumps({"success": False, "error": "every rule needs a name"})
+        if r.get("delete"):
+            lines.append(f"DELETE|{name}")
+            continue
+        try:
+            values = ";".join(f"{k}={_spec_number(v, k)}" for k, v in (r.get("values") or {}).items())
+        except ValueError as e:
+            return json.dumps({"success": False, "error": f"rule {name}: {e}"})
+        priority = "" if r.get("priority") is None else str(int(r["priority"]))
+        enabled = "" if r.get("enabled") is None else ("true" if r["enabled"] else "false")
+        lines.append("RULE|{}|{}|{}|{}|{}|{}|{}|{}".format(
+            name, _spec_field(r.get("kind", "")), _spec_field(r.get("scope1", "")),
+            _spec_field(r.get("scope2", "")), priority, enabled, _spec_field(r.get("comment", "")),
+            values.replace("|", "/")))
+    PCB_RULES_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
+    response = await altium_bridge.execute_command("set_pcb_rules", {})
+    return _script_result(response)
 
 
 @mcp.tool()

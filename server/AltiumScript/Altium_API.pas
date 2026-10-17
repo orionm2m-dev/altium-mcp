@@ -1158,6 +1158,8 @@ begin
             Result := GetBoardOutlineReport(ParamValueOf('pcb_path'));
         'run_pcb_drc':
             Result := RunPcbDrcReport(ParamValueOf('pcb_path'), ParamValueOf('run'), ROOT_DIR + 'drc_report.txt');
+        'set_pcb_rules':
+            Result := SetPcbRulesReport(ROOT_DIR + 'pcb_rules_spec.txt');
         'set_pcb_regions':
             Result := SetPcbRegionsReport(ROOT_DIR + 'pcb_regions_spec.txt');
         'draw_pcb_mechanical':
