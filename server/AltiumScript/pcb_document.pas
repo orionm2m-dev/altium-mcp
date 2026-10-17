@@ -1258,10 +1258,11 @@ begin
 end;
 
 // Tools > Design Rule Check > Run Design Rule Check as a batch, without the
-// dialog, then every violation left on the board: the rule, the description
-// Altium gives it, the two primitives and whether it is waived. With Run =
-// 'false' the violations already on the board are listed as they are.
-function RunPcbDrcReport(PcbPath, Run: String): String;
+// dialog (the text report goes to ReportPath), then every violation left on
+// the board: the rule, the description Altium gives it, the two primitives
+// and whether it is waived. With Run = 'false' the violations already on the
+// board are listed as they are.
+function RunPcbDrcReport(PcbPath, Run, ReportPath: String): String;
 var
     Board  : IPCB_Board;
     Iter   : IPCB_BoardIterator;
@@ -1280,8 +1281,10 @@ begin
     Ran := False;
     if LowerCase(Trim(Run)) <> 'false' then
     begin
-        Board.RunBatchDesignRuleCheck;
-        Ran := True;
+        if FileExists(ReportPath) then DeleteFile(ReportPath);
+        // The function returns False when the check finds violations; the report file shows that it ran.
+        Board.RunBatchDesignRuleCheck(ReportPath, 1, False, False);
+        Ran := FileExists(ReportPath);
     end;
     Items := TStringList.Create;
     Rules := TStringList.Create;
@@ -1322,6 +1325,7 @@ begin
     for i := 0 to Rules.Count - 1 do
         Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + Counts[i] + '}';
     Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "ran": ' + JSONBool(Ran) +
+              ', "report_file": ' + JSONStr(ReportPath) + ', "report_written": ' + JSONBool(FileExists(ReportPath)) +
               ', "violations": ' + IntToStr(N) + ', "waived": ' + IntToStr(Waived) +
               ', "listed": ' + IntToStr(Kept) +
               ', ' + BuildJSONArray(Rules, 'by_rule') +
