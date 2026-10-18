@@ -39,11 +39,14 @@ begin
 end;
 
 // Remove every footprint of the library whose name equals FpName (case-
-// insensitive). Returns the number removed.
+// insensitive). The editor draws the footprint it shows from the library
+// board, so another footprint is shown first when the shown one is removed.
+// Returns the number removed.
 function RemoveLibraryFootprints(PcbLib: IPCB_Library; FpName: String): Integer;
 var
-    i    : Integer;
-    Comp : IPCB_LibComponent;
+    i     : Integer;
+    Comp  : IPCB_LibComponent;
+    Other : IPCB_LibComponent;
 begin
     Result := 0;
     for i := PcbLib.ComponentCount - 1 downto 0 do
@@ -51,6 +54,17 @@ begin
         Comp := PcbLib.GetComponent(i);
         if (Comp <> nil) and (UpperCase(Comp.Name) = UpperCase(FpName)) then
         begin
+            if (PcbLib.CurrentComponent <> nil) and
+               (UpperCase(PcbLib.CurrentComponent.Name) = UpperCase(FpName)) then
+            begin
+                Other := nil;
+                if (i > 0) then
+                    Other := PcbLib.GetComponent(0)
+                else if (PcbLib.ComponentCount > 1) then
+                    Other := PcbLib.GetComponent(1);
+                if (Other <> nil) and (UpperCase(Other.Name) <> UpperCase(FpName)) then
+                    PcbLib.CurrentComponent := Other;
+            end;
             PcbLib.RemoveComponent(Comp);
             Result := Result + 1;
         end;
@@ -65,7 +79,7 @@ end;
 //   REPLACE|<1 or 0>                     (optional: 1 = a footprint replaces
 //                                         any footprint of the same name)
 //   FOOTPRINT|<name>|<description>
-//   PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
+//   PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]][|mask_exp]
 //   TRACK|x1|y1|x2|y2|width|layer
 //   ARC|cx|cy|radius|start_angle|end_angle|width|layer
 //   FILL|x1|y1|x2|y2|rotation|layer
@@ -87,6 +101,7 @@ var
     Region      : IPCB_Region;
     Contour     : IPCB_Contour;
     Via         : IPCB_Via;
+    PadCache    : TPadCache;
     Line, Kind  : String;
     LibPath     : String;
     FieldValue  : String;
@@ -181,11 +196,8 @@ begin
                     LibComp.Description := GetFieldFromPipeString(Line, 2);
                     PcbLib.RegisterComponent(LibComp);
                     CreatedCount := CreatedCount + 1;
-                    if (Placeholder <> nil) then
-                    begin
-                        PcbLib.RemoveComponent(Placeholder);
-                        Placeholder := nil;
-                    end;
+                    // The placeholder of a new library is the footprint the editor shows:
+                    // it is removed at the end, once the last new footprint is shown
                 end
                 else if (LibComp <> nil) and (Kind = 'PAD') then
                 begin
@@ -226,6 +238,18 @@ begin
                     Pad.Rotation := SafeStrToFloat(Trim(GetFieldFromPipeString(Line, 4)));
                     LibComp.AddPCBObject(Pad);
                     PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, c_NoEventData);
+                    // Optional 22: manual solder mask expansion in mils through the pad
+                    // cache (empty keeps the rule); a negative value larger than the pad
+                    // leaves no opening. Paste expansion is not honoured through the cache
+                    // in Altium 26 (the flag lands on the solder mask), so it stays a rule
+                    FieldValue := Trim(GetFieldFromPipeString(Line, 22));
+                    if (FieldValue <> '') then
+                    begin
+                        PadCache := Pad.GetState_Cache;
+                        PadCache.SolderMaskExpansion := MilsToCoord(SafeStrToFloat(FieldValue));
+                        PadCache.SolderMaskExpansionValid := eCacheManual;
+                        Pad.SetState_Cache(PadCache);
+                    end;
                 end
                 else if (LibComp <> nil) and (Kind = 'TRACK') then
                 begin
@@ -322,6 +346,11 @@ begin
         if (PcbLib <> nil) then
         begin
             if (LibComp <> nil) then PcbLib.CurrentComponent := LibComp;
+            if (Placeholder <> nil) and (CreatedCount > 0) then
+            begin
+                PcbLib.RemoveComponent(Placeholder);
+                Placeholder := nil;
+            end;
             PcbLib.Board.ViewManager_FullUpdate;
             AddJSONProperty(ResultProps, 'library', StringReplace(PcbLib.Board.FileName, '\', '/', REPLACEALL));
             AddJSONInteger(ResultProps, 'components', PcbLib.ComponentCount);
@@ -513,6 +542,8 @@ begin
                                     end;
                                     if (Prim.TopShape = eRoundedRectangular) then
                                         AddJSONInteger(PrimProps, 'corner_pct', Prim.StackCRPctOnLayer[eTopLayer]);
+                                    if (Prim.Cache.SolderMaskExpansionValid = eCacheManual) then
+                                        AddJSONNumber(PrimProps, 'mask_exp', CoordToMils(Prim.Cache.SolderMaskExpansion));
                                 end;
                                 eTrackObject:
                                 begin

@@ -1483,7 +1483,10 @@ async def create_footprints_batch(ctx: Context, spec_file: str) -> str:
                                        footprint of the same name instead of
                                        being added next to it)
             FOOTPRINT|<name>|<description>
-            PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]]
+            PAD|name|x|y|rot|layer|plated|hole_size|hole_type|hole_width|hole_rot|top_x|top_y|top_shape[|corner_pct[|mode|mid_x|mid_y|mid_shape|bot_x|bot_y|bot_shape]][|mask_exp]
+                (optional 22: mask_exp sets a manual solder mask expansion
+                in mils, empty keeps the rule; a negative value larger than
+                the pad leaves no opening)
             TRACK|x1|y1|x2|y2|width|layer
             ARC|cx|cy|radius|start_angle|end_angle|width|layer
             FILL|x1|y1|x2|y2|rotation|layer
