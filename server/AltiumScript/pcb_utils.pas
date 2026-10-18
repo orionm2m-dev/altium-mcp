@@ -696,6 +696,26 @@ begin
 end;
 
 // Function to create a net class and add nets to it
+// The nets a class lists, each once; Listed receives the raw count of the
+// member entries (a class may list a net more than once).
+function ClassMemberNames(AClass: IPCB_ObjectClass; var Listed: Integer): TStringList;
+var
+    i : Integer;
+    S : String;
+begin
+    Result := TStringList.Create;
+    Listed := 0;
+    i := 0;
+    S := AClass.MemberName(i);
+    while (S <> '') and (i < 10000) do
+    begin
+        if Result.IndexOf(S) < 0 then Result.Add(S);
+        Listed := Listed + 1;
+        i := i + 1;
+        S := AClass.MemberName(i);
+    end;
+end;
+
 function CreateNetClass(ClassName: String; NetNames: TStringList): String;
 var
     Board       : IPCB_Board;
@@ -707,6 +727,8 @@ var
     AddedCount  : Integer;
     OutputLines : TStringList;
     Missing     : TStringList;
+    Existing    : TStringList;
+    Listed      : Integer;
 begin
     // Initialize result
     ResultProps := TStringList.Create;
@@ -759,18 +781,28 @@ begin
             PCBServer.PostProcess;
         end;
         
-        // Add nets to the class
+        // Add the nets the class does not list yet (AddMemberByName is a
+        // procedure; IsMember is not reliable from a script, so membership is
+        // read back from the member list). A class listing a net more than
+        // once is rebuilt with each net once.
+        Existing := ClassMemberNames(NetClass, Listed);
         PCBServer.PreProcess;
-        for i := 0 to NetNames.Count - 1 do
+        PCBServer.SendMessageToRobots(NetClass.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+        if Listed > Existing.Count then
         begin
-            // AddMemberByName is a procedure: membership is checked afterwards
-            NetClass.AddMemberByName(NetNames[i]);
-            if NetClass.IsMember(NetNames[i]) then
-                AddedCount := AddedCount + 1
-            else
-                Missing.Add(NetNames[i]);
+            NetClass.RemoveAllMembers;
+            for i := 0 to Existing.Count - 1 do NetClass.AddMemberByName(Existing[i]);
         end;
+        for i := 0 to NetNames.Count - 1 do
+            if Existing.IndexOf(NetNames[i]) < 0 then NetClass.AddMemberByName(NetNames[i]);
+        PCBServer.SendMessageToRobots(NetClass.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
         PCBServer.PostProcess;
+        Board.GraphicallyInvalidate;
+        Existing.Free;
+        Existing := ClassMemberNames(NetClass, Listed);
+        for i := 0 to NetNames.Count - 1 do
+            if Existing.IndexOf(NetNames[i]) >= 0 then AddedCount := AddedCount + 1
+            else Missing.Add(NetNames[i]);
         
         // Clean up iterator
         Board.BoardIterator_Destroy(ClassIterator);
@@ -781,6 +813,7 @@ begin
         AddJSONBoolean(ResultProps, 'class_created', not ClassExists);
         AddJSONInteger(ResultProps, 'nets_added', AddedCount);
         AddJSONProperty(ResultProps, 'nets_missing', Missing.CommaText);
+        AddJSONInteger(ResultProps, 'members', Existing.Count);
         
         OutputLines := TStringList.Create;
         try
@@ -792,6 +825,7 @@ begin
     finally
         ResultProps.Free;
         Missing.Free;
+        Existing.Free;
     end;
 end;
 
