@@ -1975,7 +1975,7 @@ var
     LibComp : IPCB_LibComponent;
     NewComp     : IPCB_Component;
     Iter    : IPCB_GroupIterator;
-    Prim    : IPCB_Primitive;
+    Prim, Twin : IPCB_Primitive;
     Pad     : IPCB_Pad;
     PadNames, PadNets : TStringList;
     i       : Integer;
@@ -2003,11 +2003,18 @@ begin
     Old.GroupIterator_Destroy(Iter);
     NewComp := PCBServer.PCBObjectFactory(eComponentObject, eNoDimension, eCreate_Default);
     NewComp.Pattern := Pattern;
+    // the replicas keep the library's internal coordinates, in which the
+    // pattern origin is the library origin; each one is brought to the new
+    // component's reference (0, 0) first, so that the flip to the other
+    // side, the rotation and the move below act about the pattern origin,
+    // the way Place » Component does
     Iter := LibComp.GroupIterator_Create;
     Prim := Iter.FirstPCBObject;
     while Prim <> nil do
     begin
-        NewComp.AddPCBObject(Prim.Replicate);
+        Twin := Prim.Replicate;
+        Twin.MoveByXY(-Lib.Board.XOrigin, -Lib.Board.YOrigin);
+        NewComp.AddPCBObject(Twin);
         Prim := Iter.NextPCBObject;
     end;
     LibComp.GroupIterator_Destroy(Iter);
