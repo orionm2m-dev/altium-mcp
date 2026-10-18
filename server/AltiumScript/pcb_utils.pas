@@ -1520,6 +1520,15 @@ begin
                 AddJSONProperty(RuleProps, 'rule_kind', Rule.GetState_ShortDescriptorString);
                 AddJSONProperty(RuleProps, 'filter1', Rule.Scope1Expression);
                 AddJSONProperty(RuleProps, 'filter2', Rule.Scope2Expression);
+                // the board outline clearance rule keeps a matrix of object kind
+                // against edge kind: a sample of it in mm (track to outline edge,
+                // TH pad to cutout edge) tells whether the values were set
+                if Rule.RuleKind = eRule_BoardOutlineClearance then
+                begin
+                    AddJSONProperty(RuleProps, 'track_to_outline_mm', FormatFloat('0.###', CoordToMMs(Rule.GetClearance(1, 10))));
+                    AddJSONProperty(RuleProps, 'thpad_to_cutout_mm', FormatFloat('0.###', CoordToMMs(Rule.GetClearance(3, 12))));
+                    AddJSONProperty(RuleProps, 'poly_to_outline_mm', FormatFloat('0.###', CoordToMMs(Rule.GetClearance(6, 10))));
+                end;
 
                 // Add to rules array
                 RulesArray.Add(BuildJSONObject(RuleProps, 1));

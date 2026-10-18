@@ -1439,7 +1439,7 @@ end;
 function ApplyRuleValues(Rule: IPCB_Rule; Kind, Values: String): String;
 var
     Rest, Item, Key, Val : String;
-    p, q  : Integer;
+    p, q, o, g : Integer;
     V     : TCoord;
     Known : Boolean;
 begin
@@ -1527,9 +1527,26 @@ begin
                 if Key = 'expansion' then Rule.Expansion := V
                 else Known := False;
             end
+            else if Kind = 'BoardOutlineClearance' then
+            begin
+                // the rule keeps a matrix of object kind (arc, track, SMD pad,
+                // TH pad, via, fill, polygon, region, text, hole: ids 0..9)
+                // against outline, cavity and cutout edge (ids 10, 11, 12)
+                if Key = 'gap' then
+                begin
+                    for o := 0 to 9 do
+                        for g := 10 to 12 do
+                        begin
+                            Rule.SetClearance(o, g, V);
+                            Rule.SetClearance(g, o, V);
+                        end;
+                    Rule.Gap := V;
+                end
+                else Known := False;
+            end
             else
             begin
-                // BoardOutlineClearance, Clearance, HoleToHoleClearance
+                // Clearance, HoleToHoleClearance
                 if Key = 'gap' then Rule.Gap := V
                 else Known := False;
             end;
@@ -1626,7 +1643,12 @@ begin
                     if Field <> '' then Rule.Comment := Field;
                     Unknown := ApplyRuleValues(Rule, Kind, GetFieldFromPipeString(Rec, 8));
                     Field := GetFieldFromPipeString(Rec, 5);
-                    if Field <> '' then Rule.SetState_Priority(StrToInt(Field));
+                    if Field <> '' then
+                    begin
+                        // 1 is the highest; the value takes effect once the rules
+                        // are re-sorted below
+                        Rule.SetState_Priority(StrToInt(Field));
+                    end;
                     if Action = 'updated' then
                         PCBServer.SendMessageToRobots(Rule.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
                     if Unknown <> '' then PcbDocWarn('rule ' + Name + ' (' + Kind + '): keys not used: ' + Unknown);
@@ -1639,6 +1661,8 @@ begin
                 end;
             end;
         end;
+        // the priorities set above take effect once the rules are re-sorted
+        Board.SortRulesByPriority;
         PCBServer.PostProcess;
         Board.GraphicallyInvalidate;
         SaveBoardDocument(PcbPath);
