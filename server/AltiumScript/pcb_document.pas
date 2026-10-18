@@ -1958,7 +1958,6 @@ begin
             else Pad.Net := FindBoardNet(Board, NetName);
             PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
             Result := True;
-            Break;
         end;
         Pad := Iter.NextPCBObject;
     end;
@@ -1978,6 +1977,7 @@ var
     Prim, Twin : IPCB_Primitive;
     Pad     : IPCB_Pad;
     PadNames, PadNets : TStringList;
+    Shift             : Boolean;
     i       : Integer;
 begin
     Result := False;
@@ -2003,17 +2003,27 @@ begin
     Old.GroupIterator_Destroy(Iter);
     NewComp := PCBServer.PCBObjectFactory(eComponentObject, eNoDimension, eCreate_Default);
     NewComp.Pattern := Pattern;
-    // the replicas keep the library's internal coordinates, in which the
-    // pattern origin is the library origin; each one is brought to the new
-    // component's reference (0, 0) first, so that the flip to the other
-    // side, the rotation and the move below act about the pattern origin,
-    // the way Place » Component does
+    // The pattern shown in the library editor lives on the library board,
+    // with the pattern origin at the library origin; every other pattern
+    // keeps its own coordinates about (0, 0). A pad tells which frame the
+    // pattern is in, and the replicas of a shown pattern are brought to the
+    // new component's reference first, so that the flip to the other side,
+    // the rotation and the move below act about the pattern origin, the way
+    // Place » Component does
+    Shift := False;
+    Iter := LibComp.GroupIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+    Pad := Iter.FirstPCBObject;
+    if Pad <> nil then
+        Shift := (Abs(Pad.x - Lib.Board.XOrigin) < MilsToCoord(10000)) and
+                 (Abs(Pad.y - Lib.Board.YOrigin) < MilsToCoord(10000));
+    LibComp.GroupIterator_Destroy(Iter);
     Iter := LibComp.GroupIterator_Create;
     Prim := Iter.FirstPCBObject;
     while Prim <> nil do
     begin
         Twin := Prim.Replicate;
-        Twin.MoveByXY(-Lib.Board.XOrigin, -Lib.Board.YOrigin);
+        if Shift then Twin.MoveByXY(-Lib.Board.XOrigin, -Lib.Board.YOrigin);
         NewComp.AddPCBObject(Twin);
         Prim := Iter.NextPCBObject;
     end;
