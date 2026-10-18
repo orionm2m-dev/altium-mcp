@@ -1544,9 +1544,15 @@ begin
                 end
                 else Known := False;
             end
+            else if Kind = 'Clearance' then
+            begin
+                if Key = 'gap' then Rule.Gap := V
+                else if Key = 'ignore_pad_to_pad' then Rule.SetState_IgnorePadToPad(SafeStrToFloat(Val) <> 0)
+                else Known := False;
+            end
             else
             begin
-                // Clearance, HoleToHoleClearance
+                // HoleToHoleClearance
                 if Key = 'gap' then Rule.Gap := V
                 else Known := False;
             end;
