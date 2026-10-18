@@ -706,10 +706,12 @@ var
     ResultProps : TStringList;
     AddedCount  : Integer;
     OutputLines : TStringList;
+    Missing     : TStringList;
 begin
     // Initialize result
     ResultProps := TStringList.Create;
     AddedCount := 0;
+    Missing := TStringList.Create;
     ClassExists := False;
     
     try
@@ -761,9 +763,12 @@ begin
         PCBServer.PreProcess;
         for i := 0 to NetNames.Count - 1 do
         begin
-            // Add each net to the class
-            if NetClass.AddMemberByName(NetNames[i]) then
-                AddedCount := AddedCount + 1;
+            // AddMemberByName is a procedure: membership is checked afterwards
+            NetClass.AddMemberByName(NetNames[i]);
+            if NetClass.IsMember(NetNames[i]) then
+                AddedCount := AddedCount + 1
+            else
+                Missing.Add(NetNames[i]);
         end;
         PCBServer.PostProcess;
         
@@ -775,6 +780,7 @@ begin
         AddJSONProperty(ResultProps, 'class_name', ClassName);
         AddJSONBoolean(ResultProps, 'class_created', not ClassExists);
         AddJSONInteger(ResultProps, 'nets_added', AddedCount);
+        AddJSONProperty(ResultProps, 'nets_missing', Missing.CommaText);
         
         OutputLines := TStringList.Create;
         try
@@ -785,6 +791,7 @@ begin
         end;
     finally
         ResultProps.Free;
+        Missing.Free;
     end;
 end;
 
