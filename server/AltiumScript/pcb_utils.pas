@@ -126,7 +126,10 @@ begin
                 if (Kind = 'FPLIB') then
                 begin
                     LibPath := GetFieldFromPipeString(Line, 1);
-                    if (LibPath <> '') and not FileExists(LibPath) then
+                    // an open library is used as it is; a library that is not
+                    // open is opened from disk; only a path with no file behind
+                    // it starts a new library
+                    if (LibPath <> '') and not Client.IsDocumentOpen(LibPath) and not FileExists(LibPath) then
                     begin
                         // A library that does not exist yet is created, so a
                         // batch can start a new library. Altium gives it an
@@ -314,6 +317,18 @@ begin
             end;
         end;
 
+        // make the last footprint current and refresh the library view, and
+        // report where the footprints went and whether the last one is found
+        if (PcbLib <> nil) then
+        begin
+            if (LibComp <> nil) then PcbLib.CurrentComponent := LibComp;
+            PcbLib.Board.ViewManager_FullUpdate;
+            AddJSONProperty(ResultProps, 'library', StringReplace(PcbLib.Board.FileName, '\', '/', REPLACEALL));
+            AddJSONInteger(ResultProps, 'components', PcbLib.ComponentCount);
+            AddJSONBoolean(ResultProps, 'library_file_exists', FileExists(LibPath));
+            if (LibComp <> nil) then
+                AddJSONBoolean(ResultProps, 'last_found_by_name', PcbLib.GetComponentByName(LibComp.Name) <> nil);
+        end;
         AddJSONInteger(ResultProps, 'created', CreatedCount);
         AddJSONInteger(ResultProps, 'replaced', Replaced);
         AddJSONInteger(ResultProps, 'primitive_errors', PrimErrors);
