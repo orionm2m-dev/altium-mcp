@@ -507,6 +507,21 @@ begin
     Result := Seg;
 end;
 
+// True for a region that is one of the rigid-flex board regions (the layer
+// stack regions) of the board: the region iterator returns them with the
+// board cutouts, and they must never be removed as cutouts.
+function IsBoardRegion(Board: IPCB_Board; R: IPCB_Region): Boolean;
+var
+    Mgr : IPCB_BoardRegionsManager;
+    i   : Integer;
+begin
+    Result := False;
+    Mgr := Board.GetState_BoardRegionManager;
+    if Mgr = nil then Exit;
+    for i := 0 to Mgr.BoardRegionCount - 1 do
+        if Mgr.BoardRegion(i).I_ObjectAddress = R.I_ObjectAddress then Result := True;
+end;
+
 // Every board cutout region of the board is removed, one at a time, since the
 // iterator does not survive a removal.
 function RemoveBoardCutouts(Board: IPCB_Board): Integer;
@@ -524,7 +539,7 @@ begin
         R := Iter.FirstPCBObject;
         while (R <> nil) and (Hit = nil) do
         begin
-            if R.Kind = eRegionKind_BoardCutout then Hit := R;
+            if (R.Kind = eRegionKind_BoardCutout) and not IsBoardRegion(Board, R) then Hit := R;
             R := Iter.NextPCBObject;
         end;
         Board.BoardIterator_Destroy(Iter);
@@ -592,11 +607,12 @@ function BoardCutoutsJSON(Board: IPCB_Board): String;
 var
     Iter : IPCB_BoardIterator;
     R    : IPCB_Region;
-    Cuts, Segs : TStringList;
+    Cuts, Segs, Regs : TStringList;
     Rect : TCoordRect;
     i, N : Integer;
 begin
     Cuts := TStringList.Create;
+    Regs := TStringList.Create;
     N := 0;
     Iter := Board.BoardIterator_Create;
     Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
@@ -605,7 +621,17 @@ begin
     R := Iter.FirstPCBObject;
     while R <> nil do
     begin
-        if R.Kind = eRegionKind_BoardCutout then
+        if IsBoardRegion(Board, R) then
+        begin
+            Rect := R.BoundingRectangle;
+            Regs.Add('{"index": ' + IntToStr(Regs.Count) + ', "name": ' + JSONStr(R.Name) +
+                     ', "bbox_mm": [' + PcbDocNum('0.####', CoordToMMs(Rect.Left - Board.XOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Bottom - Board.YOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Right - Board.XOrigin)) + ', ' +
+                     PcbDocNum('0.####', CoordToMMs(Rect.Top - Board.YOrigin)) + ']' +
+                     ', "shape_segments": ' + IntToStr(R.ShapeSegmentCount) + '}');
+        end
+        else if R.Kind = eRegionKind_BoardCutout then
         begin
             Segs := TStringList.Create;
             for i := 0 to R.ShapeSegmentCount - 1 do
@@ -624,8 +650,10 @@ begin
         R := Iter.NextPCBObject;
     end;
     Board.BoardIterator_Destroy(Iter);
-    Result := '"cutouts": ' + IntToStr(N) + ', ' + BuildJSONArray(Cuts, 'cutout_list');
+    Result := '"cutouts": ' + IntToStr(N) + ', ' + BuildJSONArray(Cuts, 'cutout_list') +
+              ', "board_regions": ' + IntToStr(Regs.Count) + ', ' + BuildJSONArray(Regs, 'board_region_list');
     Cuts.Free;
+    Regs.Free;
 end;
 
 // Board cutout regions whose bounding box lies inside the rectangle (mm from
@@ -651,7 +679,7 @@ begin
         R := Iter.FirstPCBObject;
         while (R <> nil) and (Hit = nil) do
         begin
-            if R.Kind = eRegionKind_BoardCutout then
+            if (R.Kind = eRegionKind_BoardCutout) and not IsBoardRegion(Board, R) then
             begin
                 Rect := R.BoundingRectangle;
                 if (Rect.Left >= L) and (Rect.Right <= Rt) and (Rect.Bottom >= B) and (Rect.Top <= T) then Hit := R;

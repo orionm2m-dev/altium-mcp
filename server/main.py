@@ -2419,6 +2419,9 @@ async def get_board_outline(ctx: Context, pcb_path: str) -> str:
              width_mm, height_mm, cutouts, cutout_list[] (index, bbox_mm,
              shape_segments, vertices_mm, vertices_raw), substacks[],
              regions[], split_lines and bending_lines.
+             The rigid-flex board regions (layer stack regions) are listed
+             apart as board_regions / board_region_list (name, bbox, vertex
+             count) and are not counted as cutouts.
     """
     logger.info(f"get_board_outline {pcb_path}")
     response = await altium_bridge.execute_command("get_board_outline", {"pcb_path": pcb_path})
