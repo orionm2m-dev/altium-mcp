@@ -27,6 +27,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from step_export import export_step
+from pcb_primitives import build_pad_spec, build_keepout_spec
 import dialogs
 
 # Configure logging
@@ -2616,6 +2617,62 @@ async def draw_pcb_mechanical(ctx: Context, pcb_path: str, layers: list = None, 
     PCB_MECHANICAL_SPEC.write_text("\n".join(lines) + "\n", encoding=SPEC_ENCODING, errors="replace")
     response = await altium_bridge.execute_command("draw_pcb_mechanical", {})
     return _script_result(response)
+
+
+@mcp.tool()
+async def set_pcb_pads(ctx: Context, pcb_path: str, pads: list) -> str:
+    """Add free board pads or update uniquely identified pads, then save.
+
+    Coordinates and sizes are mm relative to the board origin. Each entry has
+    operation (add/update), name, and optional component (empty for free pads).
+    Editable fields: x_mm, y_mm, size_x_mm, size_y_mm, hole_mm, plated (bool),
+    layer (top/bottom/multi), shape (round/rect/octagonal), locked (bool).
+    An add needs all fields except component and locked; only free pads can be
+    added. Omitted update fields stay unchanged, including nets and rotation.
+    Supplying both sizes explicitly replaces the pad stack with a simple stack.
+    Through holes require multi. For NPTH use plated=false and sizes no larger
+    than hole_mm; verify the returned actual geometry before manufacturing.
+    To remove only an unintended drill, update hole_mm to 0. Every target is
+    resolved before mutation; ambiguous, missing or duplicate targets abort.
+    Returns actual pad geometry, net, plating, layer, added/updated counts and
+    save status. This edits the board instance, not its footprint library.
+    """
+    try:
+        spec = build_pad_spec(pcb_path, pads)
+    except (ValueError, TypeError, KeyError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_pads_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    return _script_result(await altium_bridge.execute_command("set_pcb_pads", {}))
+
+
+@mcp.tool()
+async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
+    """Create/update free all-object keepouts by stable unique_id, then save.
+
+    Each entry requires unique_id (8 uppercase letters/digits), kind, layer,
+    restrictions, and geometry. layer: top, bottom, mid1..mid30, or all (all
+    layers). restrictions must explicitly contain all five: via, track, copper,
+    smd_pad, th_pad. Selective restrictions are not supported by this tool.
+    kind and geometry (mm relative to board origin):
+      track: x1_mm, y1_mm, x2_mm, y2_mm, width_mm
+      arc: x_mm, y_mm, radius_mm, start_deg, end_deg, width_mm
+      fill: x1_mm, y1_mm, x2_mm, y2_mm (ordered axis-aligned bounds)
+      region: vertices as [[x_mm,y_mm], ...] (straight closed contour)
+    Arcs run counterclockwise; start_deg=0/end_deg=360 creates a full circle.
+    locked defaults true. Existing IDs must resolve to a single free keepout
+    of the same kind. Other objects are never cleared. All targets and enabled
+    copper layers are checked before mutation. Reports actual geometry, layer,
+    keepout flag and save status. Effective clearance adds the applicable PCB
+    Clearance rule to the geometry; this tool does not create or change rules.
+    Keepouts affect pads too: do not use them over required solder pads or where
+    a copper escape must remain. This does not reserve component body height.
+    """
+    try:
+        spec = build_keepout_spec(pcb_path, keepouts)
+    except (ValueError, TypeError, KeyError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_keepouts_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    return _script_result(await altium_bridge.execute_command("set_pcb_keepouts", {}))
 
 
 PCB_FOOTPRINTS_SPEC = EXCHANGE_DIR / "pcb_footprints_spec.txt"

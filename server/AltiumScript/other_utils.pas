@@ -176,6 +176,8 @@ begin
        (CommandName = 'export_board_3d_model') or
        (CommandName = 'update_pcb_from_project') or
        (CommandName = 'set_pcb_footprints') or
+       (CommandName = 'set_pcb_pads') or
+       (CommandName = 'set_pcb_keepouts') or
        (CommandName = 'save_documents') then
     begin
         Result := True;
