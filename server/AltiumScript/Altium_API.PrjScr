@@ -1194,3 +1194,10 @@ AnnotationEnabled=1
 AnnotateScope=All
 DoLibraryUpdate=1
 DoDatabaseUpdate=1
+
+[Document11]
+DocumentPath=pcb_routing.pas
+AnnotationEnabled=1
+AnnotateScope=All
+DoLibraryUpdate=1
+DoDatabaseUpdate=1

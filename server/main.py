@@ -28,6 +28,7 @@ import zipfile
 from datetime import datetime, timezone
 from step_export import export_step
 from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
+from pcb_routing import build_routing_spec
 import dialogs
 
 # Configure logging
@@ -2701,6 +2702,52 @@ async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
     trace_path = EXCHANGE_DIR / "pcb_keepouts_spec.trace.txt"
     trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
     response = await altium_bridge.execute_command("set_pcb_keepouts", {})
+    try:
+        trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
+    except OSError:
+        trace_lines = []
+    return _script_result(response, {"trace_path": str(trace_path),
+                                     "last_phase": trace_lines[-1] if trace_lines else None})
+
+
+@mcp.tool()
+async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias: list = None) -> str:
+    """Add or precisely delete free copper tracks and standard through vias.
+
+    This executes explicit geometry; it is not an autorouter and does not
+    move pads/components, create nets, infer paths, or change design rules.
+    Supply a nonempty tracks and/or vias list. All coordinates/dimensions are
+    mm relative to the board origin. Every entry requires operation=add|delete
+    and an exact existing net name (case-sensitive).
+    tracks: layer=top|bottom|mid1..mid30, x1_mm,y1_mm,x2_mm,y2_mm,width_mm.
+    vias: x_mm,y_mm,diameter_mm,hole_mm,start_layer=top,end_layer=bottom.
+    Only standard through vias are supported; no blind/buried or custom stacks.
+    Add entries accept locked (default true). Delete entries must omit locked.
+    Positive dimensions, enabled layers, existing nets, duplicates and ownership
+    are checked for the whole batch before mutation. Canonical integer native
+    geometry identifies objects, with track endpoints treated as unordered.
+    Exactly one identical free object on the same net is an idempotent add
+    (lock state must also match). A delete must match exactly one free object
+    and net. Duplicate matches, same geometry with another net, component/
+    polygon-owned objects and keepouts are refused. No UniqueId is assumed.
+    A changed route uses a separate explicit deletion and addition; a batch
+    cannot address the same geometry twice. Only requested objects are touched.
+    Readback verifies geometry, net, ownership and lock state (or absence after
+    delete) before saving. Rebuilds native connectivity, reports counts/items
+    and a bounded phase trace. Process depths must be zero. A runtime exception
+    may leave unsaved partial changes; inspect before retrying, no rollback.
+    Saved geometry is NOT a clearance/short/connectivity or engineering-quality
+    pass: run scoped DRC and independently inspect saved routing and net paths.
+    Ground polygons/repour and differential-pair routing are not provided.
+    """
+    try:
+        spec = build_routing_spec(pcb_path, tracks, vias)
+    except (ValueError, TypeError, KeyError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_routing_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    trace_path = EXCHANGE_DIR / "pcb_routing_spec.trace.txt"
+    trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
+    response = await altium_bridge.execute_command("set_pcb_routing", {})
     try:
         trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
     except OSError:
