@@ -343,19 +343,28 @@ function FindKeepoutPrimitive(Board: IPCB_Board; Id: String; var Count: Integer)
 var
     Iter : IPCB_BoardIterator;
     P : IPCB_Primitive;
+    Region : IPCB_Region;
+    Matches : Boolean;
 begin
     Result := nil;
     Count := 0;
     Iter := Board.BoardIterator_Create;
     try
-        // Search every primitive so a foreign object with this ID cannot be overwritten.
+        // Search all objects to reject an ID collision with a foreign primitive.
+        // Free primitive UniqueId is not reliably writable; region identity is Name.
         Iter.AddFilter_ObjectSet(AllObjects);
         Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
         Iter.AddFilter_Method(eProcessAll);
         P := Iter.FirstPCBObject;
         while P <> nil do
         begin
-            if P.UniqueId = Id then
+            Matches := P.UniqueId = Id;
+            if P.ObjectId = eRegionObject then
+            begin
+                Region := P;
+                if Region.Name = Id then Matches := True;
+            end;
+            if Matches then
             begin
                 Count := Count + 1;
                 Result := P;
@@ -367,28 +376,17 @@ begin
     end;
 end;
 
-function KeepoutObjectId(Kind: String): Integer;
-begin
-    if Kind = 'track' then Result := eTrackObject
-    else if Kind = 'arc' then Result := eArcObject
-    else if Kind = 'fill' then Result := eFillObject
-    else Result := eRegionObject;
-end;
-
 function SetPcbKeepoutsReport(SpecPath: String): String;
 var
     Spec, Items, Trace : TStringList;
     Board : IPCB_Board;
     P : IPCB_Primitive;
-    Track : IPCB_Track;
-    Arc : IPCB_Arc;
-    Fill : IPCB_Fill;
     Region : IPCB_Region;
     Contour : IPCB_Contour;
-    PcbPath, Rec, Id, Kind, Error, ShapeJSON, TracePath : String;
-    i, j, Count, Mask, Added, Updated : Integer;
+    PcbPath, Rec, Id, Error, TracePath, ActualId : String;
+    i, j, Count, Added, Updated, RequestedVertices, ActualVertices : Integer;
     TargetLayer : TLayer;
-    IsNew, Saved, Verified : Boolean;
+    IsNew, Saved, FlagsVerified, IdentityVerified, ItemIdentity : Boolean;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -402,6 +400,32 @@ begin
     try
         KeepoutTrace(Trace, TracePath, 'load_spec', 0, '');
         Spec.LoadFromFile(SpecPath);
+        if Spec.Count < 2 then
+        begin
+            Result := PcbDocError('keepout spec must contain at least one region');
+            Exit;
+        end;
+        // Also reject old-server arc/fill/track requests before opening a board.
+        // The existing public region input format remains unchanged.
+        for i := 1 to Spec.Count - 1 do
+        begin
+            if GetFieldFromPipeString(Spec[i], 2) <> 'region' then
+            begin
+                Result := PcbDocError('only kind=region is supported; stable identity uses Region.Name');
+                Exit;
+            end;
+            if GetFieldFromPipeString(Spec[i], 4) <> '31' then
+            begin
+                Result := PcbDocError('all five keepout restrictions must be requested');
+                Exit;
+            end;
+            for j := 1 to i - 1 do
+                if GetFieldFromPipeString(Spec[j], 1) = GetFieldFromPipeString(Spec[i], 1) then
+                begin
+                    Result := PcbDocError('duplicate requested keepout identity');
+                    Exit;
+                end;
+        end;
         PcbPath := GetFieldFromPipeString(Spec[0], 1);
         KeepoutTrace(Trace, TracePath, 'open_board', 0, '');
         Board := OpenBoardAtPath(PcbPath);
@@ -421,19 +445,25 @@ begin
         begin
             Rec := Spec[i];
             Id := GetFieldFromPipeString(Rec, 1);
-            Kind := GetFieldFromPipeString(Rec, 2);
             KeepoutTrace(Trace, TracePath, 'preflight_layer', i, Id);
             TargetLayer := PrimitiveLayer(GetFieldFromPipeString(Rec, 3));
             if (TargetLayer <> eKeepOutLayer) and not MidLayerInStack(Board.LayerStack_V7, TargetLayer) then
                 Error := 'requested copper layer is not in the board stack: ' + GetFieldFromPipeString(Rec, 3);
             KeepoutTrace(Trace, TracePath, 'preflight_lookup', i, Id);
             P := FindKeepoutPrimitive(Board, Id, Count);
-            if Count > 1 then Error := 'duplicate primitive unique_id: ' + Id;
+            if Count > 1 then Error := 'duplicate primitive identity: ' + Id;
             if P <> nil then
             begin
-                if not P.IsKeepout then Error := 'unique_id belongs to a non-keepout primitive: ' + Id;
+                if not P.IsKeepout then Error := 'identity belongs to a non-keepout primitive: ' + Id;
                 if P.Component <> nil then Error := 'component-owned keepout cannot be changed: ' + Id;
-                if P.ObjectId <> KeepoutObjectId(Kind) then Error := 'keepout kind cannot change: ' + Id;
+                if P.InPolygon then Error := 'polygon-owned keepout cannot be changed: ' + Id;
+                if P.ObjectId <> eRegionObject then Error := 'identity belongs to another primitive kind: ' + Id
+                else
+                begin
+                    Region := P;
+                    if Region.Name <> Id then Error := 'primitive UID collides with a differently named region: ' + Id;
+                    if Region.Kind <> eRegionKind_Copper then Error := 'keepout region kind cannot change: ' + Id;
+                end;
             end;
             if Error <> '' then Break;
         end;
@@ -444,7 +474,8 @@ begin
         end;
         Added := 0;
         Updated := 0;
-        Verified := True;
+        FlagsVerified := True;
+        IdentityVerified := True;
         KeepoutTrace(Trace, TracePath, 'process_guard', 0, '');
         Error := PcbPrimitiveProcessGuard(0);
         if Error <> '' then
@@ -460,90 +491,38 @@ begin
             begin
                 Rec := Spec[i];
                 Id := GetFieldFromPipeString(Rec, 1);
-                Kind := GetFieldFromPipeString(Rec, 2);
                 TargetLayer := PrimitiveLayer(GetFieldFromPipeString(Rec, 3));
-                Mask := StrToInt(GetFieldFromPipeString(Rec, 4));
                 KeepoutTrace(Trace, TracePath, 'mutation_lookup', i, Id);
                 P := FindKeepoutPrimitive(Board, Id, Count);
                 IsNew := P = nil;
                 KeepoutTrace(Trace, TracePath, 'create_or_begin_modify', i, Id);
                 if IsNew then
-                    P := PCBServer.PCBObjectFactory(KeepoutObjectId(Kind), eNoDimension, eCreate_Default)
+                    P := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default)
                 else PCBServer.SendMessageToRobots(P.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
-                KeepoutTrace(Trace, TracePath, 'set_unique_id', i, Id);
-                P.UniqueId := Id;
+                Region := P;
+                KeepoutTrace(Trace, TracePath, 'set_region_name', i, Id);
+                Region.Name := Id;
                 KeepoutTrace(Trace, TracePath, 'set_layer', i, Id);
                 P.Layer := TargetLayer;
                 KeepoutTrace(Trace, TracePath, 'set_net', i, Id);
                 P.Net := nil;
-                // Legacy scripting API enables an all-object keepout. Selective
-                // restrictions are rejected by the typed tool before dispatch.
                 KeepoutTrace(Trace, TracePath, 'set_keepout_flag', i, Id);
                 P.IsKeepout := True;
                 KeepoutTrace(Trace, TracePath, 'set_locked', i, Id);
                 P.Moveable := GetFieldFromPipeString(Rec, 5) = '0';
-                KeepoutTrace(Trace, TracePath, 'set_geometry', i, Id);
-                ShapeJSON := '';
-                if Kind = 'track' then
+                KeepoutTrace(Trace, TracePath, 'contour_factory', i, Id);
+                Contour := PCBServer.PCBContourFactory;
+                j := 6;
+                while GetFieldFromPipeString(Rec, j) <> '' do
                 begin
-                    Track := P;
-                    Track.X1 := Board.XOrigin + PrimitiveCoord(Rec, 6);
-                    Track.Y1 := Board.YOrigin + PrimitiveCoord(Rec, 7);
-                    Track.X2 := Board.XOrigin + PrimitiveCoord(Rec, 8);
-                    Track.Y2 := Board.YOrigin + PrimitiveCoord(Rec, 9);
-                    Track.Width := PrimitiveCoord(Rec, 10);
-                    ShapeJSON := ', "x1_mm": ' + PcbDocNum('0.######', CoordToMMs(Track.X1 - Board.XOrigin)) +
-                        ', "y1_mm": ' + PcbDocNum('0.######', CoordToMMs(Track.Y1 - Board.YOrigin)) +
-                        ', "x2_mm": ' + PcbDocNum('0.######', CoordToMMs(Track.X2 - Board.XOrigin)) +
-                        ', "y2_mm": ' + PcbDocNum('0.######', CoordToMMs(Track.Y2 - Board.YOrigin)) +
-                        ', "width_mm": ' + PcbDocNum('0.######', CoordToMMs(Track.Width));
-                end
-                else if Kind = 'arc' then
-                begin
-                    Arc := P;
-                    Arc.XCenter := Board.XOrigin + PrimitiveCoord(Rec, 6);
-                    Arc.YCenter := Board.YOrigin + PrimitiveCoord(Rec, 7);
-                    Arc.Radius := PrimitiveCoord(Rec, 8);
-                    Arc.StartAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 9));
-                    Arc.EndAngle := SafeStrToFloat(GetFieldFromPipeString(Rec, 10));
-                    Arc.LineWidth := PrimitiveCoord(Rec, 11);
-                    ShapeJSON := ', "x_mm": ' + PcbDocNum('0.######', CoordToMMs(Arc.XCenter - Board.XOrigin)) +
-                        ', "y_mm": ' + PcbDocNum('0.######', CoordToMMs(Arc.YCenter - Board.YOrigin)) +
-                        ', "radius_mm": ' + PcbDocNum('0.######', CoordToMMs(Arc.Radius)) +
-                        ', "start_deg": ' + PcbDocNum('0.######', Arc.StartAngle) +
-                        ', "end_deg": ' + PcbDocNum('0.######', Arc.EndAngle) +
-                        ', "width_mm": ' + PcbDocNum('0.######', CoordToMMs(Arc.LineWidth));
-                end
-                else if Kind = 'fill' then
-                begin
-                    Fill := P;
-                    Fill.X1 := Board.XOrigin + PrimitiveCoord(Rec, 6);
-                    Fill.Y1 := Board.YOrigin + PrimitiveCoord(Rec, 7);
-                    Fill.X2 := Board.XOrigin + PrimitiveCoord(Rec, 8);
-                    Fill.Y2 := Board.YOrigin + PrimitiveCoord(Rec, 9);
-                    Fill.Rotation := 0;
-                    ShapeJSON := ', "x1_mm": ' + PcbDocNum('0.######', CoordToMMs(Fill.X1 - Board.XOrigin)) +
-                        ', "y1_mm": ' + PcbDocNum('0.######', CoordToMMs(Fill.Y1 - Board.YOrigin)) +
-                        ', "x2_mm": ' + PcbDocNum('0.######', CoordToMMs(Fill.X2 - Board.XOrigin)) +
-                        ', "y2_mm": ' + PcbDocNum('0.######', CoordToMMs(Fill.Y2 - Board.YOrigin));
-                end
-                else
-                begin
-                    Region := P;
-                    KeepoutTrace(Trace, TracePath, 'contour_factory', i, Id);
-                    Contour := PCBServer.PCBContourFactory;
-                    j := 6;
-                    while GetFieldFromPipeString(Rec, j) <> '' do
-                    begin
-                        Contour.AddPoint(Board.XOrigin + PrimitiveCoord(Rec, j), Board.YOrigin + PrimitiveCoord(Rec, j + 1));
-                        j := j + 2;
-                    end;
-                    KeepoutTrace(Trace, TracePath, 'contour_apply', i, Id);
-                    Region.SetOutlineContour(Contour);
-                    KeepoutTrace(Trace, TracePath, 'region_kind', i, Id);
-                    Region.Kind := eRegionKind_Copper;
-                    ShapeJSON := ', "vertex_count": ' + IntToStr((j - 6) div 2);
+                    Contour.AddPoint(Board.XOrigin + PrimitiveCoord(Rec, j), Board.YOrigin + PrimitiveCoord(Rec, j + 1));
+                    j := j + 2;
                 end;
+                RequestedVertices := (j - 6) div 2;
+                KeepoutTrace(Trace, TracePath, 'contour_apply', i, Id);
+                Region.SetOutlineContour(Contour);
+                KeepoutTrace(Trace, TracePath, 'region_kind', i, Id);
+                Region.Kind := eRegionKind_Copper;
                 KeepoutTrace(Trace, TracePath, 'register_or_end_modify', i, Id);
                 if IsNew then
                 begin
@@ -557,10 +536,28 @@ begin
                     Updated := Updated + 1;
                 end;
                 KeepoutTrace(Trace, TracePath, 'readback', i, Id);
-                if (P.Layer <> TargetLayer) or not P.IsKeepout then Verified := False;
-                Items.Add('{"unique_id": ' + JSONStr(P.UniqueId) + ', "kind": ' + JSONStr(Kind) +
+                ActualId := Region.Name;
+                ItemIdentity := ActualId = Id;
+                if not ItemIdentity then
+                begin
+                    IdentityVerified := False;
+                    Error := 'region identity readback mismatch; board not saved';
+                end;
+                if (P.Layer <> TargetLayer) or not P.IsKeepout then
+                begin
+                    FlagsVerified := False;
+                    Error := 'keepout layer/flag readback mismatch; board not saved';
+                end;
+                ActualVertices := 0;
+                Contour := Region.MainContour;
+                if Contour <> nil then ActualVertices := Contour.Count;
+                Items.Add('{"unique_id": ' + JSONStr(ActualId) + ', "requested_id": ' + JSONStr(Id) +
+                    ', "actual_id": ' + JSONStr(ActualId) + ', "identity_kind": "region_name"' +
+                    ', "identity_verified": ' + JSONBool(ItemIdentity) + ', "kind": "region"' +
                     ', "layer": ' + JSONStr(Layer2String(P.Layer)) + ', "is_keepout": ' + JSONBool(P.IsKeepout) +
-                    ', "locked": ' + JSONBool(not P.Moveable) + ShapeJSON + '}');
+                    ', "locked": ' + JSONBool(not P.Moveable) + ', "vertex_count": ' + IntToStr(ActualVertices) +
+                    ', "requested_vertex_count": ' + IntToStr(RequestedVertices) + '}');
+                if Error <> '' then Break;
             end;
         finally
             KeepoutTrace(Trace, TracePath, 'postprocess', 0, '');
@@ -572,11 +569,12 @@ begin
         Board.ViewManager_FullUpdate;
         Saved := False;
         KeepoutTrace(Trace, TracePath, 'save_if_verified', 0, '');
-        if Verified then Saved := SaveBoardDocument(PcbPath);
+        if IdentityVerified and FlagsVerified and (Error = '') then Saved := SaveBoardDocument(PcbPath);
         KeepoutTrace(Trace, TracePath, 'completed', 0, '');
-        Result := '{"success": ' + JSONBool(Saved and Verified) + ', "saved": ' + JSONBool(Saved) +
-            ', "keepout_flag_verified": ' + JSONBool(Verified) + ', "path": ' + JSONStr(PcbPath) +
-            ', "added": ' + IntToStr(Added) + ', "updated": ' + IntToStr(Updated) +
+        Result := '{"success": ' + JSONBool(Saved and IdentityVerified and FlagsVerified) + ', "saved": ' + JSONBool(Saved) +
+            ', "error": ' + JSONStr(Error) + ', "identity_kind": "region_name"' +
+            ', "identity_verified": ' + JSONBool(IdentityVerified) + ', "keepout_flag_verified": ' + JSONBool(FlagsVerified) +
+            ', "path": ' + JSONStr(PcbPath) + ', "added": ' + IntToStr(Added) + ', "updated": ' + IntToStr(Updated) +
             ', ' + BuildJSONArray(Items, 'keepouts') + '}';
     finally
         Spec.Free;

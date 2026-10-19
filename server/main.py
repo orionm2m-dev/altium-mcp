@@ -2670,27 +2670,28 @@ async def set_pcb_pads(ctx: Context, pcb_path: str, pads: list) -> str:
 
 @mcp.tool()
 async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
-    """Create/update free all-object keepouts by stable unique_id, then save.
+    """Create/update free named REGION keepouts, verify identity, then save.
 
-    Each entry requires unique_id (8 uppercase letters/digits), kind, layer,
-    restrictions, and geometry. layer: top, bottom, mid1..mid30, or all (all
-    layers). restrictions must explicitly contain all five: via, track, copper,
-    smd_pad, th_pad. Selective restrictions are not supported by this tool.
-    kind and geometry (mm relative to board origin):
-      track: x1_mm, y1_mm, x2_mm, y2_mm, width_mm
-      arc: x_mm, y_mm, radius_mm, start_deg, end_deg, width_mm
-      fill: x1_mm, y1_mm, x2_mm, y2_mm (ordered axis-aligned bounds)
-      region: vertices as [[x_mm,y_mm], ...] (straight closed contour)
-    Arcs run counterclockwise; start_deg=0/end_deg=360 creates a full circle.
-    locked defaults true. Existing IDs must resolve to a single free keepout
-    of the same kind. Other objects are never cleared. All targets and enabled
-    copper layers are checked before mutation. Reports actual geometry, layer,
-    keepout flag and save status. Effective clearance adds the applicable PCB
-    Clearance rule to the geometry; this tool does not create or change rules.
-    Keepouts affect pads too: do not use them over required solder pads or where
-    a copper escape must remain. This does not reserve component body height.
+    Only kind=region is supported. unique_id (8 uppercase letters/digits) is a
+    caller-selected Region.Name, NOT the unreliable free-primitive UniqueId.
+    Inputs require layer (top/bottom/mid1..mid30/all), explicit restrictions
+    [via,track,copper,smd_pad,th_pad], and vertices [[x_mm,y_mm], ...] describing
+    a simple straight closed contour without repeating its closing point.
+    Coordinates are mm relative to the board origin. locked defaults true.
+    Arc, fill and track requests are rejected; curves must be supplied as a
+    reviewed polygon approximation with a documented error/clearance budget.
+    Duplicate names, component/polygon-owned targets, non-keepouts and foreign
+    primitive ID collisions abort before mutation. Existing names must match a
+    single copper-kind region. Nothing is silently cleared or adopted by shape.
+    After registration, reports actual_id, requested_id, identity_kind=region_name,
+    identity_verified, layer/flag, actual/requested vertex counts and save status.
+    Identity or layer/keepout-flag mismatch prevents saving; in-memory changes
+    may remain and require review. Reopen/readback is still required to qualify
+    persistence. This tool does not create rules or component-height keepouts.
+    Applicable Clearance rules add to geometric keepout clearance. All-object
+    keepouts also affect pads; provide openings for legitimate NPTH/solder pads.
     Refuses nonzero client/PCB process depth. A bounded flushed trace identifies
-    the last attempted phase if the native interpreter stops; it is not rollback.
+    the last attempted native phase; it does not implement rollback or recovery.
     """
     try:
         spec = build_keepout_spec(pcb_path, keepouts)

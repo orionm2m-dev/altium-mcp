@@ -15,13 +15,24 @@ copper dimensions are accepted by validation and sent unchanged to Altium;
 inspect the actual dimensions returned by Altium. Do not infer absence of
 copper from the plating flag alone. The tool does not change a pad net.
 
-`set_pcb_keepouts` creates or updates free track, arc, fill and straight-edge
-region keepouts. IDs are explicit eight-character uppercase alphanumeric
-Altium primitive unique IDs. A matching object must already be a free keepout
-of the same kind; duplicates and foreign objects are refused. No layer is
-cleared. `top`, `bottom`, `mid1` through `mid30`, and `all` are explicit choices.
-A copper layer must exist in the current board stack. This does not create
-component-height restrictions or service reservations.
+`set_pcb_keepouts` creates or updates free, straight-edge **regions only**.
+The existing `unique_id` argument remains an explicit eight-character uppercase
+alphanumeric key, but is stored in `IPCB_Region.Name`. It is not a claim that
+`IPCB_Primitive.UniqueId` was set. A disposable Altium Designer 26 arc probe
+accepted a `UniqueId` assignment but immediately read back an empty string;
+layer/keepout readback alone therefore cannot prove stable identity. Track,
+arc and fill inputs are rejected before Python dispatch and again in Pascal
+before a board is opened, including requests from an already running older
+Python server. Their native creation paths have been removed. Curves need an
+explicitly reviewed polygon approximation; the tool does not approximate them.
+
+A matching name must identify exactly one free copper-kind keepout region.
+Duplicate names, component/polygon ownership, non-keepouts, other region kinds,
+and collisions with another primitive's native unique ID are refused before
+mutation. Existing anonymous objects are not adopted by geometry or deleted.
+No layer is cleared. `top`, `bottom`, `mid1` through `mid30`, and `all` are
+explicit choices. A copper layer must exist in the current board stack. This
+does not create component-height restrictions or service reservations.
 
 The tool uses the legacy `IPCB_Primitive.IsKeepout` scripting property for
 all-object keepouts. The caller must explicitly request all five object
@@ -33,14 +44,25 @@ A scratch `IPCB_Region` created without registering it on a board successfully
 round-tripped `IsKeepout=true` in Altium Designer 26. This is API evidence, not
 an end-to-end validation of the tools.
 
-Keepout reports read geometry, layer and `IsKeepout` back from the actual
-primitives; `keepout_flag_verified` does not claim a selective restriction
-mask was inspected. Check saved native restrictions, the effective Clearance
-rule, and PCB DRC in the target installation. A mechanical NPTH inside an
-all-object keepout can itself produce a TH-pad violation; provide a geometric
-opening or an appropriately scoped rule rather than suppressing unrelated
-pad-to-metal clearances. Clearance is additional to the keepout geometry, so
-a geometric safety expansion and a rule expansion must not be counted twice.
+After adding/registering or modifying a region, the tool reads `Region.Name`
+back and compares it exactly with the requested key. A mismatch prevents the
+save and returns failure; it can still leave changes in memory for review.
+Reports identify the key as `identity_kind="region_name"`, include
+`requested_id`, `actual_id`, `identity_verified`, and expose the actual name
+in the compatibility `unique_id` result field. Actual/requested vertex counts,
+layer, lock state and `IsKeepout` are also read/reported. Vertex counts are not
+full coordinate verification. Saving requires every identity, layer and flag
+check to pass. Read the saved native file or close/reopen a disposable board
+to qualify persistence and repeat-upsert behavior in the target installation;
+in-memory name readback alone is not end-to-end qualification.
+
+`keepout_flag_verified` does not claim a selective restriction mask was
+inspected. Check saved native restrictions, the effective Clearance rule, and
+PCB DRC. A mechanical NPTH inside an all-object keepout can itself produce a
+TH-pad violation; provide a geometric opening or an appropriately scoped rule
+rather than suppressing unrelated pad-to-metal clearances. Clearance is
+additional to keepout geometry, so a geometric safety expansion and a rule
+expansion must not be counted twice.
 
 Both tools group changes in a PCB transaction, refresh the view and save the
 requested board. The report includes the actual save result. Preflight errors
@@ -90,10 +112,14 @@ public dispatch behavior and native safety contract structure. They do not
 compile DelphiScript or qualify native recovery; use a disposable board and
 explicit review before live recovery in a target installation.
 
-After installing the updated server, reconnect the MCP client so its typed
-Python tools are rediscovered. The script project contains `pcb_primitives.pas`.
-Use the public tools for live tests on a disposable board first; do not call
-server functions from development scripts to modify an application project.
+The script project contains `pcb_primitives.pas`; the existing handler reads
+this source on dispatch. Region input syntax and the public tool signature
+are unchanged. An already running Python server still has its older validator
+and tool description until that server/client session is restarted or reloaded
+through a supported mechanism. The Pascal region-only guard also protects
+that interval. This patch does not restart either the client or Altium. Use
+the public tools for live tests on a disposable board first; do not call server
+functions from development scripts to modify an application project.
 
 Offline checks (do not import the server or start Altium):
 
@@ -103,9 +129,11 @@ python -B -m unittest discover -s server/tests -p test_step_export.py -v
 ```
 
 Offline tests exercise validation and record encoding, including explicit
-side selection, full-circle arc encoding, zero-copper NPTH input, hole-only
-updates, invalid values, duplicate identities and record injection. They do
-not claim Altium geometry or manufacturing validation.
+side selection, named-region encoding, unsupported-kind rejection before
+dispatch, zero-copper NPTH input, hole-only updates, invalid vertices, duplicate
+identities and record injection. Native-source checks cover the identity/save
+guards and refusal of foreign objects. They do not compile DelphiScript or
+claim live geometry, name persistence or manufacturing validation.
 
 API context:
 

@@ -103,22 +103,15 @@ def build_pad_spec(pcb_path, pads):
 
 
 def build_keepout_spec(pcb_path, keepouts):
-    """Build keepout upserts with explicit layers and object restrictions."""
+    """Build named-region upserts; unique_id is stored as Region.Name."""
     lines = ["PCB|" + _pcb_path(pcb_path)]
     if not isinstance(keepouts, list) or not keepouts:
         raise ValueError("keepouts must be a nonempty list")
-    geometry = {
-        "track": ("x1_mm", "y1_mm", "x2_mm", "y2_mm", "width_mm"),
-        "arc": ("x_mm", "y_mm", "radius_mm", "start_deg", "end_deg", "width_mm"),
-        "fill": ("x1_mm", "y1_mm", "x2_mm", "y2_mm"),
-        "region": ("vertices",),
-    }
     seen = set()
     for item in keepouts:
-        if not isinstance(item, dict) or item.get("kind") not in geometry:
-            raise ValueError("kind must be track, arc, fill, or region")
-        kind = item["kind"]
-        _unknown(item, {"unique_id", "kind", "layer", "restrictions", "locked", *geometry[kind]})
+        if not isinstance(item, dict) or item.get("kind") != "region":
+            raise ValueError("only kind=region is supported; stable identity uses Region.Name")
+        _unknown(item, {"unique_id", "kind", "layer", "restrictions", "locked", "vertices"})
         uid = item.get("unique_id", "")
         if not isinstance(uid, str) or not re.fullmatch(r"[A-Z0-9]{8}", uid):
             raise ValueError("unique_id must contain exactly eight uppercase letters or digits")
@@ -129,38 +122,28 @@ def build_keepout_spec(pcb_path, keepouts):
         restrictions = item.get("restrictions")
         if not isinstance(restrictions, list) or not restrictions:
             raise ValueError("restrictions must be a nonempty explicit list")
-        if any(not isinstance(r, str) or r not in _RESTRICTIONS for r in restrictions):
+        if any(not isinstance(value, str) or value not in _RESTRICTIONS for value in restrictions):
             raise ValueError("restriction must be via, track, copper, smd_pad, or th_pad")
-        mask = sum(_RESTRICTIONS[r] for r in set(restrictions))
+        mask = sum(_RESTRICTIONS[value] for value in set(restrictions))
         if mask != 31:
             raise ValueError("this tool supports all five restrictions together; selective keepouts are not supported")
         locked = _boolean(item.get("locked", True), "locked")
-        if kind == "region":
-            points = item.get("vertices")
-            if not isinstance(points, list) or len(points) < 3:
-                raise ValueError("region needs at least three vertices")
-            coords = []
-            numeric = []
-            for point in points:
-                if not isinstance(point, (list, tuple)) or len(point) != 2:
-                    raise ValueError("each vertex must be [x_mm, y_mm]")
-                coords.extend((_number(point[0], "vertex x"), _number(point[1], "vertex y")))
-                numeric.append(tuple(point))
-            if len(set(numeric)) != len(numeric):
-                raise ValueError("vertices must be distinct; do not repeat the closing vertex")
-            area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(numeric, numeric[1:] + numeric[:1]))
-            if abs(area) < 1e-12:
-                raise ValueError("region must have nonzero area")
-        else:
-            coords = [_number(item.get(key), key, 0 if key in {"radius_mm", "width_mm"} else None,
-                              strict=key in {"radius_mm", "width_mm"}) for key in geometry[kind]]
-            if kind == "fill" and (item["x2_mm"] <= item["x1_mm"] or item["y2_mm"] <= item["y1_mm"]):
-                raise ValueError("fill bounds must be ordered with positive width and height")
-            if kind == "track" and (item["x1_mm"], item["y1_mm"]) == (item["x2_mm"], item["y2_mm"]):
-                raise ValueError("track endpoints must differ")
-            if kind == "arc" and not 0 < item["end_deg"] - item["start_deg"] <= 360:
-                raise ValueError("arc must have a counterclockwise sweep in (0, 360]; use 0 and 360 for a circle")
-        lines.append("|".join(["KEEPOUT", uid, kind, layer, str(mask), locked, *coords]))
+        points = item.get("vertices")
+        if not isinstance(points, list) or len(points) < 3:
+            raise ValueError("region needs at least three vertices")
+        coords = []
+        numeric = []
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError("each vertex must be [x_mm, y_mm]")
+            coords.extend((_number(point[0], "vertex x"), _number(point[1], "vertex y")))
+            numeric.append(tuple(point))
+        if len(set(numeric)) != len(numeric):
+            raise ValueError("vertices must be distinct; do not repeat the closing vertex")
+        area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(numeric, numeric[1:] + numeric[:1]))
+        if abs(area) < 1e-12:
+            raise ValueError("region must have nonzero area")
+        lines.append("|".join(["KEEPOUT", uid, "region", layer, str(mask), locked, *coords]))
     return "\n".join(lines) + "\n"
 
 

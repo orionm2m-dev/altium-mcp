@@ -21,9 +21,9 @@ def pad(**changes):
     return result
 
 
-def arc(**changes):
-    result = dict(unique_id="KO000001", kind="arc", layer="bottom", restrictions=ALL,
-                  x_mm=0, y_mm=0, radius_mm=3.325, start_deg=0, end_deg=360, width_mm=1.95)
+def region(**changes):
+    result = dict(unique_id="KO000001", kind="region", layer="bottom", restrictions=ALL,
+                  vertices=[[0, 0], [2, 0], [2, 1], [0, 1]])
     result.update(changes)
     return result
 
@@ -68,35 +68,71 @@ class PadSpecTests(unittest.TestCase):
 
 
 class KeepoutSpecTests(unittest.TestCase):
-    def test_annulus_keeps_explicit_side_and_full_circle(self):
-        fields = build_keepout_spec(PCB, [arc()]).splitlines()[1].split("|")
-        self.assertEqual(fields[:6], ["KEEPOUT", "KO000001", "arc", "bottom", "31", "1"])
-        self.assertEqual(fields[6:], ["0", "0", "3.325", "0", "360", "1.95"])
+    def test_named_region_keeps_existing_input_encoding(self):
+        fields = build_keepout_spec(PCB, [region()]).splitlines()[1].split("|")
+        self.assertEqual(fields[:6], ["KEEPOUT", "KO000001", "region", "bottom", "31", "1"])
+        self.assertEqual(fields[6:], ["0", "0", "2", "0", "2", "1", "0", "1"])
 
     def test_all_layers_only_when_explicit(self):
-        self.assertIn("|all|31|", build_keepout_spec(PCB, [arc(layer="all")]))
+        self.assertIn("|all|31|", build_keepout_spec(PCB, [region(layer="all")]))
         with self.assertRaises(ValueError):
-            build_keepout_spec(PCB, [arc(layer=None)])
+            build_keepout_spec(PCB, [region(layer=None)])
 
     def test_selective_restrictions_fail_explicitly(self):
         with self.assertRaisesRegex(ValueError, "selective"):
-            build_keepout_spec(PCB, [arc(restrictions=["via"])])
+            build_keepout_spec(PCB, [region(restrictions=["via"])])
 
-    def test_unique_ids_and_explicit_restrictions_are_required(self):
-        for change in ({"unique_id": "lower"}, {"restrictions": []}, {"restrictions": ["everything"]},
-                       {"start_deg": 360, "end_deg": 0}, {"end_deg": 720}, {"width_mm": 0}):
+    def test_unsupported_kinds_rejected_even_with_otherwise_valid_geometry(self):
+        for kind in ("arc", "track", "fill", None, "Region"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "only kind=region"):
+                build_keepout_spec(PCB, [region(kind=kind)])
+
+    def test_unique_names_and_explicit_restrictions_are_required(self):
+        for change in ({"unique_id": "lower"}, {"unique_id": "KO000001|"},
+                       {"restrictions": []}, {"restrictions": ["everything"]},
+                       {"locked": "false"}, {"width_mm": 1}):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                build_keepout_spec(PCB, [arc(**change)])
+                build_keepout_spec(PCB, [region(**change)])
         with self.assertRaisesRegex(ValueError, "duplicate"):
-            build_keepout_spec(PCB, [arc(), arc()])
+            build_keepout_spec(PCB, [region(), region()])
 
-    def test_fill_and_region_validation(self):
-        base = dict(unique_id="KO000002", layer="top", restrictions=ALL)
-        self.assertIn("|fill|top|", build_keepout_spec(PCB, [dict(base, kind="fill", x1_mm=0, y1_mm=0, x2_mm=1, y2_mm=2)]))
-        for points in ([[0, 0], [1, 1], [2, 2]], [[0, 0], [1, 0], [0, 0]]):
-            with self.assertRaises(ValueError):
-                build_keepout_spec(PCB, [dict(base, kind="region", vertices=points)])
-        self.assertIn("|region|top|", build_keepout_spec(PCB, [dict(base, kind="region", vertices=[[0, 0], [1, 0], [0, 1]])]))
+    def test_region_vertex_validation(self):
+        invalid = ([], [[0, 0], [1, 0]], [[0, 0], [1, 1], [2, 2]],
+                   [[0, 0], [1, 0], [0, 0]], [[0, 0], [1, 0], [0, float("inf")]],
+                   [[0, 0], [1, 0], [0, float("nan")]], [[0, 0], [True, 0], [0, 1]],
+                   [[0, 0], [1, 0], [0, 1, 2]])
+        for points in invalid:
+            with self.subTest(points=points), self.assertRaises(ValueError):
+                build_keepout_spec(PCB, [region(vertices=points)])
+        self.assertIn("|region|top|", build_keepout_spec(PCB, [region(layer="top", vertices=[[0, 0], [1, 0], [0, 1]])]))
+
+    def test_native_region_identity_guard_prevents_unverified_save(self):
+        source = Path(__file__).resolve().parents[1].joinpath("AltiumScript/pcb_primitives.pas").read_text(encoding="utf-8")
+        body = source.split("function SetPcbKeepoutsReport", 1)[1]
+        rejection = "only kind=region is supported"
+        self.assertLess(body.index(rejection), body.index("OpenBoardAtPath(PcbPath)"))
+        self.assertLess(body.index("duplicate requested keepout identity"), body.index("PCBServer.PreProcess;"))
+        for guard in ("not P.IsKeepout", "P.Component <> nil", "P.InPolygon", "Count > 1",
+                      "P.ObjectId <> eRegionObject", "Region.Name <> Id", "Region.Kind <> eRegionKind_Copper"):
+            self.assertIn(guard, body)
+            self.assertLess(body.index(guard), body.index("PCBServer.PreProcess;"))
+        self.assertIn("Region.Name := Id", body)
+        self.assertNotIn("P.UniqueId :=", body)
+        self.assertLess(body.index("Board.AddPCBObject(P)"), body.index("ActualId := Region.Name"))
+        self.assertIn("ItemIdentity := ActualId = Id", body)
+        self.assertIn("IdentityVerified := False", body)
+        self.assertIn("if IdentityVerified and FlagsVerified and (Error = '') then Saved := SaveBoardDocument(PcbPath)", body)
+        self.assertIn('"identity_kind": "region_name"', body)
+        self.assertIn("Contour := Region.MainContour", body)
+        for unsupported in ("IPCB_Arc", "IPCB_Track", "IPCB_Fill", "Fill.X1", "KeepoutObjectId"):
+            self.assertNotIn(unsupported, body)
+
+    def test_native_lookup_counts_region_names_and_foreign_uid_collisions(self):
+        source = Path(__file__).resolve().parents[1].joinpath("AltiumScript/pcb_primitives.pas").read_text(encoding="utf-8")
+        lookup = source.split("function FindKeepoutPrimitive", 1)[1].split("function SetPcbKeepoutsReport", 1)[0]
+        for token in ("Matches := P.UniqueId = Id", "Region.Name = Id", "if Matches then", "Count := Count + 1"):
+            self.assertIn(token, lookup)
+        self.assertEqual(lookup.count("Count := Count + 1"), 1)
 
     def test_server_python_parses_without_import_side_effects(self):
         ast.parse(Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8"))
@@ -142,7 +178,7 @@ class ProcessRecoveryTests(unittest.TestCase):
             self.assertLess(body.index("PcbPrimitiveProcessGuard(0)"), body.index("PCBServer.PreProcess;"))
         self.assertIn("while Log.Count >= 64 do Log.Delete(0)", source)
         self.assertIn("Log.SaveToFile(Path)", source)
-        for phase in ("mutation_lookup", "set_unique_id", "set_keepout_flag", "region_kind", "postprocess_completed", "save_if_verified"):
+        for phase in ("mutation_lookup", "set_region_name", "set_keepout_flag", "region_kind", "postprocess_completed", "save_if_verified"):
             self.assertIn("'" + phase + "'", source)
 
     def test_public_wrapper_does_not_dispatch_invalid_repair(self):
@@ -170,8 +206,13 @@ class ProcessRecoveryTests(unittest.TestCase):
             env["altium_bridge"].execute_command.assert_awaited_once_with("recover_pcb_process", {})
             self.assertIn("PROCESS|1|0", Path(directory, "pcb_process_recovery_spec.txt").read_text())
             env["altium_bridge"].execute_command.reset_mock()
+            for kind in ("arc", "fill", "track"):
+                rejected = json.loads(asyncio.run(env["set_pcb_keepouts"](None, PCB, [region(kind=kind)])))
+                self.assertFalse(rejected["success"])
+                self.assertIn("only kind=region", rejected["error"])
+            env["altium_bridge"].execute_command.assert_not_awaited()
             env["altium_bridge"].execute_command.return_value = {"success": False, "error": "timeout"}
-            failed = json.loads(asyncio.run(env["set_pcb_keepouts"](None, PCB, [arc()])))
+            failed = json.loads(asyncio.run(env["set_pcb_keepouts"](None, PCB, [region()])))
             self.assertFalse(failed["success"])
             self.assertEqual(failed["last_phase"], "dispatch_pending")
             self.assertTrue(Path(failed["trace_path"]).exists())
