@@ -83,7 +83,7 @@ class RoutingSpecTests(unittest.TestCase):
                 build_routing_spec(PCB,*args)
 
     def test_real_native_rounding_validation_is_before_mutation(self):
-        source=(ROOT/'AltiumScript/pcb_routing.pas').read_text(encoding='utf-8')
+        source=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8').split('// Explicit free copper track/via batches.',1)[1]
         body=source.split('function SetPcbRoutingReport',1)[1]
         for guard in ('RoutingRecordGuard(Board, Rec)', 'NetCount <> 1', 'Keys.IndexOf(Key)',
                       'Count > 1', "(Action = 'delete') and (Count <> 1)",
@@ -99,7 +99,7 @@ class RoutingSpecTests(unittest.TestCase):
         self.assertNotIn('SetState_Unique',source)
 
     def test_native_save_is_after_final_geometry_and_net_verification(self):
-        source=(ROOT/'AltiumScript/pcb_routing.pas').read_text(encoding='utf-8')
+        source=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8').split('// Explicit free copper track/via batches.',1)[1]
         body=source.split('function SetPcbRoutingReport',1)[1]
         self.assertEqual(body.count('PCBServer.PreProcess;'),1)
         self.assertEqual(body.count('PCBServer.PostProcess;'),1)
@@ -133,7 +133,8 @@ class RoutingSpecTests(unittest.TestCase):
             self.assertEqual((Path(directory)/'pcb_routing_spec.txt').read_text(),build_routing_spec(PCB,[track()],[via()]))
         self.assertIn("'set_pcb_routing':",(ROOT/'AltiumScript/Altium_API.pas').read_text())
         self.assertIn("CommandName = 'set_pcb_routing'",(ROOT/'AltiumScript/other_utils.pas').read_text())
-        self.assertIn('DocumentPath=pcb_routing.pas',(ROOT/'AltiumScript/Altium_API.PrjScr').read_text())
+        self.assertIn('DocumentPath=pcb_primitives.pas',(ROOT/'AltiumScript/Altium_API.PrjScr').read_text())
+        self.assertNotIn('DocumentPath=pcb_routing.pas',(ROOT/'AltiumScript/Altium_API.PrjScr').read_text())
 
 
 if __name__=='__main__': unittest.main()

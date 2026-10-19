@@ -108,7 +108,7 @@ class KeepoutSpecTests(unittest.TestCase):
 
     def test_native_region_identity_guard_prevents_unverified_save(self):
         source = Path(__file__).resolve().parents[1].joinpath("AltiumScript/pcb_primitives.pas").read_text(encoding="utf-8")
-        body = source.split("function SetPcbKeepoutsReport", 1)[1]
+        body = source.split("function SetPcbKeepoutsReport", 1)[1].split("// Explicit free copper track/via batches.", 1)[0]
         rejection = "only kind=region is supported"
         self.assertLess(body.index(rejection), body.index("OpenBoardAtPath(PcbPath)"))
         self.assertLess(body.index("duplicate requested keepout identity"), body.index("PCBServer.PreProcess;"))

@@ -96,8 +96,12 @@ then precisely delete them and verify saved absence and unchanged components.
 Exercise foreign-net/owner and duplicate rejection before using production
 geometry. Unregistered factory property probes alone are not this qualification.
 
-The public Python tool and new script unit require a supported MCP-server
-refresh before use. This change does not restart the server or Altium.
+The public Python tool requires a supported MCP-server refresh before its first
+use. Native routing functions live in the existing pcb_primitives.pas unit: an
+already open Altium script project may retain its source membership even after
+the MCP server restarts. Adding a separate unit can therefore leave its entry
+point undeclared while existing units reload correctly. This layout avoids that
+additional source-registration dependency. It does not restart Altium.
 
 References:
 
