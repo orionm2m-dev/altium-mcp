@@ -30,6 +30,7 @@ from step_export import export_step
 from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
 from pcb_routing import build_routing_spec
 import dialogs
+import script_guard
 
 # Configure logging
 logging.basicConfig(
@@ -304,6 +305,27 @@ class AltiumBridge:
             start_time = time.time()
             while not RESPONSE_FILE.exists() and time.time() - start_time < timeout:
                 await asyncio.sleep(0.5)
+                if not RESPONSE_FILE.exists() and time.time() - start_time >= 2:
+                    failures = script_guard.find_script_errors(self.config.altium_exe_path)
+                    if failures:
+                        closed = script_guard.dismiss_script_errors(self.config.altium_exe_path, failures)
+                        stopped = False
+                        stop_error = ""
+                        if closed and all(item["safe_to_stop"] for item in failures):
+                            try:
+                                script_guard.stop_script_executor(self.config.altium_exe_path)
+                                stopped = True
+                            except OSError as exc:
+                                stop_error = str(exc)
+                        logger.error("Altium script error: %s", failures)
+                        return {
+                            "success": False, "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
+                            "command": command, "script_errors": failures,
+                            "dialogs_closed": len(closed),
+                            "executor_stop_dispatched": stopped, "executor_stop_error": stop_error,
+                            "executor_recovered": False, "requires_recovery_probe": True,
+                            "mutation_state": "unknown", "retry_performed": False,
+                        }
             
             if not RESPONSE_FILE.exists():
                 logger.error("Timeout waiting for response from Altium")
@@ -1345,8 +1367,7 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 60) -> st
     if not os.path.exists(exe):
         return json.dumps({"recovered": False, "error": f"Altium executable not found: {exe}"})
     logger.info("recover_script_executor: dispatching EditScript:Stop")
-    subprocess.Popen(f'"{exe}" -REditScript:Stop', shell=True, stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    script_guard.stop_script_executor(exe)
     await asyncio.sleep(3)
     probe = await run_altium_script(ctx, "ResultText := '{\"probe\": \"executor ok\"}';",
                                     timeout_seconds)
@@ -2207,7 +2228,7 @@ async def open_document(ctx: Context, path: str) -> str:
 def _script_result(response: dict, extra: dict = None) -> str:
     """The JSON a script function returned, with extra fields merged in."""
     if not response.get("success", False):
-        return json.dumps({"success": False, "error": response.get("error", "unknown error"), **(extra or {})})
+        return json.dumps({**response, "success": False, "error": response.get("error", "unknown error"), **(extra or {})})
     result = response.get("result", {})
     if isinstance(result, str):
         try:

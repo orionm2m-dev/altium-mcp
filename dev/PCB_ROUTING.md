@@ -107,3 +107,24 @@ References:
 
 - [Altium PCB design-object API](https://www.altium.com/documentation/altium-dxp-developer/pcb-api-design-objects-interfaces-reference)
 - [Altium Situs autorouter](https://www.altium.com/documentation/altium-designer/pcb/routing/situs-topological-autorouter): separate capability, not invoked by this tool.
+
+## Script failure handling
+
+The bridge watches for narrowly recognized compiler diagnostics and explicit
+script-runtime errors from the configured Altium executable. It captures their
+text and returns promptly instead of consuming the full response timeout.
+Only revalidated error dialogs are closed. Save confirmations, busy-instance
+messages, library errors and generic access violations are not answered.
+Multiple visible instances disable the automatic Stop action because the
+command-line Stop process has no PID selector.
+
+A recognized failure dispatches the documented EditScript:Stop process once,
+without a shell window. It never retries the failed operation. The response
+keeps mutation_state unknown and executor_recovered false: inspect the native
+trace/file and run the public recover_script_executor probe before deciding
+whether a retry is safe. A queued Stop action alone is not proof of recovery.
+
+Classifier, fail-fast response and hidden-process contracts have offline
+tests. Their Windows dialog capture still needs native qualification.
+Changes to this Python bridge require a supported MCP-server restart to take
+effect; editing the file does not update an already running server.
