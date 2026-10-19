@@ -180,6 +180,7 @@ begin
        (CommandName = 'set_pcb_pads') or
        (CommandName = 'set_pcb_keepouts') or
        (CommandName = 'set_pcb_routing') or
+       (CommandName = 'set_pcb_polygons') or
        (CommandName = 'save_documents') then
     begin
         Result := True;

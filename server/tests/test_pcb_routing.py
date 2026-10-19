@@ -84,7 +84,7 @@ class RoutingSpecTests(unittest.TestCase):
 
     def test_real_native_rounding_validation_is_before_mutation(self):
         source=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8').split('// Explicit free copper track/via batches.',1)[1]
-        body=source.split('function SetPcbRoutingReport',1)[1]
+        body=source.split('function SetPcbRoutingReport',1)[1].split('// Named solid copper polygons',1)[0]
         for guard in ('RoutingRecordGuard(Board, Rec)', 'NetCount <> 1', 'Keys.IndexOf(Key)',
                       'Count > 1', "(Action = 'delete') and (Count <> 1)",
                       'RoutingOwnershipGuard(P, NetName)', 'PcbPrimitiveProcessGuard(0)'):
@@ -100,7 +100,7 @@ class RoutingSpecTests(unittest.TestCase):
 
     def test_native_save_is_after_final_geometry_and_net_verification(self):
         source=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8').split('// Explicit free copper track/via batches.',1)[1]
-        body=source.split('function SetPcbRoutingReport',1)[1]
+        body=source.split('function SetPcbRoutingReport',1)[1].split('// Named solid copper polygons',1)[0]
         self.assertEqual(body.count('PCBServer.PreProcess;'),1)
         self.assertEqual(body.count('PCBServer.PostProcess;'),1)
         self.assertIn("finally\n            KeepoutTrace(Trace, TracePath, 'postprocess'",body)

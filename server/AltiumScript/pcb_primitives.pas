@@ -987,3 +987,437 @@ begin
         Spec.Free; Keys.Free; Actions.Free; Items.Free; Trace.Free;
     end;
 end;
+
+// Named solid copper polygons and polygon-only cutouts. Identity is Name.
+// All request targets and affected existing pours are preflighted before writes.
+
+function PourObjectName(P: IPCB_Primitive): String;
+var Poly: IPCB_Polygon; Reg: IPCB_Region;
+begin
+    Result := '';
+    if P.ObjectId = ePolyObject then begin Poly := P; Result := Poly.Name; end
+    else if P.ObjectId = eRegionObject then begin Reg := P; Result := Reg.Name; end;
+end;
+
+function FindPourObject(Board: IPCB_Board; Name: String; var Count: Integer): IPCB_Primitive;
+var Iter: IPCB_BoardIterator; P: IPCB_Primitive;
+begin
+    Result := nil; Count := 0;
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePolyObject, eRegionObject));
+        Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        P := Iter.FirstPCBObject;
+        while P <> nil do begin
+            if SameText(PourObjectName(P), Name) then begin Result := P; Count := Count + 1; end;
+            P := Iter.NextPCBObject;
+        end;
+    finally Board.BoardIterator_Destroy(Iter); end;
+end;
+
+function PourOwnershipGuard(P: IPCB_Primitive; Rec: String): String;
+var Poly: IPCB_Polygon; Reg: IPCB_Region; Kind, Name: String;
+begin
+    Result := '';
+    if P = nil then Exit;
+    Kind := GetFieldFromPipeString(Rec, 0);
+    Name := GetFieldFromPipeString(Rec, 2);
+    if PourObjectName(P) <> Name then Result := 'case-insensitive name collision; exact spelling is required'
+    else if P.Component <> nil then Result := 'component-owned pour object cannot be adopted'
+    else if P.InPolygon then Result := 'polygon-owned child cannot be adopted'
+    else if P.IsKeepout then Result := 'keepout cannot be adopted as polygon or cutout'
+    else if P.Layer <> PrimitiveLayer(GetFieldFromPipeString(Rec, 4)) then Result := 'existing named object belongs to another layer'
+    else if Kind = 'POLYGON' then begin
+        if P.ObjectId <> ePolyObject then Result := 'polygon name collides with another object kind'
+        else begin
+            Poly := P;
+            if Poly.PolygonType <> eSignalLayerPolygon then Result := 'only signal-layer polygons are supported'
+            else if Poly.Net = nil then Result := 'existing polygon has no net'
+            else if Poly.Net.Name <> GetFieldFromPipeString(Rec, 3) then Result := 'existing polygon belongs to another net';
+        end;
+    end
+    else if Kind = 'CUTOUT' then begin
+        if P.ObjectId <> eRegionObject then Result := 'cutout name collides with another object kind'
+        else begin
+            Reg := P;
+            if Reg.Kind <> eRegionKind_Cutout then Result := 'region is not a polygon-only cutout'
+            else if Reg.Net <> nil then Result := 'polygon cutout must not have a net'
+            else if Reg.HoleCount <> 0 then Result := 'compound cutout regions are unsupported';
+        end;
+    end else Result := 'unsupported pour object kind';
+end;
+
+function PourSegmentCount(P: IPCB_Primitive): Integer;
+var Poly: IPCB_Polygon; Reg: IPCB_Region;
+begin
+    if P.ObjectId = ePolyObject then begin Poly := P; Result := Poly.PointCount; end
+    else begin Reg := P; Result := Reg.ShapeSegmentCount; end;
+end;
+
+function PourSegmentAt(P: IPCB_Primitive; Index: Integer): TPolySegment;
+var Poly: IPCB_Polygon; Reg: IPCB_Region;
+begin
+    if P.ObjectId = ePolyObject then begin Poly := P; Result := Poly.Segments[Index]; end
+    else begin Reg := P; Result := Reg.ShapeSegments[Index]; end;
+end;
+
+function PourShapeGuard(P: IPCB_Primitive): String;
+var i, N: Integer; Seg: TPolySegment;
+begin
+    Result := '';
+    if P = nil then Exit;
+    N := PourSegmentCount(P);
+    if (N < 3) or (N > 4096) then begin Result := 'existing contour vertex count is unsupported'; Exit; end;
+    for i := 0 to N - 1 do begin
+        Seg := PourSegmentAt(P, i);
+        if Seg.Kind <> ePolySegmentLine then begin Result := 'arc contours are unsupported'; Exit; end;
+    end;
+end;
+
+function PourOptionsKey(P: IPCB_Primitive): String;
+var Poly: IPCB_Polygon;
+begin
+    Result := IntToStr(P.Layer) + '|' + JSONBool(not P.Moveable);
+    if P.ObjectId = ePolyObject then begin
+        Poly := P;
+        Result := Result + '|' + IntToStr(Poly.PolygonType) + '|' + IntToStr(Poly.PolyHatchStyle) +
+            '|' + IntToStr(Poly.PourOver) + '|' + JSONBool(Poly.RemoveDead) +
+            '|' + JSONBool(Poly.RemoveIslandsByArea) + '|' + JSONBool(Poly.RemoveNarrowNecks) +
+            '|' + IntToStr(Poly.NeckWidthThreshold) + '|' + IntToStr(Poly.ArcApproximation);
+    end;
+end;
+
+function PourGeometryKey(P: IPCB_Primitive): String;
+var i: Integer; Seg: TPolySegment;
+begin
+    Result := PourOptionsKey(P);
+    for i := 0 to PourSegmentCount(P) - 1 do begin
+        Seg := PourSegmentAt(P, i);
+        Result := Result + '|' + IntToStr(Seg.Kind) + ',' + IntToStr(Seg.vx) + ',' + IntToStr(Seg.vy);
+    end;
+end;
+
+function PourRequestKey(Board: IPCB_Board; Rec: String): String;
+var i, N: Integer;
+begin
+    Result := IntToStr(PrimitiveLayer(GetFieldFromPipeString(Rec, 4))) + '|' +
+        JSONBool(GetFieldFromPipeString(Rec, 5) = '1');
+    if GetFieldFromPipeString(Rec, 0) = 'POLYGON' then
+        Result := Result + '|' + IntToStr(eSignalLayerPolygon) + '|' + IntToStr(ePolySolid) +
+            '|' + IntToStr(ePolygonPourOver_SameNet) + '|' + JSONBool(GetFieldFromPipeString(Rec, 6) = '1') +
+            '|false|true|' + IntToStr(PrimitiveCoord(Rec, 7)) + '|' + IntToStr(PrimitiveCoord(Rec, 8));
+    N := StrToInt(GetFieldFromPipeString(Rec, 10));
+    for i := 0 to N - 1 do
+        Result := Result + '|' + IntToStr(ePolySegmentLine) + ',' +
+            IntToStr(Board.XOrigin + PrimitiveCoord(Rec, 11 + i * 2)) + ',' +
+            IntToStr(Board.YOrigin + PrimitiveCoord(Rec, 12 + i * 2));
+end;
+
+function PourCopperRegionCount(Poly: IPCB_Polygon): Integer;
+var Iter: IPCB_GroupIterator; Reg: IPCB_Region;
+begin
+    Result := 0;
+    Iter := Poly.GroupIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+        Reg := Iter.FirstPCBObject;
+        while Reg <> nil do begin
+            if (Reg.Kind = eRegionKind_Copper) and (Reg.Area > 0) then Result := Result + 1;
+            Reg := Iter.NextPCBObject;
+        end;
+    finally Poly.GroupIterator_Destroy(Iter); end;
+end;
+
+function PourObjectJSON(Board: IPCB_Board; P: IPCB_Primitive): String;
+var Poly: IPCB_Polygon; Reg: IPCB_Region; Verts: TStringList; i: Integer; Kind, NetName, Extra: String;
+begin
+    Verts := TStringList.Create;
+    try
+        Kind := 'cutout'; NetName := ''; Extra := '';
+        if P.ObjectId = ePolyObject then begin
+            Kind := 'polygon'; Poly := P;
+            if Poly.Net <> nil then NetName := Poly.Net.Name;
+            Extra := ', "solid": ' + JSONBool(Poly.PolyHatchStyle = ePolySolid) +
+                ', "remove_dead": ' + JSONBool(Poly.RemoveDead) +
+                ', "remove_islands_by_area": ' + JSONBool(Poly.RemoveIslandsByArea) +
+                ', "remove_narrow_necks": ' + JSONBool(Poly.RemoveNarrowNecks) +
+                ', "neck_width_mm": ' + PcbDocNum('0.########', CoordToMMs(Poly.NeckWidthThreshold)) +
+                ', "arc_tolerance_mm": ' + PcbDocNum('0.########', CoordToMMs(Poly.ArcApproximation)) +
+                ', "generated_copper_regions": ' + IntToStr(PourCopperRegionCount(Poly));
+        end;
+        for i := 0 to PourSegmentCount(P) - 1 do Verts.Add(OutlineSegmentJSON(Board, PourSegmentAt(P, i)));
+        Result := '{"kind": ' + JSONStr(Kind) + ', "name": ' + JSONStr(PourObjectName(P)) +
+            ', "net": ' + JSONStr(NetName) + ', "layer": ' + JSONStr(Layer2String(P.Layer)) +
+            ', "locked": ' + JSONBool(not P.Moveable) + ', "is_keepout": ' + JSONBool(P.IsKeepout) +
+            ', "native_geometry_key": ' + JSONStr(PourGeometryKey(P)) + Extra + ', ' + BuildJSONArray(Verts, 'vertices_mm') + '}';
+    finally Verts.Free; end;
+end;
+
+function PourInventoryJSON(Board: IPCB_Board): String;
+var Iter: IPCB_BoardIterator; P: IPCB_Primitive; Reg: IPCB_Region; Items: TStringList; Include: Boolean;
+begin
+    Items := TStringList.Create;
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePolyObject, eRegionObject));
+        Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        P := Iter.FirstPCBObject;
+        while P <> nil do begin
+            Include := P.ObjectId = ePolyObject;
+            if P.ObjectId = eRegionObject then begin Reg := P; Include := Reg.Kind = eRegionKind_Cutout; end;
+            if Include then Items.Add(PourObjectJSON(Board, P));
+            P := Iter.NextPCBObject;
+        end;
+        Result := BuildJSONArray(Items, 'inventory');
+    finally Board.BoardIterator_Destroy(Iter); Items.Free; end;
+end;
+
+function PourBatchHasPolygon(Spec: TStringList; Name: String): Boolean;
+var i: Integer;
+begin
+    Result := False;
+    for i := 1 to Spec.Count - 1 do
+        if (GetFieldFromPipeString(Spec[i], 0) = 'POLYGON') and
+           (GetFieldFromPipeString(Spec[i], 2) = Name) then Result := True;
+end;
+
+function PourAffectedGuard(Board: IPCB_Board; Spec: TStringList): String;
+var Iter: IPCB_BoardIterator; Poly: IPCB_Polygon; i: Integer; Affected: Boolean;
+begin
+    Result := '';
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePolyObject));
+        Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Poly := Iter.FirstPCBObject;
+        while Poly <> nil do begin
+            Affected := False;
+            for i := 1 to Spec.Count - 1 do
+                if (PrimitiveLayer(GetFieldFromPipeString(Spec[i], 4)) = Poly.Layer) and
+                   (GetFieldFromPipeString(Spec[i], 1) <> 'repour') then Affected := True;
+            if Affected and not PourBatchHasPolygon(Spec, Poly.Name) then begin
+                Result := 'include every existing polygon on changed layers explicitly, at least as repour: ' + Poly.Name;
+                Break;
+            end;
+            Poly := Iter.NextPCBObject;
+        end;
+    finally Board.BoardIterator_Destroy(Iter); end;
+end;
+
+procedure ApplyPourGeometry(Board: IPCB_Board; P: IPCB_Primitive; Rec: String);
+var Poly: IPCB_Polygon; Reg: IPCB_Region; Seg: TPolySegment; i, N, Count: Integer;
+begin
+    N := StrToInt(GetFieldFromPipeString(Rec, 10));
+    P.Layer := PrimitiveLayer(GetFieldFromPipeString(Rec, 4));
+    P.IsKeepout := False;
+    P.Moveable := GetFieldFromPipeString(Rec, 5) = '0';
+    if P.ObjectId = ePolyObject then begin
+        Poly := P;
+        Poly.Name := GetFieldFromPipeString(Rec, 2);
+        Poly.Net := RoutingNet(Board, GetFieldFromPipeString(Rec, 3), Count);
+        Poly.PolygonType := eSignalLayerPolygon;
+        Poly.PolyHatchStyle := ePolySolid;
+        Poly.PourOver := ePolygonPourOver_SameNet;
+        Poly.RemoveDead := GetFieldFromPipeString(Rec, 6) = '1';
+        Poly.RemoveIslandsByArea := False;
+        Poly.RemoveNarrowNecks := True;
+        Poly.NeckWidthThreshold := PrimitiveCoord(Rec, 7);
+        Poly.ArcApproximation := PrimitiveCoord(Rec, 8);
+        Poly.PointCount := N;
+    end else begin
+        Reg := P;
+        Reg.Name := GetFieldFromPipeString(Rec, 2);
+        Reg.Net := nil;
+        Reg.Kind := eRegionKind_Cutout;
+        Reg.ShapeSegmentCount := N;
+    end;
+    for i := 0 to N - 1 do begin
+        Seg := TPolySegment;
+        Seg.Kind := ePolySegmentLine;
+        Seg.vx := Board.XOrigin + PrimitiveCoord(Rec, 11 + i * 2);
+        Seg.vy := Board.YOrigin + PrimitiveCoord(Rec, 12 + i * 2);
+        if P.ObjectId = ePolyObject then Poly.Segments[i] := Seg else Reg.ShapeSegments[i] := Seg;
+    end;
+    if P.ObjectId = eRegionObject then Reg.UpdateContourFromShape(True);
+end;
+
+function SetPcbPolygonsReport(SpecPath: String): String;
+var
+    Spec, Names, Keys, Actions, Items, Trace: TStringList;
+    Board: IPCB_Board;
+    Net: IPCB_Net;
+    P: IPCB_Primitive;
+    Poly: IPCB_Polygon;
+    PcbPath, Rec, Name, Kind, Action, Error, Key, TracePath: String;
+    i, j, Count, NetCount, N, Added, Updated, Removed, Repoured, Unchanged: Integer;
+    OldRepourMode: TPolygonRepourMode;
+    DryRun, Saved, Verified, IsNew: Boolean;
+begin
+    if not FileExists(SpecPath) then begin Result := PcbDocError('polygon spec does not exist'); Exit; end;
+    Spec := TStringList.Create; Names := TStringList.Create; Keys := TStringList.Create;
+    Actions := TStringList.Create; Items := TStringList.Create; Trace := TStringList.Create;
+    TracePath := ChangeFileExt(SpecPath, '.trace.txt');
+    try
+        KeepoutTrace(Trace, TracePath, 'load_spec', 0, '');
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count = 0 then begin Result := PcbDocError('empty polygon spec'); Exit; end;
+        PcbPath := GetFieldFromPipeString(Spec[0], 1);
+        DryRun := GetFieldFromPipeString(Spec[0], 2) = '1';
+        if (Spec.Count = 1) and not DryRun then begin Result := PcbDocError('empty mutation batch'); Exit; end;
+        KeepoutTrace(Trace, TracePath, 'open_board', 0, '');
+        Board := OpenBoardAtPath(PcbPath);
+        if Board = nil then begin Result := PcbDocError('cannot open requested PCB'); Exit; end;
+        if not SameText(Board.FileName, PcbPath) then begin Result := PcbDocError('opened PCB path differs'); Exit; end;
+        Error := PcbPrimitiveProcessGuard(0);
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        for i := 1 to Spec.Count - 1 do begin
+            Rec := Spec[i]; Kind := GetFieldFromPipeString(Rec, 0);
+            Action := GetFieldFromPipeString(Rec, 1); Name := GetFieldFromPipeString(Rec, 2);
+            KeepoutTrace(Trace, TracePath, 'preflight', i, Name);
+            if (Kind <> 'POLYGON') and (Kind <> 'CUTOUT') then Error := 'invalid pour record kind';
+            if (Action <> 'create') and (Action <> 'update') and (Action <> 'upsert') and
+               (Action <> 'delete') and (Action <> 'repour') then Error := 'invalid pour operation';
+            if (Kind = 'CUTOUT') and (Action = 'repour') then Error := 'cutouts cannot be repoured';
+            if Trim(Name) = '' then Error := 'empty pour identity';
+            if Names.IndexOf(Name) >= 0 then Error := 'duplicate pour identity';
+            Names.Add(Name);
+            if (GetFieldFromPipeString(Rec, 4) <> 'top') and (GetFieldFromPipeString(Rec, 4) <> 'bottom') then Error := 'outer copper layers only';
+            if not MidLayerInStack(Board.LayerStack_V7, PrimitiveLayer(GetFieldFromPipeString(Rec, 4))) then Error := 'requested layer absent';
+            if Kind = 'POLYGON' then begin
+                Net := RoutingNet(Board, GetFieldFromPipeString(Rec, 3), NetCount);
+                if NetCount <> 1 then Error := 'polygon net must resolve exactly once';
+            end;
+            if (Action <> 'delete') and (Action <> 'repour') then begin
+                N := StrToInt(GetFieldFromPipeString(Rec, 10));
+                if (N < 3) or (N > 4096) then Error := 'unsupported contour count';
+                if (PrimitiveCoord(Rec, 7) <= 0) or (PrimitiveCoord(Rec, 8) <= 0) then Error := 'neck/arc dimension rounds to zero';
+                for j := 0 to N - 1 do
+                    if (PrimitiveCoord(Rec, 11+j*2) = PrimitiveCoord(Rec, 11+((j+1) mod N)*2)) and
+                       (PrimitiveCoord(Rec, 12+j*2) = PrimitiveCoord(Rec, 12+((j+1) mod N)*2)) then Error := 'edge collapses in native coordinates';
+            end;
+            if Error <> '' then Break;
+            P := FindPourObject(Board, Name, Count);
+            if Count > 1 then Error := 'multiple objects have the requested name'
+            else if (Action = 'create') and (Count <> 0) then Error := 'create requires an unused name'
+            else if ((Action = 'update') or (Action = 'delete') or (Action = 'repour')) and (Count <> 1) then Error := 'operation requires exactly one existing object'
+            else Error := PourOwnershipGuard(P, Rec);
+            if Error = '' then Error := PourShapeGuard(P);
+            if Error <> '' then Break;
+            if (Action = 'delete') or (Action = 'repour') then Key := PourGeometryKey(P)
+            else Key := PourRequestKey(Board, Rec);
+            Keys.Add(Key);
+        end;
+        if Error = '' then Error := PourAffectedGuard(Board, Spec);
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        if DryRun then begin
+            KeepoutTrace(Trace, TracePath, 'dry_run_completed', 0, '');
+            Result := '{"success": true, "dry_run": true, "saved": false, "preflight_pass": true, "path": ' +
+                JSONStr(PcbPath) + ', ' + PourInventoryJSON(Board) + '}';
+            Exit;
+        end;
+        Added := 0; Updated := 0; Removed := 0; Repoured := 0; Unchanged := 0;
+        Saved := False; Verified := False;
+        KeepoutTrace(Trace, TracePath, 'preprocess', 0, '');
+        OldRepourMode := PCBServer.SystemOptions.PolygonRepour;
+        try
+            // Avoid user-configurable confirmation prompts; restore in every normal exit.
+            PCBServer.SystemOptions.PolygonRepour := eAlwaysRepour;
+            PCBServer.PreProcess;
+            try
+                for i := 1 to Spec.Count - 1 do begin
+                    Rec := Spec[i]; Kind := GetFieldFromPipeString(Rec, 0);
+                    Action := GetFieldFromPipeString(Rec, 1); Name := GetFieldFromPipeString(Rec, 2);
+                    KeepoutTrace(Trace, TracePath, 'mutation_lookup', i, Name);
+                    P := FindPourObject(Board, Name, Count);
+                    Error := PourOwnershipGuard(P, Rec);
+                    if Count > 1 then Error := 'pour target became ambiguous';
+                    if Error <> '' then Break;
+                    if Action = 'delete' then begin
+                        Board.RemovePCBObject(P); Removed := Removed + 1; Actions.Add('deleted');
+                    end else if Action = 'repour' then Actions.Add('repoured')
+                    else if (P <> nil) and (PourGeometryKey(P) = Keys[i-1]) then begin
+                        Unchanged := Unchanged + 1; Actions.Add('unchanged');
+                    end else begin
+                        IsNew := P = nil;
+                        if IsNew then begin
+                            if Kind = 'POLYGON' then P := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default)
+                            else P := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+                        end else PCBServer.SendMessageToRobots(P.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                        try
+                            KeepoutTrace(Trace, TracePath, 'apply_geometry', i, Name);
+                            ApplyPourGeometry(Board, P, Rec);
+                        finally
+                            if not IsNew then PCBServer.SendMessageToRobots(P.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                        end;
+                        if IsNew then begin
+                            Board.AddPCBObject(P);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, P.I_ObjectAddress);
+                            Added := Added + 1; Actions.Add('added');
+                        end else begin Updated := Updated + 1; Actions.Add('updated'); end;
+                    end;
+                end;
+            finally
+                KeepoutTrace(Trace, TracePath, 'postprocess', 0, '');
+                PCBServer.PostProcess;
+                KeepoutTrace(Trace, TracePath, 'postprocess_completed', 0, '');
+            end;
+            if Error = '' then
+                for i := 1 to Spec.Count - 1 do begin
+                    Rec := Spec[i]; Name := GetFieldFromPipeString(Rec, 2);
+                    if (GetFieldFromPipeString(Rec, 0) = 'POLYGON') and (GetFieldFromPipeString(Rec, 1) <> 'delete') then begin
+                        P := FindPourObject(Board, Name, Count);
+                        if Count <> 1 then begin Error := 'polygon disappeared before repour'; Break; end;
+                        Poly := P;
+                        KeepoutTrace(Trace, TracePath, 'repour', i, Name);
+                        Poly.SetState_CopperPourInvalid;
+                        Poly.Rebuild;
+                        Repoured := Repoured + 1;
+                        KeepoutTrace(Trace, TracePath, 'repour_completed', i, Name);
+                    end;
+                end;
+        finally
+            PCBServer.SystemOptions.PolygonRepour := OldRepourMode;
+            KeepoutTrace(Trace, TracePath, 'preferences_restored', 0, '');
+        end;
+        if Error = '' then begin
+            ResetParameters; AddStringParameter('Action', 'RebuildConnectivity'); RunProcess('PCB:UpdateConnectivity');
+            Board.ConnectivelyValidateNets;
+            for i := 1 to Spec.Count - 1 do begin
+                Rec := Spec[i]; Name := GetFieldFromPipeString(Rec, 2);
+                Action := GetFieldFromPipeString(Rec, 1);
+                KeepoutTrace(Trace, TracePath, 'final_readback', i, Name);
+                P := FindPourObject(Board, Name, Count);
+                if Action = 'delete' then begin
+                    if Count <> 0 then Error := 'deleted object is still present'
+                    else Items.Add('{"name": ' + JSONStr(Name) + ', "action": "deleted", "verified": true}');
+                end else begin
+                    if Count <> 1 then Error := 'saved candidate missing or ambiguous'
+                    else begin
+                        Error := PourOwnershipGuard(P, Rec);
+                        if (Error = '') and (PourGeometryKey(P) <> Keys[i-1]) then Error := 'native contour/options readback mismatch';
+                        if (Error = '') and (P.ObjectId = ePolyObject) then begin
+                            Poly := P;
+                            if (GetFieldFromPipeString(Rec, 9) <> '1') and (PourCopperRegionCount(Poly) = 0) then
+                                Error := 'polygon has no generated copper; inspect before retry or explicitly allow_empty';
+                        end;
+                        if Error = '' then Items.Add('{"action": ' + JSONStr(Actions[i-1]) + ', "verified": true, "object": ' + PourObjectJSON(Board, P) + '}');
+                    end;
+                end;
+                if Error <> '' then Break;
+            end;
+            Verified := Error = '';
+        end;
+        Board.GraphicallyInvalidate; Board.ViewManager_FullUpdate;
+        KeepoutTrace(Trace, TracePath, 'save_if_verified', 0, '');
+        if Verified and (Error = '') then Saved := SaveBoardDocument(PcbPath);
+        KeepoutTrace(Trace, TracePath, 'completed', 0, '');
+        Result := '{"success": ' + JSONBool(Saved and Verified) + ', "saved": ' + JSONBool(Saved) +
+            ', "verified": ' + JSONBool(Verified) + ', "dry_run": false, "drc_run": false, "error": ' + JSONStr(Error) +
+            ', "path": ' + JSONStr(PcbPath) + ', "added": ' + IntToStr(Added) + ', "updated": ' + IntToStr(Updated) +
+            ', "deleted": ' + IntToStr(Removed) + ', "unchanged": ' + IntToStr(Unchanged) +
+            ', "repoured": ' + IntToStr(Repoured) + ', ' + BuildJSONArray(Items, 'objects') + '}';
+    finally Spec.Free; Names.Free; Keys.Free; Actions.Free; Items.Free; Trace.Free; end;
+end;

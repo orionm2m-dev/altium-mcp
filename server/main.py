@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from step_export import export_step
 from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
 from pcb_routing import build_routing_spec
+from pcb_polygons import build_polygon_spec
 import dialogs
 import script_guard
 
@@ -2769,6 +2770,53 @@ async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias
     trace_path = EXCHANGE_DIR / "pcb_routing_spec.trace.txt"
     trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
     response = await altium_bridge.execute_command("set_pcb_routing", {})
+    try:
+        trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
+    except OSError:
+        trace_lines = []
+    return _script_result(response, {"trace_path": str(trace_path),
+                                     "last_phase": trace_lines[-1] if trace_lines else None})
+
+
+@mcp.tool()
+async def set_pcb_polygons(ctx: Context, pcb_path: str, polygons: list = None,
+                           cutouts: list = None, dry_run: bool = False) -> str:
+    """Manage named solid copper pours and polygon-only cutouts, then repour/save.
+
+    Millimetres relative to PCB origin. Each polygon has operation=create|update|
+    upsert|delete|repour, name (exact stable identity), existing net and layer=top|
+    bottom. Create/update/upsert also require vertices=[[x,y],...] for one simple
+    straight-edged outer contour (3..4096 points, no repeated closing point),
+    with optional locked=true, remove_dead=true, neck_width_mm=0.15,
+    arc_tolerance_mm=0.01 and allow_empty=false. Solid pour covers same-net
+    objects; small connected-island filtering is disabled. Narrow-neck removal
+    is enabled. Existing rules determine clearance and pad connection style;
+    this tool does not change them. Native DRC is required after every pour.
+
+    cutouts entries use operation=create|update|upsert|delete, name, layer and
+    vertices (except delete), optional locked=true. These are layer-specific
+    polygon cutouts, not physical board holes or keepouts: pads/tracks remain
+    allowed in them. Cutouts have no net. Batch names must be unique across both
+    kinds. Same-name foreign kind/net/layer/owner, duplicates, unsupported shapes
+    and non-idle processes are rejected for the whole batch before mutation.
+    Existing polygons on every changed layer must be explicitly included in
+    the batch (repour is sufficient), preventing stale unmentioned pours.
+
+    dry_run=true performs preflight and inventories the actual board without
+    modifying or saving it; omit both lists for inventory only. Runtime errors
+    may leave unsaved partial changes; no rollback or automatic retry. Readback
+    checks exact names/geometry/options, deleted absence and nonempty generated
+    copper before save. allow_empty=true explicitly permits an empty polygon.
+    Success is not proof of complete connectivity or manufacturing compliance.
+    """
+    try:
+        spec = build_polygon_spec(pcb_path, polygons, cutouts, dry_run)
+    except (ValueError, TypeError, KeyError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_polygons_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    trace_path = EXCHANGE_DIR / "pcb_polygons_spec.trace.txt"
+    trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
+    response = await altium_bridge.execute_command("set_pcb_polygons", {}, timeout=180)
     try:
         trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
     except OSError:
