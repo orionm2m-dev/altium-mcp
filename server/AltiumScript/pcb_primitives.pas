@@ -2,6 +2,139 @@
 // relative to the board origin. Python validates every record before dispatch.
 // Existing targets are resolved and checked before the first board mutation.
 
+// Read the actual PCB module depth, not only the client command depth.
+// A script error may stop the interpreter before its finally block executes.
+function ReadPcbProcessDepth(var ClientDepth, PcbDepth: Integer): String;
+var
+    PcbModule : IDispatch;
+begin
+    Result := '';
+    ClientDepth := -1;
+    PcbDepth := -1;
+    try
+        ClientDepth := Client.ProcessControl.ProcessDepth;
+        PcbModule := Client.ServerModuleByName('PCB');
+        if PcbModule = nil then
+        begin
+            Result := 'PCB server module is unavailable';
+            Exit;
+        end;
+        PcbDepth := PcbModule.ProcessControl.ProcessDepth;
+    except
+        Result := 'cannot read client and PCB process depths';
+    end;
+end;
+
+function PcbPrimitiveProcessGuard(Dummy: Integer): String;
+var
+    ClientDepth, PcbDepth : Integer;
+begin
+    Result := ReadPcbProcessDepth(ClientDepth, PcbDepth);
+    if Result <> '' then Exit;
+    if ClientDepth <> 0 then
+        Result := 'client process is active; cancel the active command before editing'
+    else if PcbDepth <> 0 then
+        Result := 'PCB process depth is ' + IntToStr(PcbDepth) +
+            '; inspect the abandoned transaction before editing; no automatic recovery';
+end;
+
+function RecoverPcbProcessReport(SpecPath: String): String;
+var
+    Spec : TStringList;
+    Board : IPCB_Board;
+    Doc : IServerDocument;
+    PcbPath, Error, ReadError : String;
+    ExpectedDepth, ClientBefore, PcbBefore, ClientAfter, PcbAfter : Integer;
+    Repair, Called, Completed : Boolean;
+begin
+    if not FileExists(SpecPath) then
+    begin
+        Result := PcbDocError('process recovery spec does not exist');
+        Exit;
+    end;
+    Spec := TStringList.Create;
+    try
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count <> 2 then
+        begin
+            Result := PcbDocError('invalid process recovery spec');
+            Exit;
+        end;
+        PcbPath := GetFieldFromPipeString(Spec[0], 1);
+        ExpectedDepth := StrToInt(GetFieldFromPipeString(Spec[1], 1));
+        Repair := GetFieldFromPipeString(Spec[1], 2) = '1';
+        Called := False;
+        Completed := False;
+        Error := ReadPcbProcessDepth(ClientBefore, PcbBefore);
+        ClientAfter := ClientBefore;
+        PcbAfter := PcbBefore;
+        // Do not open or focus documents to make a recovery target match.
+        if Error = '' then
+        begin
+            if not FileExists(PcbPath) then Error := 'requested PCB file does not exist'
+            else if not SameText(ExtractFileExt(PcbPath), '.PcbDoc') then Error := 'requested file must be a PcbDoc'
+            else if not SameText(ExpandFileName(PcbPath), PcbPath) then Error := 'requested PCB path must be absolute and canonical';
+        end;
+        if Error = '' then
+        begin
+            if Client.CurrentView = nil then Error := 'there is no current document view'
+            else
+            begin
+                Doc := Client.CurrentView.OwnerDocument;
+                if Doc = nil then Error := 'there is no current document'
+                else if not SameText(Doc.FileName, PcbPath) then Error := 'current document differs from requested PCB'
+                else if not SameText(Doc.Kind, 'PCB') then Error := 'current document is not a PCB';
+            end;
+        end;
+        if Error = '' then
+        begin
+            Board := GetBoardSafe(0);
+            if Board = nil then Error := 'current PCB board is unavailable'
+            else if not SameText(Board.FileName, PcbPath) then Error := 'current board differs from requested PCB';
+        end;
+        if (Error = '') and (ClientBefore <> 0) then Error := 'client process must be idle (depth 0)';
+        if (Error = '') and (PcbBefore <> ExpectedDepth) then Error := 'actual PCB depth differs from expected_depth';
+        if (Error = '') and Repair and (ExpectedDepth <> 1) then Error := 'repair requires expected and actual PCB depth exactly 1';
+        if (Error = '') and Repair then
+        begin
+            // Explicitly finalize one abandoned transaction. Never reset a
+            // counter, loop, alter geometry, or save a document here.
+            Called := True;
+            try
+                PCBServer.PostProcess;
+                Completed := True;
+            except
+                Error := 'PCB PostProcess raised an exception';
+            end;
+            ReadError := ReadPcbProcessDepth(ClientAfter, PcbAfter);
+            if ReadError <> '' then Error := ReadError;
+            if (Error = '') and ((PcbAfter <> 0) or (ClientAfter <> 0)) then
+                Error := 'PostProcess returned but process depths are not idle; no further recovery attempted';
+        end;
+        Result := '{"success": ' + JSONBool(Error = '') + ', "error": ' + JSONStr(Error) +
+            ', "path": ' + JSONStr(PcbPath) + ', "expected_depth": ' + IntToStr(ExpectedDepth) +
+            ', "repair_requested": ' + JSONBool(Repair) + ', "postprocess_called": ' + JSONBool(Called) +
+            ', "postprocess_completed": ' + JSONBool(Completed) + ', "saved": false' +
+            ', "before": {"client_depth": ' + IntToStr(ClientBefore) + ', "pcb_depth": ' + IntToStr(PcbBefore) + '}' +
+            ', "after": {"client_depth": ' + IntToStr(ClientAfter) + ', "pcb_depth": ' + IntToStr(PcbAfter) + '}}';
+    finally
+        Spec.Free;
+    end;
+end;
+
+// Best-effort bounded trace: a logging failure must not strand a transaction.
+procedure KeepoutTrace(Log: TStringList; Path, Phase: String; Index: Integer; Id: String);
+begin
+    try
+        while Log.Count >= 64 do Log.Delete(0);
+        Log.Add(FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now) + ' | ' + Phase +
+            ' | item=' + IntToStr(Index) + ' | id=' + Id);
+        Log.SaveToFile(Path);
+    except
+        // The native operation result remains authoritative if logging fails.
+    end;
+end;
+
 function PrimitiveLayer(Name: String): TLayer;
 begin
     if Name = 'top' then Result := eTopLayer
@@ -136,6 +269,12 @@ begin
         end;
         Added := 0;
         Updated := 0;
+        Error := PcbPrimitiveProcessGuard(0);
+        if Error <> '' then
+        begin
+            Result := PcbDocError(Error);
+            Exit;
+        end;
         PCBServer.PreProcess;
         try
             for i := 1 to Spec.Count - 1 do
@@ -238,7 +377,7 @@ end;
 
 function SetPcbKeepoutsReport(SpecPath: String): String;
 var
-    Spec, Items : TStringList;
+    Spec, Items, Trace : TStringList;
     Board : IPCB_Board;
     P : IPCB_Primitive;
     Track : IPCB_Track;
@@ -246,7 +385,7 @@ var
     Fill : IPCB_Fill;
     Region : IPCB_Region;
     Contour : IPCB_Contour;
-    PcbPath, Rec, Id, Kind, Error, ShapeJSON : String;
+    PcbPath, Rec, Id, Kind, Error, ShapeJSON, TracePath : String;
     i, j, Count, Mask, Added, Updated : Integer;
     TargetLayer : TLayer;
     IsNew, Saved, Verified : Boolean;
@@ -258,9 +397,13 @@ begin
     end;
     Spec := TStringList.Create;
     Items := TStringList.Create;
+    Trace := TStringList.Create;
+    TracePath := ChangeFileExt(SpecPath, '.trace.txt');
     try
+        KeepoutTrace(Trace, TracePath, 'load_spec', 0, '');
         Spec.LoadFromFile(SpecPath);
         PcbPath := GetFieldFromPipeString(Spec[0], 1);
+        KeepoutTrace(Trace, TracePath, 'open_board', 0, '');
         Board := OpenBoardAtPath(PcbPath);
         if Board = nil then
         begin
@@ -272,15 +415,18 @@ begin
             Result := PcbDocError('opened board path differs from the requested PCB');
             Exit;
         end;
+        KeepoutTrace(Trace, TracePath, 'board_opened', 0, '');
         Error := '';
         for i := 1 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
             Id := GetFieldFromPipeString(Rec, 1);
             Kind := GetFieldFromPipeString(Rec, 2);
+            KeepoutTrace(Trace, TracePath, 'preflight_layer', i, Id);
             TargetLayer := PrimitiveLayer(GetFieldFromPipeString(Rec, 3));
             if (TargetLayer <> eKeepOutLayer) and not MidLayerInStack(Board.LayerStack_V7, TargetLayer) then
                 Error := 'requested copper layer is not in the board stack: ' + GetFieldFromPipeString(Rec, 3);
+            KeepoutTrace(Trace, TracePath, 'preflight_lookup', i, Id);
             P := FindKeepoutPrimitive(Board, Id, Count);
             if Count > 1 then Error := 'duplicate primitive unique_id: ' + Id;
             if P <> nil then
@@ -299,8 +445,17 @@ begin
         Added := 0;
         Updated := 0;
         Verified := True;
+        KeepoutTrace(Trace, TracePath, 'process_guard', 0, '');
+        Error := PcbPrimitiveProcessGuard(0);
+        if Error <> '' then
+        begin
+            Result := PcbDocError(Error);
+            Exit;
+        end;
+        KeepoutTrace(Trace, TracePath, 'preprocess', 0, '');
         PCBServer.PreProcess;
         try
+            KeepoutTrace(Trace, TracePath, 'preprocess_completed', 0, '');
             for i := 1 to Spec.Count - 1 do
             begin
                 Rec := Spec[i];
@@ -308,18 +463,26 @@ begin
                 Kind := GetFieldFromPipeString(Rec, 2);
                 TargetLayer := PrimitiveLayer(GetFieldFromPipeString(Rec, 3));
                 Mask := StrToInt(GetFieldFromPipeString(Rec, 4));
+                KeepoutTrace(Trace, TracePath, 'mutation_lookup', i, Id);
                 P := FindKeepoutPrimitive(Board, Id, Count);
                 IsNew := P = nil;
+                KeepoutTrace(Trace, TracePath, 'create_or_begin_modify', i, Id);
                 if IsNew then
                     P := PCBServer.PCBObjectFactory(KeepoutObjectId(Kind), eNoDimension, eCreate_Default)
                 else PCBServer.SendMessageToRobots(P.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                KeepoutTrace(Trace, TracePath, 'set_unique_id', i, Id);
                 P.UniqueId := Id;
+                KeepoutTrace(Trace, TracePath, 'set_layer', i, Id);
                 P.Layer := TargetLayer;
+                KeepoutTrace(Trace, TracePath, 'set_net', i, Id);
                 P.Net := nil;
                 // Legacy scripting API enables an all-object keepout. Selective
                 // restrictions are rejected by the typed tool before dispatch.
+                KeepoutTrace(Trace, TracePath, 'set_keepout_flag', i, Id);
                 P.IsKeepout := True;
+                KeepoutTrace(Trace, TracePath, 'set_locked', i, Id);
                 P.Moveable := GetFieldFromPipeString(Rec, 5) = '0';
+                KeepoutTrace(Trace, TracePath, 'set_geometry', i, Id);
                 ShapeJSON := '';
                 if Kind = 'track' then
                 begin
@@ -367,6 +530,7 @@ begin
                 else
                 begin
                     Region := P;
+                    KeepoutTrace(Trace, TracePath, 'contour_factory', i, Id);
                     Contour := PCBServer.PCBContourFactory;
                     j := 6;
                     while GetFieldFromPipeString(Rec, j) <> '' do
@@ -374,10 +538,13 @@ begin
                         Contour.AddPoint(Board.XOrigin + PrimitiveCoord(Rec, j), Board.YOrigin + PrimitiveCoord(Rec, j + 1));
                         j := j + 2;
                     end;
+                    KeepoutTrace(Trace, TracePath, 'contour_apply', i, Id);
                     Region.SetOutlineContour(Contour);
+                    KeepoutTrace(Trace, TracePath, 'region_kind', i, Id);
                     Region.Kind := eRegionKind_Copper;
                     ShapeJSON := ', "vertex_count": ' + IntToStr((j - 6) div 2);
                 end;
+                KeepoutTrace(Trace, TracePath, 'register_or_end_modify', i, Id);
                 if IsNew then
                 begin
                     Board.AddPCBObject(P);
@@ -389,18 +556,24 @@ begin
                     PCBServer.SendMessageToRobots(P.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
                     Updated := Updated + 1;
                 end;
+                KeepoutTrace(Trace, TracePath, 'readback', i, Id);
                 if (P.Layer <> TargetLayer) or not P.IsKeepout then Verified := False;
                 Items.Add('{"unique_id": ' + JSONStr(P.UniqueId) + ', "kind": ' + JSONStr(Kind) +
                     ', "layer": ' + JSONStr(Layer2String(P.Layer)) + ', "is_keepout": ' + JSONBool(P.IsKeepout) +
                     ', "locked": ' + JSONBool(not P.Moveable) + ShapeJSON + '}');
             end;
         finally
+            KeepoutTrace(Trace, TracePath, 'postprocess', 0, '');
             PCBServer.PostProcess;
+            KeepoutTrace(Trace, TracePath, 'postprocess_completed', 0, '');
         end;
+        KeepoutTrace(Trace, TracePath, 'refresh', 0, '');
         Board.GraphicallyInvalidate;
         Board.ViewManager_FullUpdate;
         Saved := False;
+        KeepoutTrace(Trace, TracePath, 'save_if_verified', 0, '');
         if Verified then Saved := SaveBoardDocument(PcbPath);
+        KeepoutTrace(Trace, TracePath, 'completed', 0, '');
         Result := '{"success": ' + JSONBool(Saved and Verified) + ', "saved": ' + JSONBool(Saved) +
             ', "keepout_flag_verified": ' + JSONBool(Verified) + ', "path": ' + JSONStr(PcbPath) +
             ', "added": ' + IntToStr(Added) + ', "updated": ' + IntToStr(Updated) +
@@ -408,5 +581,6 @@ begin
     finally
         Spec.Free;
         Items.Free;
+        Trace.Free;
     end;
 end;

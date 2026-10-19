@@ -6,7 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pcb_primitives import build_pad_spec, build_keepout_spec
+from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
 
 
 PCB = r"C:\Boards\Controller.PcbDoc"
@@ -100,6 +100,81 @@ class KeepoutSpecTests(unittest.TestCase):
 
     def test_server_python_parses_without_import_side_effects(self):
         ast.parse(Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8"))
+
+
+class ProcessRecoveryTests(unittest.TestCase):
+    def test_report_is_default_and_encodes_explicit_expected_depth(self):
+        self.assertEqual(build_process_recovery_spec(PCB, 1), f"PCB|{PCB}\nPROCESS|1|0\n")
+        self.assertEqual(build_process_recovery_spec(PCB, 0), f"PCB|{PCB}\nPROCESS|0|0\n")
+        self.assertIn("PROCESS|1|1", build_process_recovery_spec(PCB, 1, True))
+
+    def test_repair_never_accepts_nested_or_idle_depths(self):
+        for value in (0, 2, 15, -1, True, 1.0, "1", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_process_recovery_spec(PCB, value, True)
+        for value in (-1, True, 1.0, "1", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_process_recovery_spec(PCB, value)
+
+    def test_requires_absolute_pcb_path_and_boolean_repair(self):
+        for value in ("board.PcbDoc", r"C:board.PcbDoc", r"\board.PcbDoc", r"C:\board.PcbLib", PCB + "\nPROCESS|1|1"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_process_recovery_spec(value, 1)
+        for value in (1, "true", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_process_recovery_spec(PCB, 1, value)
+
+    def test_native_recovery_is_single_guarded_postprocess_without_save(self):
+        source = Path(__file__).resolve().parents[1].joinpath("AltiumScript/pcb_primitives.pas").read_text(encoding="utf-8")
+        recovery = source.split("function RecoverPcbProcessReport", 1)[1].split("procedure KeepoutTrace", 1)[0]
+        self.assertEqual(recovery.count("PCBServer.PostProcess;"), 1)
+        for forbidden in ("SetProcessDepth", "PreProcess;", "SaveBoardDocument(", "OpenBoardAtPath(", "ShowDocument(", ".Focus;"):
+            self.assertNotIn(forbidden, recovery)
+        for guard in ("ClientBefore <> 0", "PcbBefore <> ExpectedDepth", "ExpectedDepth <> 1",
+                      "Doc.FileName, PcbPath", "Board.FileName, PcbPath", "(Error = '') and Repair"):
+            self.assertIn(guard, recovery)
+            self.assertLess(recovery.index(guard), recovery.index("PCBServer.PostProcess;"))
+
+    def test_mutators_guard_before_preprocess_and_keepouts_have_bounded_trace(self):
+        source = Path(__file__).resolve().parents[1].joinpath("AltiumScript/pcb_primitives.pas").read_text(encoding="utf-8")
+        for start in ("function SetPcbPadsReport", "function SetPcbKeepoutsReport"):
+            body = source.split(start, 1)[1]
+            self.assertLess(body.index("PcbPrimitiveProcessGuard(0)"), body.index("PCBServer.PreProcess;"))
+        self.assertIn("while Log.Count >= 64 do Log.Delete(0)", source)
+        self.assertIn("Log.SaveToFile(Path)", source)
+        for phase in ("mutation_lookup", "set_unique_id", "set_keepout_flag", "region_kind", "postprocess_completed", "save_if_verified"):
+            self.assertIn("'" + phase + "'", source)
+
+    def test_public_wrapper_does_not_dispatch_invalid_repair(self):
+        import asyncio
+        import json
+        import tempfile
+        from unittest.mock import AsyncMock
+        tree = ast.parse(Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8"))
+        selected = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.name in {"_script_result", "recover_pcb_process", "set_pcb_keepouts"}]
+        for node in selected:
+            node.decorator_list = []
+        module = ast.Module(body=selected, type_ignores=[])
+        class Bridge:
+            execute_command = AsyncMock(return_value={"success": True, "result": {"success": True}})
+        with tempfile.TemporaryDirectory() as directory:
+            env = {"json": json, "Context": object, "EXCHANGE_DIR": Path(directory), "SPEC_ENCODING": "utf-8",
+                   "build_process_recovery_spec": build_process_recovery_spec, "build_keepout_spec": build_keepout_spec,
+                   "altium_bridge": Bridge()}
+            exec(compile(module, "isolated_public_wrappers", "exec"), env)
+            invalid = json.loads(asyncio.run(env["recover_pcb_process"](None, PCB, 2, True)))
+            self.assertFalse(invalid["success"])
+            env["altium_bridge"].execute_command.assert_not_awaited()
+            asyncio.run(env["recover_pcb_process"](None, PCB, 1))
+            env["altium_bridge"].execute_command.assert_awaited_once_with("recover_pcb_process", {})
+            self.assertIn("PROCESS|1|0", Path(directory, "pcb_process_recovery_spec.txt").read_text())
+            env["altium_bridge"].execute_command.reset_mock()
+            env["altium_bridge"].execute_command.return_value = {"success": False, "error": "timeout"}
+            failed = json.loads(asyncio.run(env["set_pcb_keepouts"](None, PCB, [arc()])))
+            self.assertFalse(failed["success"])
+            self.assertEqual(failed["last_phase"], "dispatch_pending")
+            self.assertTrue(Path(failed["trace_path"]).exists())
 
 
 if __name__ == "__main__":

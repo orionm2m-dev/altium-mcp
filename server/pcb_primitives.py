@@ -1,6 +1,7 @@
 """Validated, side-effect-free specifications for native PCB primitive tools."""
 
 import math
+from pathlib import PureWindowsPath
 import re
 
 
@@ -161,3 +162,16 @@ def build_keepout_spec(pcb_path, keepouts):
                 raise ValueError("arc must have a counterclockwise sweep in (0, 360]; use 0 and 360 for a circle")
         lines.append("|".join(["KEEPOUT", uid, kind, layer, str(mask), locked, *coords]))
     return "\n".join(lines) + "\n"
+
+
+def build_process_recovery_spec(pcb_path, expected_depth, repair=False):
+    """Request a depth report, or explicitly close one abandoned transaction."""
+    path = _pcb_path(pcb_path)
+    if not PureWindowsPath(path).is_absolute():
+        raise ValueError("pcb_path must be an absolute Windows path")
+    if type(expected_depth) is not int or expected_depth < 0:
+        raise ValueError("expected_depth must be a nonnegative integer")
+    repair_value = _boolean(repair, "repair")
+    if repair and expected_depth != 1:
+        raise ValueError("repair requires expected_depth exactly 1")
+    return f"PCB|{path}\nPROCESS|{expected_depth}|{repair_value}\n"

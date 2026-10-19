@@ -48,6 +48,48 @@ make no changes. A native API exception during mutation can leave unsaved
 changes; do not retry blindly after a timeout or exception. No automatic
 rollback, restart, file-format patching or project-specific fallback is used.
 
+## Process-depth guards and explicit recovery
+
+Before `PCBServer.PreProcess`, both mutators read the client process depth and
+`Client.ServerModuleByName('PCB').ProcessControl.ProcessDepth`. They refuse
+nonzero depths. Their existing `try/finally PostProcess` remains in place, but
+an interpreter pause or native runtime failure may prevent `finally` from
+executing. These guards prevent stacking another transaction on an abandoned
+one; they do not establish or eliminate the cause of a keepout API failure.
+
+`recover_pcb_process(pcb_path, expected_depth, repair=False)` reports depths
+without opening, focusing, editing or saving documents. The requested file
+must exist, be an absolute canonical PcbDoc path, and match both the currently
+focused document and current PCB board (case-insensitive). Client depth must
+be zero; actual PCB depth must match `expected_depth`. A mismatch is reported
+as a failure with the observed before/after depths.
+
+Only after identifying an abandoned transaction and cancelling any interactive
+command may the caller explicitly request `repair=True`. Both the expected
+and actual PCB depths must then be exactly one. The tool calls
+`PCBServer.PostProcess` **once**, re-reads both depths and reports whether the
+call started/completed. It never changes a depth counter directly or loops,
+and does not save or discard existing unsaved geometry. This finalizes the
+transaction/undo environment; it is not an undo, rollback or geometry repair.
+Review existing in-memory edits and save separately through the normal tool.
+Do not use recovery to complete an intentionally active edit or infer that
+unsaved changes are correct merely because the depth returned to zero.
+
+Keepout operations keep at most 64 flushed phase entries in
+`pcb_keepouts_spec.trace.txt` alongside the exchange specification. The file
+is reset to `dispatch_pending` before each request; `trace_path` and
+`last_phase` are added to returned results, including bridge timeout reports.
+A phase identifies the next native operation attempted, not proof that it
+completed. Trace writes are best effort and never trigger recovery or block
+transaction finalization. A stopped interpreter can still require cancellation;
+inspect the trace and current state rather than replaying a timed-out edit.
+The trace does not prove absence of partial unsaved changes.
+
+Offline checks cover strict repair input validation, default report mode,
+public dispatch behavior and native safety contract structure. They do not
+compile DelphiScript or qualify native recovery; use a disposable board and
+explicit review before live recovery in a target installation.
+
 After installing the updated server, reconnect the MCP client so its typed
 Python tools are rediscovered. The script project contains `pcb_primitives.pas`.
 Use the public tools for live tests on a disposable board first; do not call

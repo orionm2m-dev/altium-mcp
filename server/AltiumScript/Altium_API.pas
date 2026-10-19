@@ -1169,6 +1169,8 @@ begin
                                                ParamValueOf('folded'), ParamValueOf('fold_rate'));
         'update_pcb_from_project':
             Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
+        'recover_pcb_process':
+            Result := RecoverPcbProcessReport(ROOT_DIR + 'pcb_process_recovery_spec.txt');
         'set_pcb_pads':
             Result := SetPcbPadsReport(ROOT_DIR + 'pcb_pads_spec.txt');
         'set_pcb_keepouts':

@@ -27,7 +27,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from step_export import export_step
-from pcb_primitives import build_pad_spec, build_keepout_spec
+from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
 import dialogs
 
 # Configure logging
@@ -2620,6 +2620,28 @@ async def draw_pcb_mechanical(ctx: Context, pcb_path: str, layers: list = None, 
 
 
 @mcp.tool()
+async def recover_pcb_process(ctx: Context, pcb_path: str, expected_depth: int, repair: bool = False) -> str:
+    """Report process depths or explicitly finalize ONE abandoned PCB transaction.
+
+    Read-only by default. The existing, currently focused PCB and current board
+    must both match the exact absolute pcb_path; no document is opened/focused.
+    Client process depth must be 0 and PCB depth must equal expected_depth.
+    repair=true additionally requires expected_depth=1 and calls exactly one
+    PCBServer.PostProcess. Use only after identifying an abandoned transaction
+    and cancelling interactive commands. Never use this to finish an active edit.
+    It does not edit geometry or save; existing unsaved changes remain for review.
+    Reports before/after depths and whether PostProcess was called/completed.
+    A failure never triggers a loop, forced counter reset, save, or restart.
+    """
+    try:
+        spec = build_process_recovery_spec(pcb_path, expected_depth, repair)
+    except (ValueError, TypeError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_process_recovery_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    return _script_result(await altium_bridge.execute_command("recover_pcb_process", {}))
+
+
+@mcp.tool()
 async def set_pcb_pads(ctx: Context, pcb_path: str, pads: list) -> str:
     """Add free board pads or update uniquely identified pads, then save.
 
@@ -2636,6 +2658,7 @@ async def set_pcb_pads(ctx: Context, pcb_path: str, pads: list) -> str:
     resolved before mutation; ambiguous, missing or duplicate targets abort.
     Returns actual pad geometry, net, plating, layer, added/updated counts and
     save status. This edits the board instance, not its footprint library.
+    Refuses to start if client or PCB process depth is nonzero; never auto-recovers.
     """
     try:
         spec = build_pad_spec(pcb_path, pads)
@@ -2666,13 +2689,23 @@ async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
     Clearance rule to the geometry; this tool does not create or change rules.
     Keepouts affect pads too: do not use them over required solder pads or where
     a copper escape must remain. This does not reserve component body height.
+    Refuses nonzero client/PCB process depth. A bounded flushed trace identifies
+    the last attempted phase if the native interpreter stops; it is not rollback.
     """
     try:
         spec = build_keepout_spec(pcb_path, keepouts)
     except (ValueError, TypeError, KeyError) as exc:
         return json.dumps({"success": False, "error": str(exc)})
     (EXCHANGE_DIR / "pcb_keepouts_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
-    return _script_result(await altium_bridge.execute_command("set_pcb_keepouts", {}))
+    trace_path = EXCHANGE_DIR / "pcb_keepouts_spec.trace.txt"
+    trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
+    response = await altium_bridge.execute_command("set_pcb_keepouts", {})
+    try:
+        trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
+    except OSError:
+        trace_lines = []
+    return _script_result(response, {"trace_path": str(trace_path),
+                                     "last_phase": trace_lines[-1] if trace_lines else None})
 
 
 PCB_FOOTPRINTS_SPEC = EXCHANGE_DIR / "pcb_footprints_spec.txt"
