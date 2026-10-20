@@ -197,67 +197,75 @@ def _blocked(state, reason, **extra):
         state=state, **extra)
 
 
+def _pending_probe_evidence(exchange_dir, old):
+    """Read one token-bound result and establish that its launcher has exited."""
+    import emergency_stop
+    latch_path = Path(exchange_dir) / "script_recovery_state.json"
+    raw = latch_path.read_bytes()
+    if json.loads(raw) != old or old.get("phase") != "probe_pending":
+        raise ValueError("Pending probe checkpoint changed")
+    token = old.get("token", "")
+    if not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("Exact unique probe token is unavailable")
+    expected_path = (Path(exchange_dir) / "recovery" / token / "result.json").resolve()
+    if Path(old.get("probe_result_path", "")).resolve() != expected_path:
+        raise ValueError("Probe result path does not match this checkpoint")
+    result_raw = expected_path.read_bytes()
+    outcome = json.loads(result_raw.decode("utf-8-sig"))
+    if outcome != {"probe": "executor ok", "token": token}:
+        raise ValueError("Existing probe result does not match this recovery token")
+    expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity")
+    if (not isinstance(expected, dict) or type(expected.get("pid")) is not int
+            or expected["pid"] <= 0 or type(expected.get("creation_filetime")) is not int
+            or expected["creation_filetime"] <= 0):
+        raise ValueError("Recorded main-process identity is unavailable")
+    launches = old.get("launches", [])
+    probes = [item for item in launches if item.get("phase") == "probe"]
+    if (len(probes) != 1 or probes[0] != launches[-1]
+            or probes[0].get("exit_code") is not None
+            or type(probes[0].get("pid")) is not int or probes[0]["pid"] <= 0
+            or probes[0]["pid"] == expected["pid"]
+            or any(item.get("phase") != "stop" or item.get("exit_code") != 0
+                   for item in launches[:-1])):
+        raise ValueError("One exact pending probe launcher is required")
+    probe_pid = probes[0]["pid"]
+    for process in _launches.values():
+        if process.poll() is None:
+            raise ValueError("A tracked recovery launcher is still running")
+    owned = _launches.get(probe_pid)
+    if owned is not None:
+        if owned.poll() != 0:
+            raise ValueError("The tracked probe launcher exited unsuccessfully")
+        exit_evidence = {"source": "owned_popen", "exit_confirmed": True, "exit_code": 0}
+    else:
+        try:
+            probe = emergency_stop.WinProcess(probe_pid)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 87:
+                raise
+            exit_evidence = {"source": "pid_absent_at_open", "exit_confirmed": True,
+                             "exit_code": None, "historical_creation_verified": False}
+        else:
+            with probe:
+                observed = probe.exit_observation()
+            if (observed.get("pid") != probe_pid
+                    or type(observed.get("creation_filetime")) is not int
+                    or observed["creation_filetime"] <= 0
+                    or type(observed.get("exit_code")) is not int
+                    or observed["exit_code"] != 0):
+                raise ValueError("Probe launcher is live or successful exit is unconfirmed")
+            exit_evidence = {"source": "query_handle_exited", "exit_confirmed": True,
+                             "exit_code": 0, "historical_creation_verified": False,
+                             "observed_creation_filetime_decimal": str(observed["creation_filetime"])}
+    return latch_path, raw, expected_path, result_raw, outcome, expected, probe_pid, exit_evidence
+
+
 def _reconcile_late_probe(exe, exchange_dir, old):
     """Reconcile one existing unique result; never launch Stop/probe or claim idle."""
     import emergency_stop
     try:
-        latch_path = Path(exchange_dir) / "script_recovery_state.json"
-        raw = latch_path.read_bytes()
-        if json.loads(raw) != old or old.get("phase") != "probe_pending":
-            raise ValueError("Pending probe checkpoint changed")
-        token = old.get("token", "")
-        if not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{32}", token) is None:
-            raise ValueError("Exact unique probe token is unavailable")
-        expected_path = (Path(exchange_dir) / "recovery" / token / "result.json").resolve()
-        if Path(old.get("probe_result_path", "")).resolve() != expected_path:
-            raise ValueError("Probe result path does not match this checkpoint")
-        result_raw = expected_path.read_bytes()
-        outcome = json.loads(result_raw.decode("utf-8-sig"))
-        if outcome != {"probe": "executor ok", "token": token}:
-            raise ValueError("Existing probe result does not match this recovery token")
-        expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity")
-        if (not isinstance(expected, dict) or type(expected.get("pid")) is not int
-                or expected["pid"] <= 0 or type(expected.get("creation_filetime")) is not int
-                or expected["creation_filetime"] <= 0):
-            raise ValueError("Recorded main-process identity is unavailable")
-        launches = old.get("launches", [])
-        probes = [item for item in launches if item.get("phase") == "probe"]
-        if (len(probes) != 1 or probes[0] != launches[-1]
-                or probes[0].get("exit_code") is not None
-                or type(probes[0].get("pid")) is not int or probes[0]["pid"] <= 0
-                or probes[0]["pid"] == expected["pid"]
-                or any(item.get("phase") != "stop" or item.get("exit_code") != 0
-                       for item in launches[:-1])):
-            raise ValueError("One exact pending probe launcher is required")
-        probe_pid = probes[0]["pid"]
-        for process in _launches.values():
-            if process.poll() is None:
-                raise ValueError("A tracked recovery launcher is still running")
-        owned = _launches.get(probe_pid)
-        if owned is not None:
-            if owned.poll() != 0:
-                raise ValueError("The tracked probe launcher exited unsuccessfully")
-            exit_evidence = {"source": "owned_popen", "exit_confirmed": True, "exit_code": 0}
-        else:
-            try:
-                probe = emergency_stop.WinProcess(probe_pid)
-            except OSError as error:
-                if getattr(error, "winerror", None) != 87:
-                    raise
-                exit_evidence = {"source": "pid_absent_at_open", "exit_confirmed": True,
-                                 "exit_code": None, "historical_creation_verified": False}
-            else:
-                with probe:
-                    observed = probe.exit_observation()
-                if (observed.get("pid") != probe_pid
-                        or type(observed.get("creation_filetime")) is not int
-                        or observed["creation_filetime"] <= 0
-                        or type(observed.get("exit_code")) is not int
-                        or observed["exit_code"] != 0):
-                    raise ValueError("Probe launcher is live or successful exit is unconfirmed")
-                exit_evidence = {"source": "query_handle_exited", "exit_confirmed": True,
-                                 "exit_code": 0, "historical_creation_verified": False,
-                                 "observed_creation_filetime_decimal": str(observed["creation_filetime"])}
+        (latch_path, raw, expected_path, result_raw, outcome, expected,
+         probe_pid, exit_evidence) = _pending_probe_evidence(exchange_dir, old)
         with emergency_stop.WinProcess(expected["pid"]) as main:
             current = main.identity()
             emergency_stop._valid_identity(current, exe, expected["pid"])
@@ -294,15 +302,79 @@ def _reconcile_late_probe(exe, exchange_dir, old):
         return _blocked(old, "Late probe not reconciled: " + str(error), no_new_dispatch=True)
 
 
+def _fresh_start_after_pending_probe(exe, exchange_dir, old):
+    """Authorize one new probe after a recorded normal start; never reuse old success."""
+    import emergency_stop
+    (latch_path, raw, result_path, result_raw, outcome, previous,
+     probe_pid, exit_evidence) = _pending_probe_evidence(exchange_dir, old)
+    if (previous.get("exe") != emergency_stop._canonical(exe)
+            or previous.get("user_sid") != emergency_stop._current_sid()):
+        raise ValueError("Previous main identity does not match the configured executable and user")
+    if not emergency_stop._exact_target_has_exited(previous):
+        raise ValueError("The previous exact main process has not exited")
+    startup_path = Path(exchange_dir) / "altium_startup.json"
+    startup_raw = startup_path.read_bytes()
+    startup = json.loads(startup_raw)
+    identity = startup.get("identity")
+    if (not isinstance(identity, dict)
+            or startup.get("success") is not True or startup.get("launched") is not True
+            or startup.get("script_dispatched") is not False
+            or startup.get("mutation_replayed") is not False
+            or startup.get("status") != "process_started_ui_unverified"
+            or startup.get("exit_code") is not None
+            or emergency_stop._canonical(startup.get("configured_exe", "")) != emergency_stop._canonical(exe)
+            or type(identity.get("pid")) is not int or identity["pid"] <= 0
+            or startup.get("target_pid") != identity["pid"]
+            or type(identity.get("creation_filetime")) is not int
+            or identity["creation_filetime"] <= previous["creation_filetime"]
+            or startup.get("creation_filetime_decimal") != str(identity["creation_filetime"])):
+        raise ValueError("A newer exact successful normal-start receipt is required")
+    with emergency_stop.WinProcess(identity["pid"]) as main:
+        current = main.identity()
+        emergency_stop._valid_identity(current, exe, identity["pid"])
+        if not emergency_stop._same_identity(current, identity):
+            raise ValueError("Current main does not match the normal-start receipt")
+        environment = inspect_environment(exe)
+        windows = environment.get("process_windows", {})
+        rows = windows.get(identity["pid"], windows.get(str(identity["pid"]), []))
+        if (environment.get("ready") is not True
+                or environment.get("target_pid") != identity["pid"]
+                or environment.get("configured_process_ids") != [identity["pid"]]
+                or environment.get("foreground_confirmed") is not True
+                or not any(w.get("class") == "TDocumentForm" for w in rows)
+                or any(w.get("class") in {"#32770", "TMessageForm", "TShowException", "TPCBImportWizard"} for w in rows)
+                or environment.get("dialog_handles") or environment.get("script_errors")):
+            raise ValueError("The newly started main application is not ready")
+        if not emergency_stop._same_identity(main.identity(), current):
+            raise ValueError("New main identity changed during verification")
+        if (latch_path.read_bytes() != raw or result_path.read_bytes() != result_raw
+                or startup_path.read_bytes() != startup_raw):
+            raise ValueError("Recovery result, checkpoint or startup receipt changed")
+    return {"identity": current, "environment": environment,
+            "evidence": {"previous_main_identity": previous,
+                "previous_probe_token": old["token"], "previous_probe_launcher": exit_evidence,
+                "previous_probe_certifies_current_main": False,
+                "normal_start_identity_verified": True,
+                "old_main_exit_verified": True, "new_probe_required": True}}
+
+
 async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                   dispatch_timeout_seconds=8, manual_stop_confirmed=False, *, verified_stop=None):
     """Caller holds the shared bridge lock throughout this operation."""
     if not 1 <= timeout_seconds <= 60 or not 1 <= dispatch_timeout_seconds <= 15:
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
     old = blocked_state(exchange_dir)
+    restarted = None
     if (old and old.get("phase") == "probe_pending" and not manual_stop_confirmed
             and verified_stop is None):
-        return _reconcile_late_probe(exe, exchange_dir, old)
+        reconciled = _reconcile_late_probe(exe, exchange_dir, old)
+        if reconciled.get("recovered"):
+            return reconciled
+        try:
+            restarted = _fresh_start_after_pending_probe(exe, exchange_dir, old)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return _blocked(old, "Pending probe/new-start verification failed: " + str(error),
+                            no_new_dispatch=True, late_probe_diagnostic=reconciled.get("error"))
     fresh_emergency = bool(old and old.get("require_fresh_instance"))
     if fresh_emergency:
         import emergency_stop
@@ -323,11 +395,11 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if pending:
         return _blocked(old or {}, "Previous recovery launcher is still running",
                         pending_launch_ids=pending)
-    if old and not manual_stop_confirmed and not fresh_emergency and verified_stop is None:
+    if old and not manual_stop_confirmed and not fresh_emergency and verified_stop is None and restarted is None:
         return _blocked(old, "Previous recovery is unresolved; no new launch dispatched")
     recorded_pending = [item["pid"] for item in (old or {}).get("launches", [])
                         if item.get("pid") and item.get("exit_code") is None]
-    environment = inspect_environment(exe, recorded_pending)
+    environment = restarted["environment"] if restarted is not None else inspect_environment(exe, recorded_pending)
     if not environment.get("ready"):
         return _blocked(old or {}, environment.get("reason", "Preflight failed"),
                         environment=environment)
@@ -338,7 +410,7 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         except (OSError, ValueError, TypeError) as error:
             return _blocked(old or {}, "Pending Stop proof rejected: " + str(error),
                             environment=environment)
-    fresh_identity = None
+    fresh_identity = restarted["identity"] if restarted is not None else None
     if fresh_emergency:
         # The old exact process was proven gone above. Independently identify the
         # single ready current instance; absence of the old PID alone is not proof.
@@ -372,8 +444,11 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         state["verified_prior_stop_exit"] = stop_evidence
     if fresh_identity is not None:
         state.update(fresh_instance_identity=fresh_identity,
-                     fresh_instance_creation_filetime_decimal=str(fresh_identity["creation_filetime"]),
-                     previous_emergency_identity=old["emergency_identity"])
+                     fresh_instance_creation_filetime_decimal=str(fresh_identity["creation_filetime"]))
+        if restarted is not None:
+            state["verified_normal_restart"] = restarted["evidence"]
+        else:
+            state["previous_emergency_identity"] = old["emergency_identity"]
     _write_state(exchange_dir, state)
 
     async def launch_once(phase, argument, deadline):

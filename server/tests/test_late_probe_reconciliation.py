@@ -61,6 +61,8 @@ class LateProbeTests(unittest.TestCase):
                 assert pid == 10, 'Ended launcher must not query SID/path'
                 return copy.deepcopy(owner.actual)
             def exit_observation(self):
+                if pid == 10:
+                    return {'pid': 10, 'creation_filetime': owner.actual['creation_filetime'], 'exit_code': 259}
                 assert pid == 11
                 if owner.mode == 'query_error_87':
                     raise owner.error(87)

@@ -57,3 +57,14 @@ unchanged checkpoint and token-bound result. A live/unknown launcher or changed
 main session remains blocked. No new Stop/probe is dispatched, no manual-stop
 claim is introduced, and native PCB transaction idle is not certified. PID-only
 historical launcher creation identity remains explicitly unverified.
+
+## 2026-10-20 — Probe a verified normal restart after a pending old probe
+
+After a completed token-bound probe belongs to a now-ended main session, recovery
+can validate a separately recorded successful `start_altium` identity and run one
+new unique probe. The previous exact main must have exited; the old launcher must
+have exited; the new configured executable/user/PID/raw creation time must match
+the unchanged startup receipt and be newer. A single ready native main window is
+required. Startup screens, import wizards, unknown identities and changed receipts
+remain blocked. The old probe result never certifies the new session. No Stop,
+manual-stop claim, automatic restart or mutation replay is added.

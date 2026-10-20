@@ -484,3 +484,11 @@ and both the checkpoint and unique-token result must remain unchanged. The resul
 reports `late_completion=true` and `no_new_dispatch=true`. Closing/replacing the
 main process invalidates this reconciliation; an old successful probe does not
 certify a new session. Recovery does not establish native PCB transaction idle.
+
+If the previous main has exited after that pending probe and `start_altium` has
+explicitly recorded a newer successful normal start, the same recovery call can
+verify that exact current identity and dispatch **one new unique probe** without
+Stop. It requires the unchanged startup/checkpoint/result records, exited old
+main and launcher, and a ready native main window without a blocking modal. The
+new state records `verified_normal_restart`; the earlier probe is retained only
+as history and cannot certify the new process. No extra public argument is needed.
