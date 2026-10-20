@@ -1230,8 +1230,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     debugger is stopped (Ctrl+F3) or Altium is restarted. This tool detects
     that state and reports exactly which statement died.
 
-    The script runs in a SEPARATE script project, so a crash here can never
-    break the other MCP tools.
+    The script runs in a SEPARATE script project to isolate source helpers.
+    A paused global script executor can still block other MCP tools. Only
+    recognized, revalidated script-error dialogs are dismissed; save/confirm
+    prompts remain untouched. Script errors return immediately without Stop
+    or retry. Use recover_script_executor before any further dispatch.
 
     Writing the script:
     - Call SandboxLog('...') before each risky statement. The log is flushed
@@ -1318,8 +1321,25 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
     dialogs = []
     while not SANDBOX_RESULT.exists() and time.time() - start < timeout_seconds:
         await asyncio.sleep(0.5)
-        if time.time() - start > 6:
-            dialogs += _dismiss_altium_dialogs()
+        if not SANDBOX_RESULT.exists() and time.time() - start >= 2:
+            failures = script_guard.find_script_errors(altium_bridge.config.altium_exe_path)
+            if failures:
+                closed = script_guard.dismiss_script_errors(
+                    altium_bridge.config.altium_exe_path, failures)
+                steps = (SANDBOX_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+                         if SANDBOX_LOG.exists() else [])
+                return json.dumps({
+                    "success": False,
+                    "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
+                    "script_errors": failures, "steps": steps,
+                    "last_step_reached": steps[-1] if steps else None,
+                    "dialogs_dismissed": len(closed),
+                    "dialogs": [item["text"] for item in failures],
+                    "executor_stop_dispatched": False, "executor_recovered": False,
+                    "requires_recovery_probe": True, "retry_performed": False,
+                    "mutation_state": "unknown",
+                    "recovery": "Use recover_script_executor; do not replay the failed script.",
+                }, indent=2)
 
     steps = []
     if SANDBOX_LOG.exists():
@@ -1337,9 +1357,8 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
             "last_step_reached": steps[-1],
             "diagnosis": "The statement AFTER the last step is what crashed or paused the script.",
             "executor_wedged": True,
-            "recovery": "Altium's script executor is now blocked. Recover by running this "
-                        "shell command (sends the debugger Stop process to the running "
-                        "Altium): \"<altium_exe>\" -REditScript:Stop  -- then retry.",
+            "recovery": "Use recover_script_executor to verify executor availability. "
+                        "Inspect the failed statement before deciding whether a retry is safe.",
             "steps": steps,
             "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
@@ -1349,9 +1368,8 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
         "diagnosis": "Usually a COMPILE error in the script, or a previously paused "
                      "script blocking execution.",
         "executor_wedged": True,
-        "recovery": "A previously paused script may be blocking execution. Recover by "
-                    "running this shell command: \"<altium_exe>\" -REditScript:Stop  "
-                    "-- then retry. If it still fails, the script itself has a COMPILE error.",
+        "recovery": "Use recover_script_executor to verify executor availability. "
+                    "Do not keep dispatching scripts while recovery is unresolved.",
         "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
 
