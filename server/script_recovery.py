@@ -202,7 +202,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if not 1 <= timeout_seconds <= 60 or not 1 <= dispatch_timeout_seconds <= 15:
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
     old = blocked_state(exchange_dir)
-    if old and old.get("require_fresh_instance"):
+    fresh_emergency = bool(old and old.get("require_fresh_instance"))
+    if fresh_emergency:
         import emergency_stop
         reason = emergency_stop.recovery_block(exe, old)
         if reason:
@@ -216,7 +217,7 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if pending:
         return _blocked(old or {}, "Previous recovery launcher is still running",
                         pending_launch_ids=pending)
-    if old and not manual_stop_confirmed:
+    if old and not manual_stop_confirmed and not fresh_emergency:
         return _blocked(old, "Previous recovery is unresolved; no new launch dispatched")
     recorded_pending = [item["pid"] for item in (old or {}).get("launches", [])
                         if item.get("pid") and item.get("exit_code") is None]
@@ -224,9 +225,40 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if not environment.get("ready"):
         return _blocked(old or {}, environment.get("reason", "Preflight failed"),
                         environment=environment)
+    fresh_identity = None
+    if fresh_emergency:
+        # The old exact process was proven gone above. Independently identify the
+        # single ready current instance; absence of the old PID alone is not proof.
+        try:
+            previous = old.get("emergency_identity") or {}
+            pid = environment.get("target_pid")
+            if (type(pid) is not int or pid <= 0
+                    or environment.get("configured_process_ids") != [pid]
+                    or not any(window.get("class") == "TDocumentForm" for window in
+                               environment.get("process_windows", {}).get(pid, []))
+                    or type(previous.get("pid")) is not int or previous["pid"] <= 0
+                    or type(previous.get("creation_filetime")) is not int
+                    or previous["creation_filetime"] <= 0):
+                raise ValueError("A complete previous identity and one ready current PID with a native main window are required")
+            with emergency_stop.WinProcess(pid) as process:
+                fresh_identity = process.identity()
+                emergency_stop._valid_identity(fresh_identity, exe, pid)
+                if (type(fresh_identity.get("creation_filetime")) is not int
+                        or fresh_identity["creation_filetime"] <= 0
+                        or (fresh_identity["pid"] == previous["pid"]
+                            and fresh_identity["creation_filetime"] == previous["creation_filetime"])):
+                    raise ValueError("Current process is not a verified fresh emergency replacement")
+        except (OSError, ValueError, TypeError) as error:
+            return _blocked(old, "Fresh-instance identity was not verified: " + str(error),
+                            environment=environment)
     token = uuid.uuid4().hex
     state = {"token": token, "phase": "preflight", "environment": environment,
-             "manual_stop_confirmed": manual_stop_confirmed, "launches": []}
+             "manual_stop_confirmed": manual_stop_confirmed,
+             "fresh_instance_confirmed": fresh_identity is not None, "launches": []}
+    if fresh_identity is not None:
+        state.update(fresh_instance_identity=fresh_identity,
+                     fresh_instance_creation_filetime_decimal=str(fresh_identity["creation_filetime"]),
+                     previous_emergency_identity=old["emergency_identity"])
     _write_state(exchange_dir, state)
 
     async def launch_once(phase, argument, deadline):
@@ -244,7 +276,7 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         return item["exit_code"]
 
     try:
-        if not manual_stop_confirmed:
+        if not manual_stop_confirmed and fresh_identity is None:
             code = await launch_once("stop", "-REditScript:Stop", dispatch_timeout_seconds)
             if code != 0:
                 return _blocked(state, "Stop dispatch did not exit successfully; delivery unproven")

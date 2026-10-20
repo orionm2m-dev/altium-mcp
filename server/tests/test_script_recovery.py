@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import script_recovery as recovery
+import emergency_stop
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,7 +35,7 @@ class RecoveryTests(unittest.TestCase):
         self.phase_results = {"stop": 0, "probe": 0}
         self.result_token = "current_token"
         self.write_result = True
-        self.environment = {"ready": True, "target_pid": 10,
+        self.environment = {"ready": True, "target_pid": 10, "configured_process_ids": [10],
                             "foreground_confirmed": True, "ui_responsive": True}
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
@@ -133,6 +134,103 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(result["recovered"])
         self.assertEqual(self.launcher.call_count, 1)
         self.assertNotIn("EditScript:Stop", self.launcher.call_args.args[0])
+
+    def install_fresh_emergency(self):
+        previous = {"pid": 5, "creation_filetime": 133777777777777771,
+                    "exe": emergency_stop._canonical("C:/Altium/X2.EXE"),
+                    "user_sid": "test-user", "running": True}
+        old = {"phase": "emergency_terminated", "require_fresh_instance": True,
+               "emergency_identity": previous, "launches": []}
+        recovery._write_state(self.root, old)
+        self.fresh = dict(previous, pid=10, creation_filetime=133777777777777777)
+        self.environment["process_windows"] = {10: [{"class": "TDocumentForm", "hwnd": 101}]}
+        self.reader = Mock()
+        self.reader.__enter__ = Mock(return_value=self.reader)
+        self.reader.__exit__ = Mock(return_value=False)
+        self.reader.identity.side_effect = lambda: dict(self.fresh)
+        self.factory = self.stack.enter_context(patch.object(emergency_stop, "WinProcess", return_value=self.reader))
+        self.old_exit = self.stack.enter_context(patch.object(emergency_stop, "recovery_block", return_value=None))
+        self.stack.enter_context(patch.object(emergency_stop, "_current_sid", return_value="test-user"))
+        return old
+
+    def test_verified_fresh_emergency_probes_without_stop_or_manual_claim(self):
+        old = self.install_fresh_emergency()
+        result = self.run_recovery()
+        self.assertTrue(result["recovered"])
+        self.assertFalse(result["state"]["manual_stop_confirmed"])
+        self.assertTrue(result["state"]["fresh_instance_confirmed"])
+        self.assertEqual(result["state"]["fresh_instance_creation_filetime_decimal"], "133777777777777777")
+        self.assertEqual(result["state"]["previous_emergency_identity"], old["emergency_identity"])
+        self.assertEqual(result["state"]["fresh_instance_identity"], self.fresh)
+        self.assertEqual(self.launcher.call_count, 1)
+        self.assertNotIn("EditScript:Stop", self.launcher.call_args.args[0])
+        self.old_exit.assert_called_once_with("C:/Altium/X2.EXE", old)
+        self.factory.assert_called_once_with(10)
+        self.assert_no_termination()
+
+    def test_same_pid_with_new_creation_is_a_fresh_emergency_instance(self):
+        self.install_fresh_emergency()
+        self.environment.update(target_pid=5, configured_process_ids=[5],
+                                process_windows={5: [{"class": "TDocumentForm", "hwnd": 101}]})
+        self.fresh["pid"] = 5
+        self.assertTrue(self.run_recovery()["recovered"])
+        self.assertEqual(self.launcher.call_count, 1)
+
+    def test_fresh_emergency_requires_old_exact_exit_and_ready_single_inventory(self):
+        self.install_fresh_emergency()
+        self.old_exit.return_value = "Exact emergency target is still alive or unknown"
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.factory.assert_not_called()
+        self.old_exit.return_value = None
+        self.environment.update(ready=False, reason="modal or ambiguous startup")
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.factory.assert_not_called()
+        self.environment.update(ready=True, configured_process_ids=[10, 11])
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.factory.assert_not_called()
+        self.launcher.assert_not_called()
+
+    def test_fresh_emergency_refuses_responsive_startup_window_without_main(self):
+        self.install_fresh_emergency()
+        self.environment["process_windows"] = {10: [{"class": "TStartUpWindow", "hwnd": 102}]}
+        result = self.run_recovery()
+        self.assertTrue(result["blocked"])
+        self.assertIn("native main window", result["error"])
+        self.factory.assert_not_called()
+        self.launcher.assert_not_called()
+
+    def test_fresh_emergency_rejects_same_unknown_or_wrong_current_identity(self):
+        old = self.install_fresh_emergency()
+        baseline = dict(self.fresh)
+        for change in ({"exe": "C:/Other/X2.EXE"}, {"user_sid": "other"},
+                       {"running": False}, {"creation_filetime": None}, {"pid": 11}):
+            with self.subTest(change=change):
+                self.fresh = dict(baseline, **change)
+                self.assertTrue(self.run_recovery()["blocked"])
+        self.environment.update(target_pid=5, configured_process_ids=[5],
+                                process_windows={5: [{"class": "TDocumentForm", "hwnd": 101}]})
+        self.fresh = dict(old["emergency_identity"])
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.factory.side_effect = PermissionError("identity query denied")
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_fresh_emergency_still_blocks_pending_launchers_and_wrong_probe(self):
+        self.install_fresh_emergency()
+        pending = Mock()
+        pending.poll.return_value = None
+        recovery._launches[99] = pending
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.factory.assert_not_called()
+        self.launcher.assert_not_called()
+        recovery._launches.clear()
+        self.result_token = "not_this_probe"
+        result = self.run_recovery()
+        self.assertEqual(result["state"]["phase"], "probe_token_mismatch")
+        self.assertFalse(result["state"]["manual_stop_confirmed"])
+        self.run_recovery()
+        self.assertEqual(self.launcher.call_count, 1)
 
     def test_wrong_token_and_stale_generic_result_cannot_pass(self):
         self.result_token = "previous_call"
