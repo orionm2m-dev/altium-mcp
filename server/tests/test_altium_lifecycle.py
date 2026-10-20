@@ -34,6 +34,9 @@ class StartTests(TestCase):
         self.process = Mock(pid=456)
         self.process.poll.return_value = None
         self.launch = self.stack.enter_context(patch.object(lifecycle.subprocess, "Popen", return_value=self.process))
+        self.environment = self.stack.enter_context(patch.object(lifecycle, "_child_environment",
+            return_value=({"PRESERVED_TEST_VALUE": "secret-test-value"},
+                          {"windir_present": True, "windir_repaired": False})))
         self.identity = {"pid": 456, "exe": emergency_stop._canonical(self.exe),
                          "creation_filetime": 133777777777777777, "user_sid": "owned", "running": True}
         self.read_identity = self.stack.enter_context(patch.object(lifecycle, "_owned_identity", return_value=self.identity))
@@ -58,6 +61,9 @@ class StartTests(TestCase):
         self.assertEqual(args, ([str(self.exe.resolve())],))
         self.assertEqual(kwargs["executable"], str(self.exe.resolve()))
         self.assertFalse(kwargs["shell"])
+        self.assertEqual(kwargs["env"], {"PRESERVED_TEST_VALUE": "secret-test-value"})
+        self.assertNotIn("secret-test-value", json.dumps(result))
+        self.assertNotIn("secret-test-value", (self.root / "altium_startup.json").read_text())
         self.assertNotIn("startupinfo", kwargs)  # Do not hide the normal GUI application.
         self.assertEqual(kwargs["creationflags"], getattr(lifecycle.subprocess, "CREATE_NO_WINDOW", 0))
         self.assertEqual(json.loads((self.root / "altium_startup.json").read_text())["target_pid"], 456)
@@ -146,6 +152,13 @@ class StartTests(TestCase):
         self.assertFalse(result["launched"])
         self.assertEqual(writes[-1]["error"], "launch failed")
 
+    def test_invalid_child_environment_never_launches(self):
+        self.environment.side_effect = ValueError("Child WINDIR invalid")
+        result = self.start()
+        self.assertFalse(result["launched"])
+        self.launch.assert_not_called()
+        self.assert_untouched()
+
     def test_owned_handle_identity_does_not_query_reused_launch_pid(self):
         reader = Mock(handle=11)
         reader.__enter__ = Mock(return_value=reader)
@@ -169,6 +182,53 @@ class StartTests(TestCase):
             self.assertEqual(result, self.identity)
             self.assertEqual(reader.handle, 11)
             backend.assert_called_once_with(os.getpid())
+
+
+class ChildEnvironmentTests(TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = self.temp.name
+
+    def test_missing_windir_repaired_only_in_child_copy(self):
+        original = {"TOKEN": "do-not-log", "SystemRoot": "existing-root", "PATH": "existing-path"}
+        with patch.object(lifecycle.os, "environ", original), \
+             patch.object(lifecycle, "_get_windows_directory", return_value=self.directory) as query:
+            child, flags = lifecycle._child_environment()
+        self.assertEqual(original, {"TOKEN": "do-not-log", "SystemRoot": "existing-root", "PATH": "existing-path"})
+        self.assertEqual(child, dict(original, WINDIR=self.directory))
+        self.assertEqual(flags, {"windir_present": False, "windir_repaired": True})
+        self.assertNotIn("do-not-log", json.dumps(flags))
+        query.assert_called_once_with()
+
+    def test_existing_case_insensitive_windir_preserved_without_native_query(self):
+        for key in ("windir", "WINDIR", "WinDir"):
+            with self.subTest(key=key), patch.object(lifecycle.os, "environ", {key: self.directory, "TOKEN": "private"}), \
+                 patch.object(lifecycle, "_get_windows_directory") as query:
+                child, flags = lifecycle._child_environment()
+                self.assertEqual(child, {key: self.directory, "TOKEN": "private"})
+                self.assertEqual(flags, {"windir_present": True, "windir_repaired": False})
+                query.assert_not_called()
+
+    def test_invalid_existing_or_derived_directory_is_not_guessed(self):
+        for original, derived in (({"WINDIR": ""}, self.directory),
+                                  ({"WINDIR": "missing-relative"}, self.directory),
+                                  ({}, str(Path(self.directory) / "absent"))):
+            with self.subTest(original=original), patch.object(lifecycle.os, "environ", original), \
+                 patch.object(lifecycle, "_get_windows_directory", return_value=derived):
+                with self.assertRaises(ValueError):
+                    lifecycle._child_environment()
+
+    def test_native_directory_query_is_mocked_and_uses_windows_api(self):
+        kernel = Mock()
+        def directory_query(buffer, capacity):
+            buffer.value = self.directory
+            return len(self.directory)
+        kernel.GetWindowsDirectoryW.side_effect = directory_query
+        with patch.object(ctypes, "WinDLL", return_value=kernel, create=True):
+            self.assertEqual(lifecycle._get_windows_directory(), self.directory)
+        kernel.GetWindowsDirectoryW.assert_called_once()
+
 
 
 class InventoryTests(TestCase):

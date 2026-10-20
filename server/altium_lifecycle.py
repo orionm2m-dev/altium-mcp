@@ -79,6 +79,36 @@ def _write_record(exchange, result):
     temporary.replace(path)
 
 
+def _get_windows_directory():
+    """Ask Windows for its directory; never infer it from a hardcoded drive."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetWindowsDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
+    kernel.GetWindowsDirectoryW.restype = wintypes.UINT
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = kernel.GetWindowsDirectoryW(buffer, len(buffer))
+    if not length:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if length >= len(buffer):
+        raise OSError("Windows directory result exceeded the buffer")
+    return buffer.value
+
+
+def _child_environment():
+    """Preserve server environment, repairing only a missing child WINDIR."""
+    environment = os.environ.copy()
+    key = next((name for name in environment if name.casefold() == "windir"), None)
+    present = key is not None
+    if not present:
+        environment["WINDIR"] = _get_windows_directory()
+        key = "WINDIR"
+    directory = Path(environment[key])
+    if not directory.is_absolute() or not directory.is_dir():
+        raise ValueError("Child WINDIR must identify an existing absolute Windows directory")
+    return environment, {"windir_present": present, "windir_repaired": not present}
+
+
 def _initial_result():
     return {"success": False, "launched": False, "ui_ready_verified": False,
             "script_dispatched": False, "mutation_replayed": False,
@@ -96,12 +126,14 @@ def _start_locked(executable, exchange):
         if pending:
             return dict(result, blocked=True, error="A previous owned cold-start process is still running",
                         pending_process_ids=pending)
+        child_env, environment_flags = _child_environment()
+        result.update(environment_flags)
         latch = script_recovery.blocked_state(exchange)
         result.update(configured_exe=executable, recovery_latch_present=bool(latch),
                       started_at_unix=time.time(), status="launch_pending")
         _write_record(exchange, result)
         process = subprocess.Popen([executable], executable=executable,
-            cwd=str(Path(executable).parent), shell=False,
+            cwd=str(Path(executable).parent), shell=False, env=child_env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         _started[process.pid] = process

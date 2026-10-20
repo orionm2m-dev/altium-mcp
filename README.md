@@ -398,3 +398,13 @@ The normal application may be visible; no console or helper window is requested.
 Offline regression: `python -B -m unittest server.tests.test_altium_lifecycle -q`.
 Normal Altium cold start still requires end-to-end native qualification; mocked
 tests and a successful process creation alone are not a recovery pass.
+
+
+Cold-start child environment preserves all server variables. If `WINDIR` is
+absent (case-insensitive), its child-only value is obtained from Windows through
+`GetWindowsDirectoryW` and checked as an existing absolute directory. Existing
+values are not overwritten; an invalid value blocks launch. No global environment,
+registry or application setting is changed. Startup metadata records only
+`windir_present` (before repair) and `windir_repaired`; environment values and
+secrets are not included. This guards a missing startup dependency and does not
+claim that every WPF or Altium startup exception has the same cause.
