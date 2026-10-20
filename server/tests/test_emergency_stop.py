@@ -79,6 +79,102 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(recovery.blocked_state(self.root)["require_fresh_instance"])
         self.assertFalse(self.terminate(prepared["plan_token"])["success"])
 
+    def attestation(self):
+        path = self.root / "prior_failure.json"
+        path.write_text('{"historical_error": "debugger stopped at breakpoint"}', encoding="utf-8")
+        return {"reason": "The managed debugging session remains unresolved after the recorded failure.",
+                "prior_receipt_path": str(path), "prior_receipt_sha256": stop._hash(path)}
+
+    def test_explicit_attestation_is_operator_authorization_not_live_detection(self):
+        self.failure.return_value["failure_evidence"] = []
+        prepared = self.prepare(failure_attestation=self.attestation())
+        self.assertTrue(prepared["success"])
+        qualification = prepared["qualification"]
+        self.assertEqual(qualification["kind"], "caller_attested_abandoned_debugger")
+        self.assertIs(qualification["live_failure_verified"], False)
+        self.assertEqual(prepared["plan"]["observed"]["failure_evidence"], [])
+        self.assertIsNone(prepared["plan"]["native_incident_path"])
+        self.assertFalse(self.terminate(prepared["plan_token"], acknowledge_unsaved_loss=False)["success"])
+        result = self.terminate(prepared["plan_token"])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["qualification"], qualification)
+        self.assertIs(result["qualification"]["live_failure_verified"], False)
+        self.assertEqual(result["observed_before_stop"]["failure_evidence"], [])
+        self.assertFalse(self.terminate(prepared["plan_token"])["success"])
+
+    def test_attestation_does_not_replace_managed_acknowledgement(self):
+        self.failure.return_value["failure_evidence"] = []
+        self.assertFalse(self.prepare(failure_attestation=self.attestation(),
+                                     acknowledge_managed_session=False)["success"])
+        self.factory.assert_not_called()
+
+    def test_attestation_missing_unknown_empty_or_invalid_fields_fail_closed(self):
+        self.failure.return_value["failure_evidence"] = []
+        valid = self.attestation()
+        candidates = [{}, {"reason": "only reason"}, dict(valid, unsupported=True),
+                      dict(valid, reason="   "), dict(valid, reason=42),
+                      dict(valid, prior_receipt_sha256="0" * 64),
+                      dict(valid, prior_receipt_sha256="not a hash"),
+                      dict(valid, prior_receipt_path="relative.json"),
+                      dict(valid, prior_receipt_path=str(self.root / "absent.json")),
+                      dict(valid, prior_receipt_path=str(self.root))]
+        for value in candidates:
+            with self.subTest(value=value):
+                self.assertFalse(self.prepare(failure_attestation=value)["success"])
+        self.assert_not_stopped()
+
+    def test_attested_receipt_change_or_removal_before_stop_refuses(self):
+        self.failure.return_value["failure_evidence"] = []
+        for remove in (False, True):
+            with self.subTest(remove=remove):
+                attestation = self.attestation()
+                prepared = self.prepare(failure_attestation=attestation)
+                path = Path(attestation["prior_receipt_path"])
+                if remove:
+                    path.unlink()
+                else:
+                    path.write_text("new evidence", encoding="utf-8")
+                result = self.terminate(prepared["plan_token"])
+                self.assertFalse(result["success"])
+                self.assertFalse(result["termination_requested"])
+        self.assert_not_stopped()
+
+    def test_attestation_keeps_pid_generation_expiry_and_exact_pid_guards(self):
+        self.failure.return_value["failure_evidence"] = []
+        for mode in ("pid", "generation", "expiry"):
+            with self.subTest(mode=mode):
+                self.clock += 301
+                prepared = self.prepare(failure_attestation=self.attestation())
+                if mode == "generation":
+                    self.identity["creation_filetime"] += 1
+                if mode == "expiry":
+                    self.clock += 301
+                result = self.terminate(prepared["plan_token"], target_pid=999 if mode == "pid" else 123)
+                self.assertFalse(result["success"])
+        self.assert_not_stopped()
+
+    def test_native_incident_persists_identity_time_and_observation_if_backup_fails(self):
+        result = self.prepare(backup_paths=[])
+        self.assertFalse(result["success"])
+        records = list((self.root / "emergency_stop" / "incidents").glob("*.json"))
+        self.assertEqual(len(records), 1)
+        incident = json.loads(records[0].read_text(encoding="utf-8"))
+        self.assertEqual(incident["identity"], self.identity)
+        self.assertEqual(incident["capture_time_unix"], self.clock)
+        self.assertTrue(incident["live_failure_verified"])
+        self.assertEqual(incident["observed"], self.failure.return_value)
+        self.assert_not_stopped()
+
+    def test_attestation_never_weakens_executable_or_owner_gate(self):
+        self.failure.return_value["failure_evidence"] = []
+        attestation = self.attestation()
+        self.identity["exe"] = stop._canonical("C:/other.exe")
+        self.assertFalse(self.prepare(failure_attestation=attestation)["success"])
+        self.identity["exe"] = self.exe
+        self.identity["user_sid"] = "other"
+        self.assertFalse(self.prepare(failure_attestation=attestation)["success"])
+        self.assert_not_stopped()
+
     def test_managed_and_unsaved_acknowledgements_required(self):
         self.assertFalse(self.prepare(acknowledge_managed_session=False)["success"])
         self.factory.assert_not_called()

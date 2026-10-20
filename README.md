@@ -332,3 +332,37 @@ hidden helper processes; this does not qualify end-to-end Altium recovery.
 Windows references: [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess),
 [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes),
 [WaitForSingleObject](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject).
+
+
+### Explicit attestation after a debugger dialog was dismissed
+
+A dismissed error dialog does not establish that the debugger recovered. Conversely,
+an old screenshot, unchanged PID/HWND, or process birth predating a receipt does not
+prove a current fault. The default emergency path therefore continues to require
+current PID-local native failure evidence.
+
+An already authorized caller can instead explicitly attest that its managed session
+remains failed. Supply `failure_attestation` **on prepare** with exactly:
+
+```json
+{
+  "reason": "The managed debugger remains unresolved after the recorded failed stop; current native paused state is not independently verified.",
+  "prior_receipt_path": "C:/project/diagnostics/prior_failure.json",
+  "prior_receipt_sha256": "<actual SHA-256 of that file>"
+}
+```
+
+This separate path is reported as `caller_attested_abandoned_debugger` with
+`live_failure_verified=false`. The receipt is an immutable reference to the caller's
+reason, not trusted executable instructions or proof of present debugger state.
+Its hash, the fresh PID/raw creation identity, disk backups, token and both existing
+acknowledgements are still checked. The receipt hash is rechecked before termination.
+No live error is fabricated, no dialog is answered, and no mutation is replayed.
+An omitted attestation preserves the existing strict live-evidence behavior.
+
+Whenever emergency preparation actually observes a qualifying live failure, it also
+writes a separate `emergency_stop/incidents/` record with raw creation identity,
+capture time and exact observed evidence, including when later backup validation
+fails. This capture is limited to emergency preparation; it is not a background
+monitor and does not retroactively certify older receipts. Incident records alone
+never authorize termination after the observed error disappears.

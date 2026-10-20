@@ -287,7 +287,44 @@ def _refused(message, **extra):
             "unsaved_state": "unknown", **extra}
 
 
-def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False):
+def _validate_attestation(value):
+    """An explicit caller statement, never reconstructed native/live proof."""
+    keys = {"reason", "prior_receipt_path", "prior_receipt_sha256"}
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError("failure_attestation requires exactly reason, prior_receipt_path and prior_receipt_sha256")
+    if not isinstance(value["reason"], str) or not value["reason"].strip():
+        raise ValueError("A nonempty unresolved-failure reason is required")
+    supplied = value["prior_receipt_sha256"]
+    if (not isinstance(supplied, str) or len(supplied) != 64
+            or any(c not in "0123456789abcdef" for c in supplied.lower())):
+        raise ValueError("prior_receipt_sha256 must be a SHA-256 hex digest")
+    if not isinstance(value["prior_receipt_path"], str):
+        raise ValueError("prior_receipt_path must be an absolute existing file")
+    path = Path(value["prior_receipt_path"])
+    if not path.is_absolute() or not path.is_file():
+        raise ValueError("prior_receipt_path must be an absolute existing file")
+    path = path.resolve()
+    if _hash(path) != supplied.lower():
+        raise ValueError("Prior receipt no longer matches its supplied SHA-256")
+    return {"reason": value["reason"].strip(), "prior_receipt_path": str(path),
+            "prior_receipt_sha256": supplied.lower()}
+
+
+def _record_native_incident(exchange, identity, observed):
+    """Persist actually observed live evidence, not the caller's historical receipt."""
+    if not observed["failure_evidence"]:
+        return None
+    folder = Path(exchange) / "emergency_stop" / "incidents"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / (str(identity["pid"]) + "_" + secrets.token_hex(8) + ".json")
+    _write_json(path, {"capture_time_unix": time.time(), "identity": identity,
+                      "observed": observed, "live_failure_verified": True,
+                      "meaning": "Failure observed at capture time; this is not proof it remains active later"})
+    return str(path)
+
+
+def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False,
+                    failure_attestation=None):
     if not acknowledge_managed_session:
         return _refused("Explicit acknowledgement that this exact PID is the managed task session is required")
     if isinstance(target_pid, bool) or not isinstance(target_pid, int) or target_pid <= 0:
@@ -303,7 +340,14 @@ def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed
             identity = process.identity()
             _valid_identity(identity, exe, target_pid)
             observed = inspect_failure(exe, identity)
-            if not observed["failure_evidence"]:
+            incident_path = _record_native_incident(exchange, identity, observed)
+            if failure_attestation is not None:
+                qualification = {"kind": "caller_attested_abandoned_debugger", "live_failure_verified": False,
+                                 "attestation": _validate_attestation(failure_attestation),
+                                 "meaning": "Caller confirms the managed session remains failed; historical evidence is not current native-state proof"}
+            elif observed["failure_evidence"]:
+                qualification = {"kind": "live_native_failure", "live_failure_verified": True}
+            else:
                 return _refused("No qualifying failure for this PID; no stop was prepared", observed=observed)
             token = secrets.token_hex(24)
             folder = Path(exchange) / "emergency_stop" / token
@@ -312,6 +356,7 @@ def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed
                 raise ValueError("Target identity changed during preparation")
             plan = {"token": token, "created_at": time.time(), "expires_at": time.time() + TTL_SECONDS,
                     "identity": identity, "observed": observed, "backups": copies,
+                    "qualification": qualification, "native_incident_path": incident_path,
                     "checkpoint": str(folder / "plan.json"), "unsaved_state": "unknown",
                     "backup_scope": "disk_only", "document_association": "caller_supplied_in_memory_unverified",
                     "managed_session_acknowledged": True,
@@ -320,6 +365,7 @@ def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed
             _latch(exchange, plan, "emergency_prepared")
             _plans[token] = json.dumps(plan, sort_keys=True)
             return {"success": True, "prepared": True, "plan_token": token, "plan": plan,
+                    "qualification": qualification,
                     "warning": "Disk copies cannot preserve unsaved documents in memory. Termination may lose them.",
                     "termination_requested": False, "terminated_confirmed": False}
     except (OSError, ValueError, TypeError) as error:
@@ -349,9 +395,14 @@ def _terminate_locked(exe, exchange, target_pid, plan_token, acknowledge_unsaved
             if not _same_identity(identity, plan["identity"]):
                 raise ValueError("PID identity differs from the prepared process")
             observed = inspect_failure(exe, identity)
-            if not observed["failure_evidence"]:
-                raise ValueError("Failure disappeared; refusing to terminate a now healthy target")
+            qualification = plan["qualification"]
+            if qualification["kind"] == "caller_attested_abandoned_debugger":
+                _validate_attestation(qualification["attestation"])
+            elif not observed["failure_evidence"]:
+                raise ValueError("Failure disappeared; no current qualifying native failure")
             _verify_backups(plan["backups"])
+            if qualification["kind"] == "caller_attested_abandoned_debugger":
+                _validate_attestation(qualification["attestation"])
             state = script_recovery.blocked_state(exchange) or {}
             if state.get("emergency_token") != plan_token:
                 raise ValueError("Recovery latch changed during verification")
@@ -364,6 +415,7 @@ def _terminate_locked(exe, exchange, target_pid, plan_token, acknowledge_unsaved
             outcome = {"success": result["terminated_confirmed"], "blocked": True,
                        "termination_requested": True, **result, "target_identity": identity,
                        "unsaved_state": "unknown", "backup_scope": "disk_only",
+                       "qualification": qualification, "observed_before_stop": observed,
                        "requires_fresh_instance_probe": True,
                        "next_action": "Launch the intended Altium session explicitly, then call recover_script_executor with manual_stop_confirmed=true. No mutation is replayed."}
             _write_json(Path(plan["checkpoint"]).with_name("result.json"), outcome)
@@ -401,10 +453,12 @@ def recovery_block(exe, state):
     return None
 
 
-def prepare(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False):
+def prepare(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False,
+            failure_attestation=None):
     try:
         with emergency_claim(exchange):
-            return _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session)
+            return _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session,
+                                   failure_attestation)
     except OSError as error:
         return _refused(str(error))
 

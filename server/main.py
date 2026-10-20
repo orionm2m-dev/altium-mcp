@@ -1409,7 +1409,8 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
 async def emergency_stop_altium(ctx: Context, action: str, target_pid: int,
                                backup_paths: list = None, plan_token: str = "",
                                acknowledge_unsaved_loss: bool = False,
-                               acknowledge_managed_session: bool = False) -> str:
+                               acknowledge_managed_session: bool = False,
+                               failure_attestation: dict = None) -> str:
     """Prepare or terminate one explicitly managed failed Altium process.
 
     prepare requires acknowledge_managed_session=true and exact existing working
@@ -1421,11 +1422,19 @@ async def emergency_stop_altium(ctx: Context, action: str, target_pid: int,
     relaunch, dialog answers, document saves or mutation retry. An exit timeout
     is unconfirmed. Script dispatch stays blocked until a fresh-instance probe;
     independent read-only diagnostics remain available.
+
+    Optional failure_attestation on prepare is an explicit caller confirmation of
+    an unresolved managed debugger failure after its dialog was dismissed. Exact
+    keys: reason, prior_receipt_path, prior_receipt_sha256. The existing receipt is
+    hashed again before stopping. This mode is labeled live_failure_verified=false;
+    it does NOT prove that a historical error is current or detect a healthy app.
+    The default mode still requires a currently observed qualifying failure.
     """
     async with altium_bridge._command_lock:
         if action == "prepare":
             outcome = emergency_stop.prepare(altium_bridge.config.altium_exe_path,
-                EXCHANGE_DIR, target_pid, backup_paths, acknowledge_managed_session)
+                EXCHANGE_DIR, target_pid, backup_paths, acknowledge_managed_session,
+                failure_attestation)
         elif action == "terminate":
             outcome = emergency_stop.terminate(altium_bridge.config.altium_exe_path,
                 EXCHANGE_DIR, target_pid, plan_token, acknowledge_unsaved_loss)
