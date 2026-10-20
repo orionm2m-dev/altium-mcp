@@ -110,6 +110,24 @@ class WinProcess:
         if not ok:
             raise self.c.WinError(self.c.get_last_error())
 
+    def exit_observation(self):
+        """Query the same HANDLE's exact PID, creation time and exit code only.
+
+        A terminated process may no longer expose a token or image path. Those
+        properties are unnecessary to prove that the previously pinned instance
+        exited. STILL_ACTIVE remains unconfirmed, including exit-code ambiguity.
+        """
+        c, w = self.c, self.w
+        pid = int(self.k.GetProcessId(self.handle))
+        self._check(pid)
+        times = [w.FILETIME() for _ in range(4)]
+        self._check(self.k.GetProcessTimes(self.handle, *(c.byref(t) for t in times)))
+        code = w.DWORD()
+        self._check(self.k.GetExitCodeProcess(self.handle, c.byref(code)))
+        return {"pid": pid,
+                "creation_filetime": int(times[0].dwHighDateTime) << 32 | times[0].dwLowDateTime,
+                "exit_code": int(code.value)}
+
     def identity(self):
         c, w = self.c, self.w
         times = [w.FILETIME() for _ in range(4)]
@@ -323,27 +341,40 @@ def _record_native_incident(exchange, identity, observed):
     return str(path)
 
 
+def _exact_target_has_exited(identity):
+    """Prove absence/reuse/exit without querying an ended process's token."""
+    pid, created = identity.get("pid"), identity.get("creation_filetime")
+    if type(pid) is not int or pid <= 0 or type(created) is not int or created <= 0:
+        raise ValueError("Exact prior PID/creation identity is unavailable")
+    try:
+        process = WinProcess(pid)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 87:
+            return True  # Only failure to OPEN this PID proves absence.
+        raise
+    with process:
+        current = process.exit_observation()
+    if (not isinstance(current, dict) or current.get("pid") != pid
+            or type(current.get("creation_filetime")) is not int
+            or current["creation_filetime"] <= 0
+            or type(current.get("exit_code")) is not int
+            or not 0 <= current["exit_code"] <= 0xFFFFFFFF):
+        raise ValueError("Exact process exit observation is unavailable")
+    return current["creation_filetime"] != created or current["exit_code"] != 259
+
+
 def _successful_previous_stop_has_exited(exe, state):
     """Release only the completed plan's TTL, never the script-dispatch latch."""
     result = state.get("termination_result")
     identity = state.get("emergency_identity")
     if (state.get("phase") != "emergency_terminated" or not isinstance(result, dict)
             or result.get("terminated_confirmed") is not True or result.get("wait_status") != 0
-            or not isinstance(identity, dict) or identity.get("exe") != _canonical(exe)
-            or type(identity.get("pid")) is not int or identity["pid"] <= 0
-            or type(identity.get("creation_filetime")) is not int or identity["creation_filetime"] <= 0):
+            or not isinstance(identity, dict) or identity.get("exe") != _canonical(exe)):
         return False
     try:
-        with WinProcess(identity["pid"]) as process:
-            current = process.identity()
-            if (current.get("pid") != identity["pid"]
-                    or type(current.get("creation_filetime")) is not int
-                    or current["creation_filetime"] <= 0):
-                return False
-            return (current["creation_filetime"] != identity["creation_filetime"]
-                    or current.get("running") is False)
-    except OSError as error:
-        return getattr(error, "winerror", None) == 87  # Invalid PID, not access denied.
+        return _exact_target_has_exited(identity)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False,
@@ -459,21 +490,17 @@ def _terminate_locked(exe, exchange, target_pid, plan_token, acknowledge_unsaved
 
 
 def recovery_block(exe, state):
-    """No Stop/probe while the exact failed instance is alive or identity is unknown."""
+    """No Stop/probe while the exact failed instance is alive or exit is unknown."""
     if not state.get("require_fresh_instance"):
         return None
     identity = state.get("emergency_identity")
-    if not identity or identity.get("exe") != _canonical(exe):
+    if not isinstance(identity, dict) or identity.get("exe") != _canonical(exe):
         return "Emergency checkpoint identity is unavailable; no dispatch"
     try:
-        with WinProcess(identity["pid"]) as process:
-            current = process.identity()
-            if (current.get("running") and current.get("pid") == identity["pid"]
-                    and current.get("creation_filetime") == identity["creation_filetime"]):
-                return "The exact emergency target is still running; no Stop/probe or mutation dispatched"
-    except OSError as error:
-        if getattr(error, "winerror", None) != 87:  # Invalid PID: old process no longer exists.
-            return "Cannot prove the emergency target exited: " + str(error)
+        if not _exact_target_has_exited(identity):
+            return "The exact emergency target is still running; no Stop/probe or mutation dispatched"
+    except (OSError, ValueError, TypeError) as error:
+        return "Cannot prove the emergency target exited: " + str(error)
     return None
 
 

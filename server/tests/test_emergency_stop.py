@@ -41,6 +41,9 @@ class ProtocolTests(unittest.TestCase):
         process.__enter__ = Mock(return_value=process)
         process.__exit__ = Mock(return_value=False)
         process.identity.side_effect = lambda: dict(self.identity, pid=pid)
+        process.exit_observation.side_effect = lambda: {
+            "pid": pid, "creation_filetime": self.identity["creation_filetime"],
+            "exit_code": 259 if self.identity["running"] else 0}
         process.wait.return_value = {"terminated_confirmed": True, "wait_status": 0,
                                      "exit_code": stop.EXIT_CODE}
         self.processes.append(process)
@@ -225,6 +228,9 @@ class ProtocolTests(unittest.TestCase):
                         else:
                             prior["creation_filetime"] += 1
                         process.identity.side_effect = lambda: prior
+                        process.exit_observation.side_effect = lambda: {
+                            "pid": prior["pid"], "creation_filetime": prior["creation_filetime"],
+                            "exit_code": 259 if prior["running"] else 0}
                     return process
                 self.factory.side_effect = prior_probe
                 next_plan = self.prepare(target_pid=456)
@@ -249,6 +255,9 @@ class ProtocolTests(unittest.TestCase):
                     elif mode == "wrong_pid":
                         current["pid"] = 999
                     process.identity.side_effect = lambda: current
+                    process.exit_observation.side_effect = lambda: {
+                        "pid": current["pid"], "creation_filetime": current.get("creation_filetime"),
+                        "exit_code": 259}
                     return process
                 self.factory.side_effect = uncertain_probe
                 self.assertFalse(self.prepare(target_pid=456)["success"])
@@ -485,6 +494,88 @@ class SourceContractTests(unittest.TestCase):
         process.terminate()
         process.k.TerminateProcess.assert_called_once_with(0x123456789, stop.EXIT_CODE)
         process.k.OpenProcess.assert_not_called()
+
+
+
+
+class EndedHandleTests(unittest.TestCase):
+    def setUp(self):
+        self.exe = stop._canonical("C:/Altium/X2.EXE")
+        self.identity = {"pid": 123, "creation_filetime": 134369701631359666,
+                         "exe": self.exe}
+        self.state = {"require_fresh_instance": True, "emergency_identity": self.identity}
+        self.observation = dict(self.identity, exit_code=0)
+        self.process = Mock()
+        self.process.__enter__ = Mock(return_value=self.process)
+        self.process.__exit__ = Mock(return_value=False)
+        self.process.exit_observation.side_effect = lambda: self.observation
+        self.process.identity.side_effect = OSError("Ended process SID is unavailable")
+        self.factory = patch.object(stop, "WinProcess", return_value=self.process)
+        self.factory.start(); self.addCleanup(self.factory.stop)
+
+    def test_exact_ended_handle_does_not_query_sid_or_image_identity(self):
+        self.assertIsNone(stop.recovery_block(self.exe, self.state))
+        self.process.identity.assert_not_called()
+        self.process.terminate.assert_not_called()
+
+    def test_still_active_is_unconfirmed_even_if_exit_code_259_was_used(self):
+        self.observation["exit_code"] = 259
+        self.assertIn("still running", stop.recovery_block(self.exe, self.state))
+        self.process.identity.assert_not_called()
+
+    def test_distinct_creation_proves_old_instance_gone(self):
+        self.observation.update(creation_filetime=self.identity["creation_filetime"]+1, exit_code=259)
+        self.assertIsNone(stop.recovery_block(self.exe, self.state))
+
+    def test_unknown_exit_read_error_including_87_is_never_absence(self):
+        for code in (31, 87, 5):
+            error = OSError("query failed"); error.winerror = code
+            self.process.exit_observation.side_effect = error
+            self.assertIn("Cannot prove", stop.recovery_block(self.exe, self.state))
+
+    def test_partial_or_mismatched_readback_fails_closed(self):
+        for changed in ({"pid": 9}, {"creation_filetime": None}, {"exit_code": None},
+                        {"exit_code": -1}, {"exit_code": True}, {"exit_code": 0x100000000}):
+            self.observation = dict(self.identity, exit_code=0, **changed) if "exit_code" not in changed else dict(self.identity, **changed)
+            self.assertIn("Cannot prove", stop.recovery_block(self.exe, self.state))
+
+    def test_completed_plan_ttl_uses_same_exit_proof_without_token_query(self):
+        state = dict(self.state, phase="emergency_terminated",
+                     termination_result={"terminated_confirmed":True,"wait_status":0})
+        self.assertTrue(stop._successful_previous_stop_has_exited(self.exe, state))
+        self.process.identity.assert_not_called()
+        error = OSError("ended process query failed");error.winerror=31
+        self.process.exit_observation.side_effect=error
+        self.assertFalse(stop._successful_previous_stop_has_exited(self.exe,state))
+
+
+class ExitObservationAdapterTests(unittest.TestCase):
+    def adapter(self, code=0, pid=123, failure=False):
+        import ctypes
+        from ctypes import wintypes
+        process = object.__new__(stop.WinProcess)
+        process.c, process.w, process.handle = ctypes, wintypes, 456
+        created = 134369701631359666
+        def times(handle, first, *unused):
+            first._obj.dwLowDateTime = created & 0xFFFFFFFF
+            first._obj.dwHighDateTime = created >> 32
+            return not failure
+        def exit_code(handle, value): value._obj.value=code; return True
+        process.k=SimpleNamespace(GetProcessId=lambda h:pid,GetProcessTimes=times,GetExitCodeProcess=exit_code)
+        process.a=SimpleNamespace()  # Any accidental token/SID query fails.
+        def check(ok):
+            if not ok: raise OSError("mocked query failed")
+        process._check=check
+        return process
+
+    def test_query_only_exact_filetime_and_exit_code(self):
+        self.assertEqual(self.adapter().exit_observation(),
+            {"pid":123,"creation_filetime":134369701631359666,"exit_code":0})
+        self.assertEqual(self.adapter(code=259).exit_observation()["exit_code"],259)
+
+    def test_query_failure_or_zero_pid_is_not_exit(self):
+        for process in (self.adapter(pid=0),self.adapter(failure=True)):
+            with self.assertRaises(OSError): process.exit_observation()
 
 
 if __name__ == "__main__":

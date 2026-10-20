@@ -37,3 +37,13 @@ read-only probe after successful exit and ready-main checks. No Stop is repeated
 and no manual-stop claim is fabricated. The internal one-use proof cannot be
 supplied through public JSON. Default unresolved-recovery blocking is unchanged.
 Historical PID-only launch identity is explicitly not claimed as verified.
+
+## 2026-10-20 — Observe ended process handles without token lookup
+
+Added a query-only exit observation using exact PID, raw creation FILETIME and
+`GetExitCodeProcess`. Emergency recovery and confirmed-plan TTL checks no longer
+query a terminated process's unavailable token or image path just to prove exit.
+Invalid-PID absence is accepted only when opening the process; unknown/read-time
+errors remain blocking. `STILL_ACTIVE` is unconfirmed. No error alone proves exit,
+no recovery latch is cleared, and no process is launched or terminated by this
+check. Focused fake-kernel tests cover ended handles and unavailable SID queries.

@@ -464,3 +464,13 @@ probe establishes executor availability, not PCB transaction idle.
 
 The WMI command-line read and Win32 cancellation path require native
 qualification; mocked tests alone do not establish live recovery.
+
+
+Emergency recovery checks a prior target's PID, creation FILETIME and exit code
+before requesting any live-process token identity. An ended process can remain
+queryable through a retained HANDLE while its token is no longer available.
+Only confirmed absence at process-open time, a different creation identity, or
+an exact matching instance with a non-`STILL_ACTIVE` exit code permits the next
+recovery check. Read errors, including WinError 31 and read-time WinError 87,
+remain blocking. This exit observation does not itself clear the recovery latch
+or prove that the surviving main application was restarted.
