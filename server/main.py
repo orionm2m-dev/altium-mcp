@@ -34,6 +34,7 @@ import dialogs
 import script_guard
 import script_recovery
 import emergency_stop
+import altium_lifecycle
 
 # Configure logging
 logging.basicConfig(
@@ -1393,6 +1394,9 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
     across server restarts. After manually stopping the failed script using
     Ctrl+F3, set manual_stop_confirmed=true to probe without another Stop.
     A still-running launcher blocks all additional recovery launches.
+    After an emergency target is proven exited, a single verified fresh ready
+    instance can receive the unique read-only probe without another Stop or a
+    claim that the user manually stopped the old debugger.
 
     timeout_seconds: probe wait, 1..60s. dispatch_timeout_seconds: per-launch
     exit wait, 1..15s. Exit 0 alone is not proof of recovery. Only the matching
@@ -1402,6 +1406,21 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
         outcome = await script_recovery.recover(
             altium_bridge.config.altium_exe_path, EXCHANGE_DIR, timeout_seconds,
             dispatch_timeout_seconds, manual_stop_confirmed)
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
+async def start_altium(ctx: Context) -> str:
+    """Explicit normal cold start of the configured executable only.
+
+    Refuses any existing configured instance or same-name process whose path is
+    unknown. Launches once with no script arguments, documents, relaunch loop or
+    mutation replay. Returns the owned process identity and immediate status;
+    process startup is not proof of UI or executor readiness. Preserves the
+    recovery latch: inspect the current UI and explicitly re-probe afterwards.
+    """
+    async with altium_bridge._command_lock:
+        outcome = altium_lifecycle.start(altium_bridge.config.altium_exe_path, EXCHANGE_DIR)
     return json.dumps(outcome, indent=2)
 
 

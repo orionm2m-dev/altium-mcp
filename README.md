@@ -371,3 +371,30 @@ capture time and exact observed evidence, including when later backup validation
 fails. This capture is limited to emergency preparation; it is not a background
 monitor and does not retroactively certify older receipts. Incident records alone
 never authorize termination after the observed error disappears.
+
+
+### Explicit cold start
+
+`start_altium` starts only the configured executable through its normal GUI startup
+path, with no `-R` argument, script, document opening, retry, or mutation replay.
+It refuses an existing exact-path instance, an unqueryable same-name process, or
+an earlier owned startup process that is still alive. Startup is serialized with
+this server's bridge lock and the cross-process emergency/recovery lock. Other
+external clients are not controlled; one writer per managed session remains the
+operating requirement.
+
+The returned PID and raw creation identity come from the retained owned launch
+handle. `creation_filetime_decimal` preserves the exact integer for clients whose
+JSON number representation rounds 64-bit timestamps. A running process does not
+prove that Altium finished startup or that its executor works. Read the current
+application state and explicitly call `recover_script_executor` afterwards. Once
+the emergency target is proven exited and the sole fresh instance passes preflight,
+recovery can run its read-only probe without sending Stop or asserting that the
+user manually stopped the debugger. The cold-start tool preserves the recovery
+latch and never closes dialogs or saves documents.
+`altium_startup.json` records launch outcome separately from the recovery state.
+The normal application may be visible; no console or helper window is requested.
+
+Offline regression: `python -B -m unittest server.tests.test_altium_lifecycle -q`.
+Normal Altium cold start still requires end-to-end native qualification; mocked
+tests and a successful process creation alone are not a recovery pass.
