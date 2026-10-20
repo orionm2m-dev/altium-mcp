@@ -1,5 +1,6 @@
 """Offline policy/store/native-adapter-shim tests; no native APIs are invoked."""
 import copy
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -193,17 +194,32 @@ class PublicWrapperTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),"exec"),namespace)
         self.call=namespace["control_import_wizard"]
     async def test_public_inspect_cancel_locked_and_persistent(self):
-        result=json.loads(await self.call(None,"inspect",PID,HWND))
+        result=json.loads(await self.call(None,"inspect",PID,int(HWND)))
         self.assertTrue(result["success"]);self.assertEqual(self.events,["claim","adapter","release"])
-        result=json.loads(await self.call(None,"cancel",PID,HWND,result["observation_token"],True))
+        result=json.loads(await self.call(None,"cancel",PID,int(HWND),result["observation_token"],True))
         self.assertTrue(result["wizard_closed_verified"]);self.assertTrue(result["recovery_latch_unchanged"])
         self.assertFalse(Path(self.tmp.name,"script_recovery_state.json").exists())
     async def test_public_invalid_action_does_not_construct_adapter(self):
-        result=json.loads(await self.call(None,"save",PID,HWND))
+        result=json.loads(await self.call(None,"save",PID,int(HWND)))
         self.assertTrue(result["blocked"]);self.assertNotIn("adapter",self.events)
     async def test_public_claim_busy_does_not_construct_adapter(self):
         self.claim_busy=True
-        result=json.loads(await self.call(None,"inspect",PID,HWND))
+        result=json.loads(await self.call(None,"inspect",PID,int(HWND)))
         self.assertTrue(result["blocked"]);self.assertEqual(self.events,[])
+
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "MCP SDK is not installed in this interpreter")
+    async def test_fastmcp_integer_handle_schema_and_call(self):
+        from mcp.server.fastmcp import FastMCP, Context
+        self.call.__annotations__["ctx"] = Context
+        server = FastMCP("mock-wizard-transport")
+        server.add_tool(self.call)
+        tools = await server.list_tools()
+        self.assertEqual(tools[0].inputSchema["properties"]["target_hwnd"]["type"], "integer")
+        result = await server.call_tool("control_import_wizard", {
+            "action": "inspect", "target_pid": PID, "target_hwnd": int(HWND)})
+        outcome = json.loads(result[0].text)
+        self.assertTrue(outcome["success"], outcome)
+        self.assertEqual(outcome["snapshot"]["window"]["hwnd"], HWND)
+        self.assertNotIn("cancel", self.adapter.calls)
 
 if __name__=="__main__": unittest.main(verbosity=2)

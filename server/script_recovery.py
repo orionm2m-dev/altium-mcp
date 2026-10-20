@@ -89,7 +89,7 @@ def inspect_environment(exe_path, required_stopped_pids=()):
         if pid in window_inventory:
             window_inventory[pid].append({"hwnd": hwnd,
                 "class": dialogs.window_class(hwnd), "title": dialogs.window_text(hwnd)})
-    modal_classes = {"#32770", "TMessageForm", "TShowException"}
+    modal_classes = {"#32770", "TMessageForm", "TShowException", "TPCBImportWizard"}
     crashes = []
     for pid, items in window_inventory.items():
         for window in items:

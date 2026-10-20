@@ -14,3 +14,15 @@ mutation retry or generic dialog answer is performed. Wizard origin remains
 unknown. Offline tests cover the policy, persistence, stale identities and native
 callback failures with mocked adapters. Native cancellation is not qualified by
 those tests.
+
+## 2026-10-20 — Block recovery dispatch while an import wizard is visible
+
+The recovery preflight now recognizes `TPCBImportWizard` as a blocking modal,
+without classifying it as a debugger failure. A visible wizard prevents Stop or
+probe dispatch; a stale hidden wizard does not block the ready main window.
+No dialog is answered and no existing recovery latch is cleared by this check.
+
+The public window handle parameter uses an integer schema. FastMCP 1.5 decodes
+numeric strings before validation, so a string-only schema rejected those calls
+before entering the tool. Internal identity records retain decimal strings. A
+mock FastMCP `list_tools`/`call_tool` test covers the actual transport conversion.

@@ -364,6 +364,19 @@ class ReadOnlyPreflightTests(unittest.TestCase):
         # No WM_CLOSE/SendInput/SetForegroundWindow functions exist in these
         # strict fakes; accidental dialog or focus mutation fails the test.
 
+    def test_import_wizard_blocks_recovery_before_responsiveness(self):
+        result, user32, _ = self.environment(modal=True, modal_class="TPCBImportWizard")
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["dialog_handles"], [102])
+        self.assertNotIn("script_errors", result)
+        user32.SendMessageTimeoutW.assert_not_called()
+
+    def test_hidden_import_wizard_does_not_block_ready_main_window(self):
+        result, user32, _ = self.environment(modal=True, modal_class="TPCBImportWizard", hidden=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["dialog_handles"], [])
+        self.assertNotIn("script_errors", result)
+
     def test_exception_reporter_blocks_before_responsiveness_even_with_other_clients(self):
         for processes in ((10,), (10, 11)):
             with self.subTest(processes=processes):

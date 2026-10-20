@@ -1427,7 +1427,7 @@ async def start_altium(ctx: Context) -> str:
 
 @mcp.tool()
 async def control_import_wizard(ctx: Context, action: str, target_pid: int,
-                                target_hwnd: str, observation_token: str = "",
+                                target_hwnd: int, observation_token: str = "",
                                 acknowledge_managed_wizard: bool = False) -> str:
     """Inspect one exact configured-process DXP Import Wizard, or cancel it once.
 
@@ -1453,17 +1453,17 @@ async def control_import_wizard(ctx: Context, action: str, target_pid: int,
                     raise ValueError("action must be inspect or cancel")
                 if isinstance(target_pid, bool) or not isinstance(target_pid, int) or target_pid <= 0:
                     raise ValueError("target_pid must be a positive integer")
-                if not isinstance(target_hwnd, str) or not target_hwnd.isdigit() or int(target_hwnd) <= 0:
-                    raise ValueError("target_hwnd must be a positive decimal string")
+                if isinstance(target_hwnd, bool) or not isinstance(target_hwnd, int) or target_hwnd <= 0:
+                    raise ValueError("target_hwnd must be a positive integer")
                 before = import_wizard_control.latch_hash(read_latch())
                 service = import_wizard_control.WizardControl(
                     import_wizard_control.NativeAdapter(),
                     altium_bridge.config.altium_exe_path, read_latch,
                     import_wizard_control.ObservationStore(EXCHANGE_DIR))
                 if action == "inspect":
-                    outcome = service.inspect(target_pid, target_hwnd)
+                    outcome = service.inspect(target_pid, str(target_hwnd))
                 else:
-                    outcome = service.cancel(target_pid, target_hwnd, observation_token,
+                    outcome = service.cancel(target_pid, str(target_hwnd), observation_token,
                                              acknowledge_managed_wizard)
                 outcome["recovery_latch_unchanged"] = before == import_wizard_control.latch_hash(read_latch())
         except Exception as exc:

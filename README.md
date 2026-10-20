@@ -414,10 +414,11 @@ claim that every WPF or Altium startup exception has the same cause.
 
 `control_import_wizard` is an out-of-band, narrowly scoped recovery tool for an
 observed `TPCBImportWizard` titled `DXP Import Wizard`. It does not use the script
-executor, and it does not clear its recovery latch.
+executor, and it does not clear its recovery latch. Recovery preflight treats a
+visible import wizard as blocking and does not dispatch Stop or probe through it.
 
-1. Call `action="inspect"` with the exact process ID and window handle (decimal
-   string) returned by the recovery inventory. The tool verifies the configured
+1. Call `action="inspect"` with the exact process ID and window handle (positive
+   integer) returned by the recovery inventory. The tool verifies the configured
    executable, process creation time, same-user identity and wizard/control state.
    It reads the wizard title and button captions, not input values or document text.
 2. Review the returned snapshot. To cancel that managed wizard, call
