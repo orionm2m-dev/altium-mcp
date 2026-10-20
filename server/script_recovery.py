@@ -197,7 +197,7 @@ def _blocked(state, reason, **extra):
 
 
 async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
-                  dispatch_timeout_seconds=8, manual_stop_confirmed=False):
+                  dispatch_timeout_seconds=8, manual_stop_confirmed=False, *, verified_stop=None):
     """Caller holds the shared bridge lock throughout this operation."""
     if not 1 <= timeout_seconds <= 60 or not 1 <= dispatch_timeout_seconds <= 15:
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
@@ -208,6 +208,11 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         reason = emergency_stop.recovery_block(exe, old)
         if reason:
             return _blocked(old, reason)
+    if verified_stop is not None:
+        from pending_stop_wizard_resume import _VerifiedPendingStop
+        if (not isinstance(verified_stop, _VerifiedPendingStop)
+                or manual_stop_confirmed or fresh_emergency):
+            return _blocked(old or {}, "Invalid internal verified-Stop capability")
     pending = []
     for pid, process in list(_launches.items()):
         if process.poll() is None:
@@ -217,7 +222,7 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if pending:
         return _blocked(old or {}, "Previous recovery launcher is still running",
                         pending_launch_ids=pending)
-    if old and not manual_stop_confirmed and not fresh_emergency:
+    if old and not manual_stop_confirmed and not fresh_emergency and verified_stop is None:
         return _blocked(old, "Previous recovery is unresolved; no new launch dispatched")
     recorded_pending = [item["pid"] for item in (old or {}).get("launches", [])
                         if item.get("pid") and item.get("exit_code") is None]
@@ -225,6 +230,13 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if not environment.get("ready"):
         return _blocked(old or {}, environment.get("reason", "Preflight failed"),
                         environment=environment)
+    stop_evidence = None
+    if verified_stop is not None:
+        try:
+            stop_evidence = verified_stop.consume(exe, exchange_dir, old, environment)
+        except (OSError, ValueError, TypeError) as error:
+            return _blocked(old or {}, "Pending Stop proof rejected: " + str(error),
+                            environment=environment)
     fresh_identity = None
     if fresh_emergency:
         # The old exact process was proven gone above. Independently identify the
@@ -255,6 +267,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     state = {"token": token, "phase": "preflight", "environment": environment,
              "manual_stop_confirmed": manual_stop_confirmed,
              "fresh_instance_confirmed": fresh_identity is not None, "launches": []}
+    if stop_evidence is not None:
+        state["verified_prior_stop_exit"] = stop_evidence
     if fresh_identity is not None:
         state.update(fresh_instance_identity=fresh_identity,
                      fresh_instance_creation_filetime_decimal=str(fresh_identity["creation_filetime"]),
@@ -276,7 +290,7 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         return item["exit_code"]
 
     try:
-        if not manual_stop_confirmed and fresh_identity is None:
+        if not manual_stop_confirmed and fresh_identity is None and stop_evidence is None:
             code = await launch_once("stop", "-REditScript:Stop", dispatch_timeout_seconds)
             if code != 0:
                 return _blocked(state, "Stop dispatch did not exit successfully; delivery unproven")

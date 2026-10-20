@@ -61,7 +61,7 @@ def _canonical(path):
 
 class WinProcess:
     """One process HANDLE for identity checks, TerminateProcess and bounded wait."""
-    def __init__(self, pid, terminate_access=False):
+    def __init__(self, pid, terminate_access=False, synchronize_access=False):
         import ctypes
         from ctypes import wintypes as w
         if os.name != "nt":
@@ -90,7 +90,7 @@ class WinProcess:
         self.a.GetTokenInformation.restype = w.BOOL
         self.a.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(w.LPWSTR)]
         self.a.ConvertSidToStringSidW.restype = w.BOOL
-        access = 0x1000 | (0x0001 | 0x00100000 if terminate_access else 0)
+        access = 0x1000 | (0x0001 | 0x00100000 if terminate_access else 0) | (0x00100000 if synchronize_access else 0)
         self.handle = self.k.OpenProcess(access, False, pid)
         if not self.handle:
             raise ctypes.WinError(ctypes.get_last_error())

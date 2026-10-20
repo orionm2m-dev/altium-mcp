@@ -26,3 +26,14 @@ The public window handle parameter uses an integer schema. FastMCP 1.5 decodes
 numeric strings before validation, so a string-only schema rejected those calls
 before entering the tool. Internal identity records retain decimal strings. A
 mock FastMCP `list_tools`/`call_tool` test covers the actual transport conversion.
+
+
+## 2026-10-20 — Resume a captured Stop after wizard cancellation
+
+Added `cancel_import_wizard_and_resume_pending_stop`. It captures and verifies the
+currently pending exact Stop process before cancelling the inspected wizard,
+waits on the same query/synchronize-only handle, then permits one unique
+read-only probe after successful exit and ready-main checks. No Stop is repeated
+and no manual-stop claim is fabricated. The internal one-use proof cannot be
+supplied through public JSON. Default unresolved-recovery blocking is unchanged.
+Historical PID-only launch identity is explicitly not claimed as verified.

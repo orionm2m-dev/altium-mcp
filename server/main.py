@@ -1410,6 +1410,36 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
     return json.dumps(outcome, indent=2)
 
 
+
+@mcp.tool()
+async def cancel_import_wizard_and_resume_pending_stop(
+        ctx: Context, target_pid: int, wizard_hwnd: int, observation_token: str,
+        acknowledge_managed_wizard: bool = False, wait_seconds: int = 8,
+        timeout_seconds: int = 30, dispatch_timeout_seconds: int = 8) -> str:
+    """Cancel the inspected exact import wizard, then resume one pending Stop.
+
+    Capture the current exact Stop process before cancellation and wait on the
+    same query/synchronize-only HANDLE. Successful exit permits only one unique
+    read-only executor probe. No repeated Stop, termination, document save or
+    mutation replay. Requires an observation token from control_import_wizard.
+    Legacy PID-only receipts are not represented as verified historical identity.
+    This operation never asserts manual_stop_confirmed.
+    """
+    import emergency_stop
+    import pending_stop_wizard_resume
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = await pending_stop_wizard_resume.cancel_and_resume_locked(
+                    altium_bridge.config.altium_exe_path, EXCHANGE_DIR, target_pid,
+                    wizard_hwnd, observation_token, acknowledge_managed_wizard,
+                    wait_seconds, timeout_seconds, dispatch_timeout_seconds)
+        except OSError as error:
+            outcome = {"recovered": False, "blocked": True, "error": str(error),
+                       "stop_redispatched": False, "manual_stop_confirmed": False}
+    return json.dumps(outcome, indent=2)
+
+
 @mcp.tool()
 async def start_altium(ctx: Context) -> str:
     """Explicit normal cold start of the configured executable only.

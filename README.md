@@ -441,3 +441,26 @@ authenticated payload, not the token itself; a newer inspection supersedes it.
 The policy and persistence are covered by offline tests, including callback
 failures. Native cancellation must still be qualified on the targeted Altium
 version; offline tests alone do not establish it.
+
+
+### Resume a pending Stop after the inspected import wizard
+
+If the wizard blocks a previously dispatched `stop_pending` command, use
+`cancel_import_wizard_and_resume_pending_stop` instead of a separate cancel.
+It takes the exact main PID, integer `wizard_hwnd`, the fresh observation token,
+and `acknowledge_managed_wizard=true`. Before cancellation it captures the current
+recorded Stop process with query/synchronize access only and checks its exact
+configured executable, user, creation time and complete Stop command line.
+
+After the same process HANDLE confirms exit code 0 and the same main application
+is ready, an internal one-use proof permits one unique read-only executor probe.
+The tool never sends Stop again and never claims that the user manually stopped
+it. Historical PID-only receipts remain explicitly unverified as historical
+identity; this proof concerns the currently captured command. A timeout, changed
+identity, failed cancellation, other modal or failed probe remains blocked.
+Public JSON cannot supply the internal proof or bypass the normal recovery gate.
+No document save, process termination or mutation replay is performed. A matching
+probe establishes executor availability, not PCB transaction idle.
+
+The WMI command-line read and Win32 cancellation path require native
+qualification; mocked tests alone do not establish live recovery.
