@@ -94,6 +94,43 @@ class PolygonSpecTests(unittest.TestCase):
             env['altium_bridge'].execute_command.assert_awaited_once_with('set_pcb_polygons',{},timeout=180)
             self.assertEqual((Path(directory)/'pcb_polygons_spec.txt').read_text(),build_polygon_spec(PCB,[polygon()],[cutout()],True))
 
+    def test_native_polygon_closing_slot_is_initialized_without_changing_unique_count(self):
+        text=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8')
+        body=text.split('procedure ApplyPourGeometry',1)[1].split('function SetPcbPolygonsReport',1)[0]
+        self.assertEqual(body.count('Poly.PointCount := N;'),1)
+        self.assertNotIn('Poly.PointCount := N + 1',body)
+        # The formerly unwritten index N is serialized by Altium. It must copy
+        # the real first segment, including when that vertex is not at origin.
+        self.assertIn("if P.ObjectId = ePolyObject then begin\n        // Altium MillExporter",body)
+        self.assertIn('Seg := Poly.Segments[0];\n        Poly.Segments[N] := Seg;',body)
+        self.assertLess(body.index('Poly.Segments[i] := Seg'),body.index('Poly.Segments[N] := Seg'))
+        self.assertIn('end else Reg.UpdateContourFromShape(True);',body)
+        key=text.split('function PourGeometryKey',1)[1].split('function PourRequestKey',1)[0]
+        self.assertIn('0 to PourSegmentCount(P) - 1',key)
+
+    def test_native_malformed_closure_cannot_repour_or_be_an_idempotent_noop(self):
+        text=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8')
+        guard=text.split('function PourClosureGuard',1)[1].split('function PourOptionsKey',1)[0]
+        self.assertLess(guard.index('N < 3'),guard.index('Poly.Segments[N]'))
+        self.assertIn('P.ObjectId <> ePolyObject then Exit',guard)
+        for field in ('Kind','vx','vy'):
+            self.assertIn('ClosingSeg.'+field+' <> FirstSeg.'+field,guard)
+        body=text.split('function SetPcbPolygonsReport',1)[1]
+        preflight=body[:body.index('PCBServer.PreProcess;')]
+        self.assertIn("(Action = 'repour') then Error := PourClosureGuard(P)",preflight)
+        # An explicit update/upsert of the same four visible vertices repairs
+        # a malformed closing slot instead of reporting unchanged.
+        noop=body.split("Actions.Add('repoured')",1)[1].split('Unchanged :=',1)[0]
+        self.assertIn("and (PourClosureGuard(P) = '') then begin",noop)
+
+    def test_native_closure_failure_blocks_verified_save(self):
+        text=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8')
+        body=text.split('function SetPcbPolygonsReport',1)[1]
+        final=body.split("'final_readback'",1)[1]
+        self.assertLess(final.index('Error := PourClosureGuard(P)'),final.index('PourGeometryKey(P) <> Keys[i-1]'))
+        self.assertLess(final.index('Error := PourClosureGuard(P)'),final.index("Verified := Error = '';"))
+        self.assertIn("if Verified and (Error = '') then Saved := SaveBoardDocument(PcbPath)",final)
+
     def test_native_preflight_save_and_preferences_contract(self):
         text=(ROOT/'AltiumScript/pcb_primitives.pas').read_text(encoding='utf-8')
         body=text.split('function SetPcbPolygonsReport',1)[1]

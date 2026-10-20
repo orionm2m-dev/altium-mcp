@@ -1075,6 +1075,20 @@ begin
     end;
 end;
 
+function PourClosureGuard(P: IPCB_Primitive): String;
+var Poly: IPCB_Polygon; FirstSeg, ClosingSeg: TPolySegment; N: Integer;
+begin
+    Result := '';
+    if P = nil then Exit;
+    if P.ObjectId <> ePolyObject then Exit;
+    Poly := P; N := Poly.PointCount;
+    if (N < 3) or (N > 4096) then begin Result := 'polygon point count is unsupported'; Exit; end;
+    FirstSeg := Poly.Segments[0];
+    ClosingSeg := Poly.Segments[N];
+    if (ClosingSeg.Kind <> FirstSeg.Kind) or (ClosingSeg.vx <> FirstSeg.vx) or
+       (ClosingSeg.vy <> FirstSeg.vy) then Result := 'polygon closing segment differs from first vertex';
+end;
+
 function PourOptionsKey(P: IPCB_Primitive): String;
 var Poly: IPCB_Polygon;
 begin
@@ -1241,7 +1255,13 @@ begin
         Seg.vy := Board.YOrigin + PrimitiveCoord(Rec, 12 + i * 2);
         if P.ObjectId = ePolyObject then Poly.Segments[i] := Seg else Reg.ShapeSegments[i] := Seg;
     end;
-    if P.ObjectId = eRegionObject then Reg.UpdateContourFromShape(True);
+    if P.ObjectId = ePolyObject then begin
+        // Altium MillExporter MakeNewPolygon copies indices 0..PointCount inclusive.
+        // PointCount is the edge count; its extra slot must repeat the first vertex.
+        // Keep the public contour at N unique vertices, never an uninitialized (0,0).
+        Seg := Poly.Segments[0];
+        Poly.Segments[N] := Seg;
+    end else Reg.UpdateContourFromShape(True);
 end;
 
 function SetPcbPolygonsReport(SpecPath: String): String;
@@ -1305,6 +1325,7 @@ begin
             else if ((Action = 'update') or (Action = 'delete') or (Action = 'repour')) and (Count <> 1) then Error := 'operation requires exactly one existing object'
             else Error := PourOwnershipGuard(P, Rec);
             if Error = '' then Error := PourShapeGuard(P);
+            if (Error = '') and (Action = 'repour') then Error := PourClosureGuard(P);
             if Error <> '' then Break;
             if (Action = 'delete') or (Action = 'repour') then Key := PourGeometryKey(P)
             else Key := PourRequestKey(Board, Rec);
@@ -1338,7 +1359,7 @@ begin
                     if Action = 'delete' then begin
                         Board.RemovePCBObject(P); Removed := Removed + 1; Actions.Add('deleted');
                     end else if Action = 'repour' then Actions.Add('repoured')
-                    else if (P <> nil) and (PourGeometryKey(P) = Keys[i-1]) then begin
+                    else if (P <> nil) and (PourGeometryKey(P) = Keys[i-1]) and (PourClosureGuard(P) = '') then begin
                         Unchanged := Unchanged + 1; Actions.Add('unchanged');
                     end else begin
                         IsNew := P = nil;
@@ -1397,6 +1418,7 @@ begin
                     if Count <> 1 then Error := 'saved candidate missing or ambiguous'
                     else begin
                         Error := PourOwnershipGuard(P, Rec);
+                        if Error = '' then Error := PourClosureGuard(P);
                         if (Error = '') and (PourGeometryKey(P) <> Keys[i-1]) then Error := 'native contour/options readback mismatch';
                         if (Error = '') and (P.ObjectId = ePolyObject) then begin
                             Poly := P;
