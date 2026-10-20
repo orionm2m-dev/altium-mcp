@@ -32,6 +32,7 @@ from pcb_routing import build_routing_spec
 from pcb_polygons import build_polygon_spec
 import dialogs
 import script_guard
+import script_recovery
 
 # Configure logging
 logging.basicConfig(
@@ -279,6 +280,10 @@ class AltiumBridge:
     async def execute_command(self, command: str, params: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
         """Execute a command in Altium via the bridge script"""
         async with self._command_lock:
+            recovery_state = script_recovery.blocked_state(EXCHANGE_DIR)
+            if recovery_state:
+                return {"success": False, "error": "Script recovery is unresolved; use recover_script_executor",
+                        "recovery_state": recovery_state, "mutation_state": "not_dispatched"}
             return await self._execute_command_locked(command, params, timeout)
 
     async def _execute_command_locked(self, command: str, params: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
@@ -312,12 +317,8 @@ class AltiumBridge:
                         closed = script_guard.dismiss_script_errors(self.config.altium_exe_path, failures)
                         stopped = False
                         stop_error = ""
-                        if closed and all(item["safe_to_stop"] for item in failures):
-                            try:
-                                script_guard.stop_script_executor(self.config.altium_exe_path)
-                                stopped = True
-                            except OSError as exc:
-                                stop_error = str(exc)
+                        # Stop is dispatched only by bounded recover_script_executor.
+                        # Do not leave a fire-and-forget X2 client after fail-fast.
                         logger.error("Altium script error: %s", failures)
                         return {
                             "success": False, "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
@@ -1270,6 +1271,16 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
              failure the last step reached plus whether Altium's script
              executor is now wedged and needs recovery.
     """
+    async with altium_bridge._command_lock:
+        recovery_state = script_recovery.blocked_state(EXCHANGE_DIR)
+        if recovery_state:
+            return json.dumps({"success": False, "error": "Script recovery is unresolved",
+                               "recovery_state": recovery_state})
+        return await _run_altium_script_locked(ctx, script, timeout_seconds,
+                                              declarations, declarations_file)
+
+
+async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, declarations_file):
     logger.info(f"run_altium_script: {len(script.splitlines())} lines")
 
     if not SANDBOX_PAS.exists() or not SANDBOX_PRJ.exists():
@@ -1345,38 +1356,27 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
 
 @mcp.tool()
-async def recover_script_executor(ctx: Context, timeout_seconds: int = 60) -> str:
+async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
+                                  dispatch_timeout_seconds: int = 8,
+                                  manual_stop_confirmed: bool = False) -> str:
+    """Bounded Stop + unique read-only probe, serialized with bridge commands.
+
+    Requires one configured Altium process, foreground and responsive UI, and
+    no modal dialog. Does not press keys, close/answer dialogs, save documents,
+    terminate processes or retry mutations. Failed/pending dispatch is latched
+    across server restarts. After manually stopping the failed script using
+    Ctrl+F3, set manual_stop_confirmed=true to probe without another Stop.
+    A still-running launcher blocks all additional recovery launches.
+
+    timeout_seconds: probe wait, 1..60s. dispatch_timeout_seconds: per-launch
+    exit wait, 1..15s. Exit 0 alone is not proof of recovery. Only the matching
+    unique probe token proves executor availability, not PCB transaction idle.
     """
-    Unwedge Altium's script executor after a script died, then verify.
-
-    A runtime error leaves the failed script paused in Altium's debugger
-    with no dialog, and every later RunScript silently does nothing until
-    the debugger is stopped. This tool dispatches Altium's own Stop
-    Debugging process into the running instance (`X2.EXE -REditScript:Stop`,
-    the same launch channel the other tools use, so no window focus or
-    keystrokes are needed) and then runs a one-line probe through the
-    sandbox. Only a probe that comes back proves the executor is usable
-    again; a wedge is defined by scripts silently doing nothing.
-
-    Args:
-        timeout_seconds (int): How long to wait for the probe (default 60).
-
-    Returns:
-        str: JSON with recovered (bool), the probe result and the steps.
-    """
-    exe = altium_bridge.config.altium_exe_path
-    if not os.path.exists(exe):
-        return json.dumps({"recovered": False, "error": f"Altium executable not found: {exe}"})
-    logger.info("recover_script_executor: dispatching EditScript:Stop")
-    script_guard.stop_script_executor(exe)
-    await asyncio.sleep(3)
-    probe = await run_altium_script(ctx, "ResultText := '{\"probe\": \"executor ok\"}';",
-                                    timeout_seconds)
-    try:
-        outcome = json.loads(probe)
-    except ValueError:
-        outcome = {"success": False, "raw": probe}
-    return json.dumps({"recovered": bool(outcome.get("success")), "probe": outcome}, indent=2)
+    async with altium_bridge._command_lock:
+        outcome = await script_recovery.recover(
+            altium_bridge.config.altium_exe_path, EXCHANGE_DIR, timeout_seconds,
+            dispatch_timeout_seconds, manual_stop_confirmed)
+    return json.dumps(outcome, indent=2)
 
 
 @mcp.tool()

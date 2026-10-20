@@ -26,21 +26,18 @@ hostile to automation:
 
 ## Recovering a wedged executor
 
-- `python dev/unwedge.py` dispatches Altium's own Stop Debugging process into
-  the running instance:
+Use the public `recover_script_executor` MCP tool. It holds the shared command
+lock, tracks the direct Stop launcher, and proves availability using a unique
+read-only probe. It does not close dialogs, kill X2, save production documents,
+or replay the failed operation. See the [public recovery contract](../README.md#scripting--development)
+for time limits, the persistent blocked checkpoint, and the manual Ctrl+F3 path.
+A matching probe proves executor availability only, not a balanced PCB transaction.
 
-      X2.EXE -REditScript:Stop
-
-  Same channel the runner uses to launch scripts, so it needs no window focus
-  and no synthetic keystrokes. It then **verifies** recovery by running a probe
-  script and waiting for output - a wedge is defined by scripts silently doing
-  nothing, so anything less is a guess. Ctrl+F3 remains only as a fallback; it
-  reaches the debugger solely when the script editor is the active document,
-  which is why it used to fail silently while reporting success.
-- The runner calls this automatically on every wedge and says whether the
-  executor actually came back.
-- `--auto-restart` force-restarts Altium as a last resort (~60-90s, kills
-  X2.EXE, unsaved Altium work is lost).
+The older `dev/unwedge.py` / runner recovery code is historical development
+support, not the bounded public recovery path. Its broad dialog dismissal,
+blind launch delay and optional process restart must not be used as a fallback
+for this tool. Native recovery still needs a separate public-tool qualification;
+offline mock tests do not establish that Altium accepted the command.
 
 ## Screenshots are a standing TOP priority
 

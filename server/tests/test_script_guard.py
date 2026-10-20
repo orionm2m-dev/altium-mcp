@@ -96,9 +96,9 @@ class BridgeGuardTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertFalse(result["retry_performed"])
         self.assertFalse(result["executor_recovered"])
-        self.assertTrue(result["executor_stop_dispatched"])
+        self.assertFalse(result["executor_stop_dispatched"])
         self.assertEqual(result["mutation_state"],"unknown")
-        guard.stop_script_executor.assert_called_once_with("X2.EXE")
+        guard.stop_script_executor.assert_not_called()
 
     def test_ambiguous_instances_return_error_without_stop(self):
         error=dict(text="Undeclared identifier: X",safe_to_stop=False)
@@ -121,9 +121,10 @@ class BridgeGuardTests(unittest.TestCase):
     def test_public_recovery_uses_hidden_stop_and_probe(self):
         source=(ROOT/"main.py").read_text(encoding="utf-8")
         recovery=source.split("async def recover_script_executor(",1)[1].split("@mcp.tool()",1)[0]
-        self.assertIn("script_guard.stop_script_executor(exe)",recovery)
-        self.assertIn("await run_altium_script",recovery)
-        self.assertNotIn("shell=True",recovery)
+        self.assertIn("async with altium_bridge._command_lock", recovery)
+        self.assertIn("await script_recovery.recover", recovery)
+        self.assertNotIn("await run_altium_script", recovery)
+        self.assertNotIn("_dismiss_altium_dialogs", recovery)
 
 
 if __name__=="__main__":unittest.main()
