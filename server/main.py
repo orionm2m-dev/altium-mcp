@@ -4569,6 +4569,43 @@ async def _prepare_screenshot_view(view_type, zoom_to):
     return await altium_bridge.execute_command("take_view_screenshot", params)
 
 
+def _current_diagnostic_window(exe_path):
+    """Visible configured-exe dialogs only; no focus, clicks or script dispatch."""
+    expected = emergency_stop._canonical(exe_path)
+    candidates = []
+    for hwnd in dialogs.top_windows():
+        if not dialogs.is_visible(hwnd):
+            continue
+        pid, path = script_guard._window_process(hwnd)
+        if not path or emergency_stop._canonical(path) != expected:
+            continue
+        cls = dialogs.window_class(hwnd)
+        if cls not in {"TShowException", "TMessageForm", "#32770", "TStartUpWindow"}:
+            continue
+        item = {"handle": hwnd, "title": dialogs.window_text(hwnd), "class_name": cls,
+                "rect": win32gui.GetWindowRect(hwnd), "pid": pid}
+        if dialogs.is_visible(hwnd):
+            candidates.append(item)
+    def priority(window):
+        process = altium_lifecycle._started.get(window["pid"])
+        owned = process is not None and process.poll() is None
+        left, top, right, bottom = window["rect"]
+        return (window["class_name"] == "TShowException", owned,
+                window["class_name"] in {"TMessageForm", "#32770"},
+                max(0, right - left) * max(0, bottom - top))
+    return max(candidates, key=priority) if candidates else None
+
+
+def _print_diagnostic_window(hwnd, destination_hdc):
+    """Capture the window without activating it or answering its dialog."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+    user32.PrintWindow.restype = wintypes.BOOL
+    return bool(user32.PrintWindow(hwnd, destination_hdc, 2))
+
+
 @mcp.tool()
 async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = None):
     """
@@ -4578,7 +4615,9 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
         view_type (str): 'pcb' or 'sch' focuses that editor through the script.
             'current' captures the existing Altium window without script dispatch,
             for diagnosing modal dialogs and script compilation failures.
-            Current mode does not identify a document or support zoom_to.
+            Current mode does not identify a document or support zoom_to. If no
+            titled main window exists, captures a visible configured-exe exception,
+            dialog or startup window without activation or keyboard input.
         zoom_to (list, optional): List of component designators (e.g. ["U12", "R42"]).
             PCB view only: Altium zooms to the bounding box of these components
             (plus a margin) before the capture, so the components fill the frame.
@@ -4663,9 +4702,15 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                 if not altium_windows and altium_fallback_windows:
                     altium_windows = altium_fallback_windows
                 
+                diagnostic_fallback = False
+                if not altium_windows and view_type.lower() == "current":
+                    diagnostic = _current_diagnostic_window(altium_bridge.config.altium_exe_path)
+                    if diagnostic is not None:
+                        altium_windows = [diagnostic]
+                        diagnostic_fallback = True
                 if not altium_windows:
                     result_queue.put({
-                        "success": False, 
+                        "success": False,
                         "error": f"No Altium windows found for {view_type} view"
                     })
                     return
@@ -4697,37 +4742,40 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     fg = win32gui.GetForegroundWindow()
                     return bool(fg) and win32process.GetWindowThreadProcessId(fg)[1] == altium_pid
 
-                try:
-                    for attempt in range(2):
-                        if attempt:
-                            import ctypes
-                            ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
-                            ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
-                        try:
-                            win32gui.SetForegroundWindow(hwnd)
-                        except Exception:
-                            pass
-                        deadline = time.time() + 1.5
-                        while time.time() < deadline:
-                            time.sleep(0.1)
-                            if altium_is_foreground():
-                                activated = True
+                if diagnostic_fallback:
+                    activated = altium_is_foreground()
+                else:
+                    try:
+                        for attempt in range(2):
+                            if attempt:
+                                import ctypes
+                                ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
+                                ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+                            try:
+                                win32gui.SetForegroundWindow(hwnd)
+                            except Exception:
+                                pass
+                            deadline = time.time() + 1.5
+                            while time.time() < deadline:
+                                time.sleep(0.1)
+                                if altium_is_foreground():
+                                    activated = True
+                                    break
+                            if activated:
                                 break
-                        if activated:
-                            break
-                except Exception as e:
-                    logger.warning(f"Could not bring window to foreground: {e}")
-                if not activated:
-                    logger.warning("Altium is not the foreground window; the capture may show an unpainted view")
-                # A freshly switched-to document needs a moment to render.
-                time.sleep(1.0)
+                    except Exception as e:
+                        logger.warning(f"Could not bring window to foreground: {e}")
+                    if not activated:
+                        logger.warning("Altium is not the foreground window; the capture may show an unpainted view")
+                    # A freshly switched-to document needs a moment to render.
+                    time.sleep(1.0)
 
                 # Measure AFTER activation: restoring or switching can change
                 # the frame's size.
                 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
                 width = right - left
                 height = bottom - top
-                if width < 200 or height < 150:
+                if width <= 0 or height <= 0 or (not diagnostic_fallback and (width < 200 or height < 150)):
                     result_queue.put({"success": False, "error": f"Altium window is too small to capture ({width}x{height}); is it minimized?"})
                     return
                 
@@ -4743,8 +4791,16 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     saveBitMap.CreateCompatibleBitmap(mfcDC, width, height)
                     saveDC.SelectObject(saveBitMap)
                     
-                    # Copy the screen into the bitmap
-                    saveDC.BitBlt((0, 0), (width, height), mfcDC, (0, 0), win32con.SRCCOPY)
+                    # Diagnostic dialogs can be captured without input or activation.
+                    if diagnostic_fallback:
+                        if not _print_diagnostic_window(hwnd, saveDC.GetSafeHdc()):
+                            win32gui.DeleteObject(saveBitMap.GetHandle())
+                            saveDC.DeleteDC()
+                            mfcDC.DeleteDC()
+                            win32gui.ReleaseDC(hwnd, hwndDC)
+                            raise RuntimeError("PrintWindow failed for the verified Altium diagnostic window")
+                    else:
+                        saveDC.BitBlt((0, 0), (width, height), mfcDC, (0, 0), win32con.SRCCOPY)
                     
                     # Convert the bitmap to an Image
                     bmpinfo = saveBitMap.GetInfo()
@@ -4784,6 +4840,9 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                         "window_class": window["class_name"],
                         "view_type": view_type,
                         "foreground_confirmed": activated,
+                        "diagnostic_fallback": diagnostic_fallback,
+                        "capture_method": "PrintWindow" if diagnostic_fallback else "BitBlt",
+                        "window_pid": altium_pid,
                         "image_format": "PNG",
                         "encoding": "base64",
                         "debug_file": debug_filename,
