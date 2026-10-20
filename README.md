@@ -408,3 +408,35 @@ registry or application setting is changed. Startup metadata records only
 `windir_present` (before repair) and `windir_repaired`; environment values and
 secrets are not included. This guards a missing startup dependency and does not
 claim that every WPF or Altium startup exception has the same cause.
+
+
+### Cancel a blocking import wizard
+
+`control_import_wizard` is an out-of-band, narrowly scoped recovery tool for an
+observed `TPCBImportWizard` titled `DXP Import Wizard`. It does not use the script
+executor, and it does not clear its recovery latch.
+
+1. Call `action="inspect"` with the exact process ID and window handle (decimal
+   string) returned by the recovery inventory. The tool verifies the configured
+   executable, process creation time, same-user identity and wizard/control state.
+   It reads the wizard title and button captions, not input values or document text.
+2. Review the returned snapshot. To cancel that managed wizard, call
+   `action="cancel"` with the same IDs, `observation_token` and
+   `acknowledge_managed_wizard=true`. The token is valid for 120 seconds, persists
+   across MCP restarts, and is consumed before validation or a cancel gesture.
+3. Inspect the result. `wizard_closed_verified=true` means the wizard is no
+   longer visible while the same process remains alive. It does not prove that a
+   pending launcher has exited, that the script executor recovered, or that the
+   prior document command succeeded. Continue with the explicit recovery checks.
+
+Only one unambiguous, enabled descendant Cancel button is supported. Other
+modals, changed identities, changed recovery state and stale observations block
+the action. There is no generic button/keyboard interface, document save, process
+termination, launcher, automatic retry or follow-up confirmation answer. The
+wizard's origin remains unknown. A native timeout has an unknown outcome and
+must be reinspected. The persisted observation stores a token hash and an
+authenticated payload, not the token itself; a newer inspection supersedes it.
+
+The policy and persistence are covered by offline tests, including callback
+failures. Native cancellation must still be qualified on the targeted Altium
+version; offline tests alone do not establish it.

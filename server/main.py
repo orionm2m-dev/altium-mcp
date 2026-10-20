@@ -35,6 +35,7 @@ import script_guard
 import script_recovery
 import emergency_stop
 import altium_lifecycle
+import import_wizard_control
 
 # Configure logging
 logging.basicConfig(
@@ -1421,6 +1422,54 @@ async def start_altium(ctx: Context) -> str:
     """
     async with altium_bridge._command_lock:
         outcome = altium_lifecycle.start(altium_bridge.config.altium_exe_path, EXCHANGE_DIR)
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
+async def control_import_wizard(ctx: Context, action: str, target_pid: int,
+                                target_hwnd: str, observation_token: str = "",
+                                acknowledge_managed_wizard: bool = False) -> str:
+    """Inspect one exact configured-process DXP Import Wizard, or cancel it once.
+
+    inspect observes only dialog/button identity and returns a persistent one-use
+    token valid for 120 seconds. cancel requires that token and an explicit
+    acknowledgement that this managed wizard should be cancelled. The process,
+    creation time, window, button and recovery latch are checked again. No script
+    dispatch, save, process termination, launcher, automatic retry or recovery
+    latch clearing. A confirmed closed wizard does not prove executor readiness.
+    The origin of the wizard remains unknown. No generic dialogs are supported.
+    """
+    def read_latch():
+        try:
+            return (Path(EXCHANGE_DIR) / "script_recovery_state.json").read_bytes()
+        except FileNotFoundError:
+            return None
+
+    outcome = {"success": False, "blocked": True, "cancel_requested": False}
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                if action not in {"inspect", "cancel"}:
+                    raise ValueError("action must be inspect or cancel")
+                if isinstance(target_pid, bool) or not isinstance(target_pid, int) or target_pid <= 0:
+                    raise ValueError("target_pid must be a positive integer")
+                if not isinstance(target_hwnd, str) or not target_hwnd.isdigit() or int(target_hwnd) <= 0:
+                    raise ValueError("target_hwnd must be a positive decimal string")
+                before = import_wizard_control.latch_hash(read_latch())
+                service = import_wizard_control.WizardControl(
+                    import_wizard_control.NativeAdapter(),
+                    altium_bridge.config.altium_exe_path, read_latch,
+                    import_wizard_control.ObservationStore(EXCHANGE_DIR))
+                if action == "inspect":
+                    outcome = service.inspect(target_pid, target_hwnd)
+                else:
+                    outcome = service.cancel(target_pid, target_hwnd, observation_token,
+                                             acknowledge_managed_wizard)
+                outcome["recovery_latch_unchanged"] = before == import_wizard_control.latch_hash(read_latch())
+        except Exception as exc:
+            requested = outcome.get("cancel_requested", False)
+            outcome.update(success=False, blocked=not requested, outcome_unknown=requested,
+                           error=str(exc), script_dispatched=False, latch_cleared=False)
     return json.dumps(outcome, indent=2)
 
 
