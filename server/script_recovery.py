@@ -83,18 +83,40 @@ def inspect_environment(exe_path, required_stopped_pids=()):
             pids.append(pid)
     window_inventory = {pid: [] for pid in pids}
     for hwnd in dialogs.top_windows():
+        if not dialogs.is_visible(hwnd):
+            continue
         pid, _ = script_guard._window_process(hwnd)
         if pid in window_inventory:
             window_inventory[pid].append({"hwnd": hwnd,
                 "class": dialogs.window_class(hwnd), "title": dialogs.window_text(hwnd)})
+    modal_classes = {"#32770", "TMessageForm", "TShowException"}
+    crashes = []
+    for pid, items in window_inventory.items():
+        for window in items:
+            if window["class"] == "TShowException":
+                match = script_guard.classify_script_dialog(
+                    window["title"], window["class"], dialogs.children(window["hwnd"]))
+                if dialogs.is_visible(window["hwnd"]):
+                    crashes.append(dict(match, hwnd=window["hwnd"], pid=pid))
+    # A form may hide after enumeration or while child text is being read.
+    # Remove it from both the blocking decision and the reported inventory.
+    window_inventory = {pid: [w for w in items if dialogs.is_visible(w["hwnd"])]
+                        for pid, items in window_inventory.items()}
+    visible_handles = {w["hwnd"] for items in window_inventory.values() for w in items}
+    crashes = [d for d in crashes if d["hwnd"] in visible_handles]
     interactive = [pid for pid, items in window_inventory.items()
-                   if any(w["class"] not in {"#32770", "TMessageForm"} for w in items)]
+                   if any(w["class"] not in modal_classes for w in items)]
     windowless = [pid for pid, items in window_inventory.items() if not items]
     result = {"ready": False, "configured_process_ids": pids,
               "visible_application_process_ids": interactive,
               "windowless_process_ids": windowless,
               "process_windows": window_inventory,
               "native_idle_verified": False}
+    if crashes:
+        result.update(script_errors=crashes,
+            reason="Native exception dialog blocks recovery; inspect and close it manually. "
+                   "No Stop, probe or report submission was dispatched.")
+        return result
     if len(pids) != 1:
         if len(interactive) == 1 and windowless:
             result["reason"] = ("One visible Altium session plus windowless X2 processes "
@@ -106,7 +128,7 @@ def inspect_environment(exe_path, required_stopped_pids=()):
     pid = pids[0]
     windows = [item["hwnd"] for item in window_inventory[pid]]
     modal = [h for h in windows
-             if dialogs.window_class(h) in {"#32770", "TMessageForm"}]
+             if dialogs.is_visible(h) and dialogs.window_class(h) in modal_classes]
     result.update(target_pid=pid, dialog_handles=modal)
     foreground = win32gui.GetForegroundWindow()
     result["foreground_confirmed"] = bool(foreground) and (

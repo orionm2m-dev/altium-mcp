@@ -46,11 +46,16 @@ def window_class(hwnd) -> str:
     return buf.value
 
 
+def is_visible(hwnd) -> bool:
+    """Read the current visibility; recheck snapshots before treating a form as blocking."""
+    return bool(_user32.IsWindowVisible(hwnd))
+
+
 def top_windows() -> list:
     found = []
 
     def cb(hwnd, _):
-        if _user32.IsWindowVisible(hwnd):
+        if is_visible(hwnd):
             found.append(hwnd)
         return True
 

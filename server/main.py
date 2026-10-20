@@ -288,6 +288,9 @@ class AltiumBridge:
 
     async def _execute_command_locked(self, command: str, params: Dict[str, Any], timeout: float = 120) -> Dict[str, Any]:
         try:
+            crash = script_guard.blocking_crash_report(self.config.altium_exe_path)
+            if crash:
+                return dict(crash, command=command)
             # Clean up any existing response file
             if RESPONSE_FILE.exists():
                 RESPONSE_FILE.unlink()
@@ -1285,6 +1288,10 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 
 async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, declarations_file):
     logger.info(f"run_altium_script: {len(script.splitlines())} lines")
+
+    crash = script_guard.blocking_crash_report(altium_bridge.config.altium_exe_path)
+    if crash:
+        return json.dumps(crash, indent=2)
 
     if not SANDBOX_PAS.exists() or not SANDBOX_PRJ.exists():
         return json.dumps({"success": False,

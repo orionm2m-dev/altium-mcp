@@ -1,4 +1,4 @@
-"""Conservative script-error capture; never accept general Altium dialogs."""
+"""Conservative script-error/crash capture; never answer general dialogs."""
 import os
 import re
 import subprocess
@@ -15,10 +15,8 @@ _ERROR_TITLES = {"error", "script error", "compiler error", "script compile erro
 
 
 def classify_script_dialog(title, window_class, children):
-    """Return a known script failure; reject confirmations and vague errors."""
-    if window_class not in {"TMessageForm", "#32770"}:
-        return None
-    if title.strip().casefold() not in _ERROR_TITLES:
+    """Capture native crash reporters without permitting any automatic answer."""
+    if window_class not in {"TMessageForm", "#32770", "TShowException"}:
         return None
     parts, buttons = [], set()
     for _, cls, text in children:
@@ -29,13 +27,22 @@ def classify_script_dialog(title, window_class, children):
             buttons.add(text.replace("&", "").strip().casefold())
         else:
             parts.append(text)
+    text = " | ".join(dict.fromkeys(parts))
+    if window_class == "TShowException":
+        # This is a native exception reporter, not a script's OK-only error.
+        # The reporter may offer Send/Restart/Close. Never answer any button,
+        # even when child text is unavailable or resembles a compile error.
+        return {"title": title, "text": text or "Native exception dialog text unavailable",
+                "kind": "native_crash", "text_available": bool(text),
+                "buttons": sorted(buttons), "auto_dismiss": False}
+    if title.strip().casefold() not in _ERROR_TITLES:
+        return None
     if buttons & _CONFIRM_BUTTONS:
         return None
     # At least one affirmative informational button is required. A VCL dialog
     # whose child text is unavailable must not be guessed from its title.
     if not buttons or not buttons <= {"ok", "close", "help", "copy"}:
         return None
-    text = " | ".join(dict.fromkeys(parts))
     lower = text.casefold()
     kind = None
     if any(token in lower for token in _COMPILER_ERRORS):
@@ -84,13 +91,15 @@ def find_script_errors(exe_path):
     expected = os.path.normcase(os.path.abspath(exe_path))
     found, pids = [], set()
     for hwnd in dialogs.top_windows():
+        if not dialogs.is_visible(hwnd):
+            continue
         pid, path = _window_process(hwnd)
         if not path or os.path.normcase(os.path.abspath(path)) != expected:
             continue
         pids.add(pid)
         match = classify_script_dialog(
             dialogs.window_text(hwnd), dialogs.window_class(hwnd), dialogs.children(hwnd))
-        if match:
+        if match and dialogs.is_visible(hwnd):
             found.append(dict(match, hwnd=hwnd, pid=pid))
     for match in found:
         # The command-line Stop process cannot target an arbitrary PID.
@@ -104,14 +113,32 @@ def dismiss_script_errors(exe_path, expected):
     """Close only revalidated, previously captured script-error dialogs."""
     import dialogs
     fresh = find_script_errors(exe_path)
-    allowed = {(d["hwnd"], d["pid"], d["text"]) for d in expected if d["safe_to_stop"]}
+    allowed = {(d["hwnd"], d["pid"], d["text"]) for d in expected
+               if d.get("safe_to_stop") and d.get("kind") in {"compile", "runtime"}}
     closed = []
     for match in fresh:
         key = match["hwnd"], match["pid"], match["text"]
-        if match["safe_to_stop"] and key in allowed:
+        if (match["safe_to_stop"] and match.get("kind") in {"compile", "runtime"}
+                and key in allowed):
             dialogs._user32.PostMessageW(match["hwnd"], 0x0010, 0, 0)
             closed.append(match)
     return closed
+
+
+def blocking_crash_report(exe_path):
+    """Read-only pre-dispatch check; retain native crash evidence, never dismiss."""
+    failures = [d for d in find_script_errors(exe_path) if d["kind"] == "native_crash"]
+    if not failures:
+        return None
+    return {"success": False, "blocked": True,
+            "error": "Altium native crash: " + " | ".join(d["text"] for d in failures),
+            "script_errors": failures, "mutation_state": "not_dispatched",
+            "dialogs_closed": 0, "dialogs_dismissed": 0,
+            "executor_stop_dispatched": False, "executor_recovered": False,
+            "retry_performed": False, "requires_recovery_probe": True,
+            "manual_action": "Inspect and close the native exception reporter manually; "
+                             "do not send a report automatically. Then stop the failed "
+                             "script and verify recovery before another command."}
 
 
 def stop_script_executor(exe_path):

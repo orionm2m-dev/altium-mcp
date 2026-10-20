@@ -83,6 +83,18 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("^|", self.launcher.call_args_list[1].args[0])
         self.assert_no_termination()
 
+    def test_native_crash_preflight_never_dispatches_stop_or_probe(self):
+        self.environment.update(ready=False, reason="Native exception dialog blocks recovery",
+            script_errors=[{"kind": "native_crash", "text": "Access violation in ScriptingSystem.DLL"}])
+        for manual in (False, True):
+            with self.subTest(manual_stop_confirmed=manual):
+                result = self.run_recovery(manual_stop_confirmed=manual)
+                self.assertTrue(result["blocked"])
+                self.assertEqual(result["environment"]["script_errors"], self.environment["script_errors"])
+                self.launcher.assert_not_called()
+                self.assertFalse((self.root / "recovery").exists())
+                self.assertFalse((self.root / "script_recovery_state.json").exists())
+
     def test_pending_stop_does_not_launch_probe_or_accumulate_on_retry(self):
         self.phase_results["stop"] = None
         first = self.run_recovery()
@@ -219,7 +231,7 @@ class LockContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReadOnlyPreflightTests(unittest.TestCase):
-    def environment(self, *, modal=False, processes=(10,), recorded=()):
+    def environment(self, *, modal=False, processes=(10,), recorded=(), modal_class="#32770", hidden=False, hides_during_capture=False):
         windows = [101, 102] if modal else [101]
         user32 = SimpleNamespace(SendMessageTimeoutW=Mock(return_value=1))
         api = SimpleNamespace(OpenProcess=Mock(return_value=Mock()))
@@ -227,9 +239,17 @@ class ReadOnlyPreflightTests(unittest.TestCase):
         process = SimpleNamespace(EnumProcesses=Mock(return_value=list(processes)),
             QueryFullProcessImageName=Mock(return_value="C:/Altium/X2.EXE"),
             GetWindowThreadProcessId=Mock(return_value=(1, 10)))
+        visibility = {"hidden": hidden}
+        def children(hwnd):
+            if hides_during_capture:
+                visibility["hidden"] = True
+            return [(103, "TStaticText", "Access violation in ScriptingSystem.DLL"),
+                    (104, "TButton", "Send Report"), (105, "TButton", "Close")]
         dialogs = SimpleNamespace(top_windows=lambda: windows,
+            is_visible=lambda h: not (visibility["hidden"] and h == 102),
             window_text=lambda h: "Altium" if h == 101 else "Save confirmation",
-            window_class=lambda h: "#32770" if h == 102 else "TMainForm")
+            window_class=lambda h: modal_class if h == 102 else "TMainForm",
+            children=children)
         with patch.dict(sys.modules, {"win32gui": gui,
                                      "win32process": process, "dialogs": dialogs}), \
                 patch.object(recovery, "_process_path", return_value="C:/Altium/X2.EXE") as read_path:
@@ -245,6 +265,42 @@ class ReadOnlyPreflightTests(unittest.TestCase):
         user32.SendMessageTimeoutW.assert_not_called()
         # No WM_CLOSE/SendInput/SetForegroundWindow functions exist in these
         # strict fakes; accidental dialog or focus mutation fails the test.
+
+    def test_exception_reporter_blocks_before_responsiveness_even_with_other_clients(self):
+        for processes in ((10,), (10, 11)):
+            with self.subTest(processes=processes):
+                result, user32, _ = self.environment(modal=True, modal_class="TShowException",
+                                                     processes=processes)
+                self.assertFalse(result["ready"])
+                self.assertEqual(result["script_errors"][0]["kind"], "native_crash")
+                self.assertEqual(result["script_errors"][0]["text"],
+                                 "Access violation in ScriptingSystem.DLL")
+                self.assertIn("Native exception dialog", result["reason"])
+                self.assertEqual(result["visible_application_process_ids"], [10])
+                user32.SendMessageTimeoutW.assert_not_called()
+
+    def test_hidden_exception_from_stale_enumeration_is_not_blocking_modal(self):
+        result, user32, _ = self.environment(modal=True, modal_class="TShowException", hidden=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["dialog_handles"], [])
+        self.assertEqual([w["hwnd"] for w in result["process_windows"][10]], [101])
+        self.assertNotIn("script_errors", result)
+
+    def test_exception_hidden_while_reading_text_is_removed_from_blocking_inventory(self):
+        result, user32, _ = self.environment(modal=True, modal_class="TShowException",
+                                             hides_during_capture=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["dialog_handles"], [])
+        self.assertEqual([w["hwnd"] for w in result["process_windows"][10]], [101])
+        self.assertNotIn("script_errors", result)
+
+    def test_hidden_exception_does_not_remove_separate_windowless_client_block(self):
+        result, user32, _ = self.environment(modal=True, modal_class="TShowException", hidden=True,
+                                             processes=(10, 11))
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["windowless_process_ids"], [11])
+        self.assertNotIn("script_errors", result)
+        self.assertIn("possible pending dispatch clients", result["reason"])
 
     def test_multiple_processes_block_before_window_interaction(self):
         result, user32, _ = self.environment(processes=(10, 11))

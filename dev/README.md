@@ -33,6 +33,22 @@ or replay the failed operation. See the [public recovery contract](../README.md#
 for time limits, the persistent blocked checkpoint, and the manual Ctrl+F3 path.
 A matching probe proves executor availability only, not a balanced PCB transaction.
 
+Visible `TShowException` native crash reporters block Stop/probe and normal bridge/
+sandbox dispatch without accepting a dialog or submitting a report. Capture retains
+available exception text; a missing readable label is reported explicitly. Visibility
+is rechecked after reading children so a hidden form is not reported as a blocker.
+The presence of windowless old command clients is an independent blocking condition.
+
+Run only the explicit offline guard modules (all native APIs are mocked):
+
+```sh
+python -B -m unittest server.tests.test_script_guard server.tests.test_script_recovery server.tests.test_sandbox_script_guard server.tests.test_screenshot_dispatch
+```
+
+Do not use a broad `test_*script*.py` discovery pattern for this check: it also
+selects the interactive Altium integration harness. Offline results do not qualify
+the live native executor or establish that the cause of a DLL crash is fixed.
+
 The older `dev/unwedge.py` / runner recovery code is historical development
 support, not the bounded public recovery path. Its broad dialog dismissal,
 blind launch delay and optional process restart must not be used as a fallback

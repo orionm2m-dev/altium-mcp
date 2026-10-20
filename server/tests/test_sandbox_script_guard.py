@@ -25,7 +25,8 @@ class SandboxGuardTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.loop.close()
 
-    def run_case(self, text, *, title="Error", buttons=("OK",), ambiguous=False):
+    def run_case(self, text, *, title="Error", buttons=("OK",), ambiguous=False,
+                 window_class="TMessageForm", crash_after_launch=False):
         tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
         method = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
                       and n.name == "_run_altium_script_locked")
@@ -34,9 +35,10 @@ class SandboxGuardTests(unittest.TestCase):
         exe = os.path.abspath("X2.EXE")
         windows = [1, 2] if ambiguous else [1]
         user32 = SimpleNamespace(PostMessageW=Mock())
-        native_dialogs = SimpleNamespace(_user32=user32, top_windows=lambda: windows,
+        native_dialogs = SimpleNamespace(_user32=user32, is_visible=lambda hwnd: True,
+            top_windows=lambda: [] if crash_after_launch and not popen.call_count else windows,
             window_text=lambda hwnd: title if hwnd == 1 else "Altium",
-            window_class=lambda hwnd: "TMessageForm" if hwnd == 1 else "TMainForm",
+            window_class=lambda hwnd: window_class if hwnd == 1 else "TMainForm",
             children=lambda hwnd: [(11, "TStaticText", text)] +
                 [(20 + i, "TButton", button) for i, button in enumerate(buttons)])
         with tempfile.TemporaryDirectory() as temporary:
@@ -69,7 +71,7 @@ class SandboxGuardTests(unittest.TestCase):
                     None, "anything", 12, "", "")))
         broad.assert_not_called()
         stop.assert_not_called()
-        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(popen.call_count, 0 if window_class == "TShowException" and not crash_after_launch else 1)
         return result, user32.PostMessageW, clock.now
 
     def test_save_confirm_warning_and_general_error_remain_open(self):
@@ -86,6 +88,27 @@ class SandboxGuardTests(unittest.TestCase):
                 self.assertFalse(result["success"])
                 self.assertEqual(elapsed, 12)
                 self.assertEqual(result["dialogs_dismissed"], 0)
+
+    def test_preexisting_native_crash_blocks_launch_and_is_not_closed(self):
+        text = "Access violation at address 00000001D8F79C54 in module ScriptingSystem.DLL"
+        result, close, elapsed = self.run_case(text, window_class="TShowException",
+                                              buttons=("Send Report", "Close"))
+        self.assertEqual(result["script_errors"][0]["text"], text)
+        self.assertEqual(result["script_errors"][0]["kind"], "native_crash")
+        self.assertEqual(result["mutation_state"], "not_dispatched")
+        self.assertEqual(elapsed, 0)
+        close.assert_not_called()
+
+    def test_native_crash_after_launch_is_captured_without_closing_reporter(self):
+        text = "Access violation at address 00000001D8F79C54. Read of address 0000000000000078"
+        result, close, elapsed = self.run_case(text, window_class="TShowException",
+            buttons=("Send Report", "Close"), crash_after_launch=True)
+        self.assertEqual(result["script_errors"][0]["text"], text)
+        self.assertEqual(result["script_errors"][0]["kind"], "native_crash")
+        self.assertEqual(result["dialogs_dismissed"], 0)
+        self.assertEqual(elapsed, 2)
+        close.assert_not_called()
+        self.assertFalse(result["retry_performed"])
 
     def test_compile_error_captured_and_only_exact_dialog_closed_without_stop(self):
         result, close, elapsed = self.run_case("Undeclared identifier: SomeFunction")

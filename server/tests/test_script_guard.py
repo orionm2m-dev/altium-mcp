@@ -44,6 +44,59 @@ class ScriptDialogTests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertIsNone(script_guard.classify_script_dialog(*args))
 
+    def test_native_exception_text_is_captured_but_never_dismissible(self):
+        text = ("Access violation at address 00000001D8F79C54 in module "
+                "'ScriptingSystem.DLL'. Read of address 0000000000000078")
+        item = script_guard.classify_script_dialog(*dialog(
+            text, buttons=("Send Report", "Close"), cls="TShowException"))
+        self.assertEqual(item["kind"], "native_crash")
+        self.assertEqual(item["text"], text)
+        self.assertTrue(item["text_available"])
+        self.assertFalse(item["auto_dismiss"])
+        self.assertIn("send report", item["buttons"])
+        failure = dict(item, hwnd=12, pid=3, safe_to_stop=True)
+        user32 = SimpleNamespace(PostMessageW=Mock())
+        with patch.dict(sys.modules, {"dialogs": SimpleNamespace(_user32=user32)}), \
+                patch.object(script_guard, "find_script_errors", return_value=[failure]):
+            self.assertEqual(script_guard.dismiss_script_errors("X2.EXE", [failure]), [])
+            blocked = script_guard.blocking_crash_report("X2.EXE")
+        user32.PostMessageW.assert_not_called()
+        self.assertEqual(blocked["mutation_state"], "not_dispatched")
+        self.assertEqual(blocked["script_errors"][0]["text"], text)
+
+    def test_exception_reporter_with_no_readable_text_still_blocks(self):
+        item = script_guard.classify_script_dialog("Error", "TShowException", [])
+        self.assertEqual(item["kind"], "native_crash")
+        self.assertFalse(item["text_available"])
+        self.assertFalse(item["auto_dismiss"])
+
+    def test_information_busy_instance_is_not_an_answerable_script_error(self):
+        self.assertIsNone(script_guard.classify_script_dialog(*dialog(
+            "There is another instance running, but it is busy at the moment",
+            title="Information")))
+
+    def test_exception_hidden_during_capture_is_not_reported_or_dismissed(self):
+        native_dialogs = SimpleNamespace(top_windows=lambda: [12],
+            is_visible=Mock(side_effect=[True, False]),
+            window_text=lambda h: "Error", window_class=lambda h: "TShowException",
+            children=lambda h: [(20, "TStaticText", "Access violation in ScriptingSystem.DLL")])
+        with patch.dict(sys.modules, {"dialogs": native_dialogs}), \
+                patch.object(script_guard, "_window_process", return_value=(3, str(ROOT / "X2.EXE"))):
+            self.assertEqual(script_guard.find_script_errors(str(ROOT / "X2.EXE")), [])
+
+    def test_top_window_enumeration_filters_hidden_forms(self):
+        tree = ast.parse((ROOT / "dialogs.py").read_text(encoding="utf-8"))
+        methods = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                   and n.name in {"is_visible", "top_windows"}]
+        def enumerate_windows(callback, parameter):
+            for hwnd in (10, 11, 12):
+                callback(hwnd, parameter)
+        native = SimpleNamespace(EnumWindows=enumerate_windows,
+                                 IsWindowVisible=lambda hwnd: hwnd != 11)
+        environment = {"_user32": native, "_EnumWindowsProc": lambda callback: callback}
+        exec(compile(ast.Module(body=methods, type_ignores=[]), "visibility_test", "exec"), environment)
+        self.assertEqual(environment["top_windows"](), [10, 12])
+
     def test_hidden_stop_has_no_shell_no_inherited_stdio(self):
         with patch.object(script_guard.subprocess,"Popen") as popen:
             script_guard.stop_script_executor(r"C:\Altium\X2.EXE")
@@ -65,14 +118,15 @@ class ScriptDialogTests(unittest.TestCase):
 
 
 class BridgeGuardTests(unittest.TestCase):
-    def run_case(self, failures, closed):
+    def run_case(self, failures, closed, preexisting_crash=None):
         tree=ast.parse((ROOT/"main.py").read_text(encoding="utf-8"))
         bridge=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="AltiumBridge")
         method=next(n for n in bridge.body if isinstance(n,ast.AsyncFunctionDef) and n.name=="_execute_command_locked")
         method.decorator_list=[]
         clock=SimpleNamespace(now=0)
         async def sleep(_):clock.now+=3
-        guard=SimpleNamespace(find_script_errors=Mock(return_value=failures),
+        guard=SimpleNamespace(blocking_crash_report=Mock(return_value=preexisting_crash),
+                              find_script_errors=Mock(return_value=failures),
                               dismiss_script_errors=Mock(return_value=closed),
                               stop_script_executor=Mock())
         calls=[]
@@ -85,7 +139,7 @@ class BridgeGuardTests(unittest.TestCase):
             exec(compile(ast.Module(body=[method],type_ignores=[]),"bridge_guard_test","exec"),env)
             obj=SimpleNamespace(config=SimpleNamespace(altium_exe_path="X2.EXE"),run_altium_script=run)
             result=asyncio.run(env["_execute_command_locked"](obj,"set_pcb_routing",{},120))
-        self.assertEqual(calls,["run"])
+        self.assertEqual(calls,[] if preexisting_crash else ["run"])
         return result,guard,clock.now
 
     def test_known_script_failure_returns_promptly_without_retry_or_success_claim(self):
@@ -98,6 +152,25 @@ class BridgeGuardTests(unittest.TestCase):
         self.assertFalse(result["executor_recovered"])
         self.assertFalse(result["executor_stop_dispatched"])
         self.assertEqual(result["mutation_state"],"unknown")
+        guard.stop_script_executor.assert_not_called()
+
+    def test_native_crash_before_dispatch_never_runs_script(self):
+        failure = {"success": False, "blocked": True, "mutation_state": "not_dispatched",
+                   "script_errors": [{"kind": "native_crash", "text": "Access violation in ScriptingSystem.DLL"}]}
+        result, guard, elapsed = self.run_case([], [], preexisting_crash=failure)
+        self.assertEqual(result["script_errors"], failure["script_errors"])
+        self.assertEqual(result["mutation_state"], "not_dispatched")
+        self.assertEqual(elapsed, 0)
+        guard.dismiss_script_errors.assert_not_called()
+        guard.stop_script_executor.assert_not_called()
+
+    def test_crash_during_dispatch_returns_exact_text_without_retry(self):
+        failure = {"kind": "native_crash", "text": "Access violation at address 00000001D8F79C54 in ScriptingSystem.DLL",
+                   "safe_to_stop": True, "auto_dismiss": False}
+        result, guard, elapsed = self.run_case([failure], [])
+        self.assertEqual(result["script_errors"], [failure])
+        self.assertEqual(result["dialogs_closed"], 0)
+        self.assertFalse(result["retry_performed"])
         guard.stop_script_executor.assert_not_called()
 
     def test_ambiguous_instances_return_error_without_stop(self):
