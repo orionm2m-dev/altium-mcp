@@ -284,3 +284,51 @@ Need to add the following test units
 - `set_pcb_layer_visibility`
 - `layout_duplicator`
 - `get_pcb_screenshot`
+
+
+## Emergency stop of a managed failed session
+
+`emergency_stop_altium` is an explicit, two-phase last-resort tool; it is never
+called automatically by recovery or a failed mutation. The caller must already
+be authorized to stop the exact managed task session. Sharing a Windows user SID
+is an identity restriction, not proof of project ownership.
+
+1. Call `action="prepare"`, `target_pid=<exact PID>`,
+   `acknowledge_managed_session=true`, and `backup_paths=[<absolute working Altium
+   documents>]`. Visible crash/breakpoint-stop evidence, a doubly checked hung UI,
+   or a still-running launcher identified by its current owned process handle is
+   required for that PID. Information/Save dialogs are never answered. Preparation
+   copies and hashes files **from disk only** and returns a one-use 300-second token.
+2. Review the checkpoint and paths. Call `action="terminate"` with the same PID,
+   `plan_token`, and `acknowledge_unsaved_loss=true`. Unsaved memory remains
+   **unknown and may be lost**. Source files, backups, identity and failure evidence
+   are rechecked. The same Windows handle is used for raw creation-time identity,
+   termination and a bounded 5-second exit wait. A timeout means exit unconfirmed.
+3. Start the intended session explicitly and call `recover_script_executor` with
+   `manual_stop_confirmed=true`. The old PID plus raw creation identity must be
+   gone, and the existing unique read-only probe must succeed. No relaunch, save,
+   child-process stop, global X2 termination or mutation replay is performed.
+
+Checkpoints are under `C:/Users/Public/altium_mcp/emergency_stop/`. Tokens are
+held in server memory and cannot be reused after restart. A consumed plan that
+failed before any termination attempt allows immediate explicit preparation with
+all checks repeated. If termination was attempted or its status is unknown, a new
+preparation waits for the previous 300-second plan to expire. The unresolved latch
+remains; ordinary script dispatch is blocked, while independent diagnostics/current
+screenshots remain available. A new plan may supersede an expired one only after
+all preparation checks. The shared asyncio command lock serializes this MCP server. A separate
+nonblocking OS file lock serializes emergency/recovery state transitions across
+MCP servers and releases automatically on process exit. An active plan is rejected
+and the latch token is rechecked before stopping. Other external clients are not
+controlled; use one MCP writer for the managed session. Disk checkpoints alone never authorize termination. To load a newly
+installed tool, restart the MCP client/server; this does not restart Altium.
+
+Offline qualification uses explicit modules (no native app calls):
+`python -B -m unittest server.tests.test_emergency_stop server.tests.test_script_recovery server.tests.test_script_guard server.tests.test_sandbox_script_guard server.tests.test_screenshot_dispatch -q`.
+Public Altium termination remains unqualified until an authorized native test.
+The low-level `WinProcess` adapter can be tested separately on disposable owned
+hidden helper processes; this does not qualify end-to-end Altium recovery.
+
+Windows references: [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess),
+[GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes),
+[WaitForSingleObject](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject).

@@ -33,6 +33,7 @@ from pcb_polygons import build_polygon_spec
 import dialogs
 import script_guard
 import script_recovery
+import emergency_stop
 
 # Configure logging
 logging.basicConfig(
@@ -1401,6 +1402,37 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
         outcome = await script_recovery.recover(
             altium_bridge.config.altium_exe_path, EXCHANGE_DIR, timeout_seconds,
             dispatch_timeout_seconds, manual_stop_confirmed)
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
+async def emergency_stop_altium(ctx: Context, action: str, target_pid: int,
+                               backup_paths: list = None, plan_token: str = "",
+                               acknowledge_unsaved_loss: bool = False,
+                               acknowledge_managed_session: bool = False) -> str:
+    """Prepare or terminate one explicitly managed failed Altium process.
+
+    prepare requires acknowledge_managed_session=true and exact existing working
+    document backup_paths. Returns a one-use token valid for 300 seconds. Copies
+    are disk-only: unsaved memory is UNKNOWN and cannot be backed up by this tool.
+    terminate requires the same PID/token and acknowledge_unsaved_loss=true.
+    Revalidates PID creation time, configured executable, user, failure evidence
+    and disk hashes, then stops only the verified process handle. No children,
+    relaunch, dialog answers, document saves or mutation retry. An exit timeout
+    is unconfirmed. Script dispatch stays blocked until a fresh-instance probe;
+    independent read-only diagnostics remain available.
+    """
+    async with altium_bridge._command_lock:
+        if action == "prepare":
+            outcome = emergency_stop.prepare(altium_bridge.config.altium_exe_path,
+                EXCHANGE_DIR, target_pid, backup_paths, acknowledge_managed_session)
+        elif action == "terminate":
+            outcome = emergency_stop.terminate(altium_bridge.config.altium_exe_path,
+                EXCHANGE_DIR, target_pid, plan_token, acknowledge_unsaved_loss)
+        else:
+            outcome = {"success": False, "blocked": True,
+                       "error": "action must be prepare or terminate",
+                       "termination_requested": False}
     return json.dumps(outcome, indent=2)
 
 

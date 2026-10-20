@@ -196,12 +196,17 @@ def _blocked(state, reason, **extra):
         state=state, **extra)
 
 
-async def recover(exe, exchange_dir, timeout_seconds=30,
+async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                   dispatch_timeout_seconds=8, manual_stop_confirmed=False):
     """Caller holds the shared bridge lock throughout this operation."""
     if not 1 <= timeout_seconds <= 60 or not 1 <= dispatch_timeout_seconds <= 15:
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
     old = blocked_state(exchange_dir)
+    if old and old.get("require_fresh_instance"):
+        import emergency_stop
+        reason = emergency_stop.recovery_block(exe, old)
+        if reason:
+            return _blocked(old, reason)
     pending = []
     for pid, process in list(_launches.items()):
         if process.poll() is None:
@@ -284,3 +289,15 @@ async def recover(exe, exchange_dir, timeout_seconds=30,
         state["phase"] = "failed_unresolved"
         _write_state(exchange_dir, state)
         return _blocked(state, str(exc))
+
+
+async def recover(exe, exchange_dir, timeout_seconds=30,
+                  dispatch_timeout_seconds=8, manual_stop_confirmed=False):
+    """Serialize emergency state transitions across MCP processes as well."""
+    import emergency_stop
+    try:
+        with emergency_stop.emergency_claim(exchange_dir):
+            return await _recover_emergency_serialized(exe, exchange_dir, timeout_seconds,
+                dispatch_timeout_seconds, manual_stop_confirmed)
+    except OSError as error:
+        return _blocked(blocked_state(exchange_dir) or {}, str(error))
