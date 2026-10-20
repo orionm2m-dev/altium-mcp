@@ -323,6 +323,29 @@ def _record_native_incident(exchange, identity, observed):
     return str(path)
 
 
+def _successful_previous_stop_has_exited(exe, state):
+    """Release only the completed plan's TTL, never the script-dispatch latch."""
+    result = state.get("termination_result")
+    identity = state.get("emergency_identity")
+    if (state.get("phase") != "emergency_terminated" or not isinstance(result, dict)
+            or result.get("terminated_confirmed") is not True or result.get("wait_status") != 0
+            or not isinstance(identity, dict) or identity.get("exe") != _canonical(exe)
+            or type(identity.get("pid")) is not int or identity["pid"] <= 0
+            or type(identity.get("creation_filetime")) is not int or identity["creation_filetime"] <= 0):
+        return False
+    try:
+        with WinProcess(identity["pid"]) as process:
+            current = process.identity()
+            if (current.get("pid") != identity["pid"]
+                    or type(current.get("creation_filetime")) is not int
+                    or current["creation_filetime"] <= 0):
+                return False
+            return (current["creation_filetime"] != identity["creation_filetime"]
+                    or current.get("running") is False)
+    except OSError as error:
+        return getattr(error, "winerror", None) == 87  # Invalid PID, not access denied.
+
+
 def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed_session=False,
                     failure_attestation=None):
     if not acknowledge_managed_session:
@@ -330,8 +353,9 @@ def _prepare_locked(exe, exchange, target_pid, backup_paths, acknowledge_managed
     if isinstance(target_pid, bool) or not isinstance(target_pid, int) or target_pid <= 0:
         return _refused("A positive exact target PID is required")
     old = script_recovery.blocked_state(exchange) or {}
-    safe_new_prepare = (old.get("phase") == "emergency_failed_unresolved"
-                        and old.get("termination_requested") is False)
+    safe_new_prepare = ((old.get("phase") == "emergency_failed_unresolved"
+                         and old.get("termination_requested") is False)
+                        or _successful_previous_stop_has_exited(exe, old))
     if (old.get("emergency_token") and old.get("expires_at", 0) > time.time()
             and not safe_new_prepare):
         return _refused("An emergency plan is already active; use its token or wait for expiry", state=old)

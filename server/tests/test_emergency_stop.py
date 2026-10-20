@@ -200,6 +200,78 @@ class ProtocolTests(unittest.TestCase):
                 self.identity[field] = old
         self.assert_not_stopped()
 
+    def previous_successful_stop(self):
+        return {"phase": "emergency_terminated", "emergency_token": "previous",
+                "expires_at": self.clock + 300, "require_fresh_instance": True,
+                "emergency_identity": dict(self.identity),
+                "termination_result": {"terminated_confirmed": True, "wait_status": 0,
+                                       "exit_code": stop.EXIT_CODE}}
+
+    def test_completed_stop_allows_next_plan_only_after_exact_identity_exit_proof(self):
+        original = self.open_process
+        for mode in ("missing", "exited", "pid_reused"):
+            with self.subTest(mode=mode):
+                recovery._write_state(self.root, self.previous_successful_stop())
+                def prior_probe(pid, terminate_access=False):
+                    if pid == 123 and mode == "missing":
+                        error = OSError("invalid PID")
+                        error.winerror = 87
+                        raise error
+                    process = original(pid, terminate_access)
+                    if pid == 123:
+                        prior = dict(self.identity)
+                        if mode == "exited":
+                            prior["running"] = False
+                        else:
+                            prior["creation_filetime"] += 1
+                        process.identity.side_effect = lambda: prior
+                    return process
+                self.factory.side_effect = prior_probe
+                next_plan = self.prepare(target_pid=456)
+                self.assertTrue(next_plan["success"])
+                self.assertEqual(next_plan["plan"]["identity"]["pid"], 456)
+                self.assertEqual(recovery.blocked_state(self.root)["phase"], "emergency_prepared")
+                self.assertTrue(recovery.blocked_state(self.root)["require_fresh_instance"])
+        self.assert_not_stopped()
+
+    def test_completed_stop_still_running_unknown_or_incomplete_identity_remains_blocked(self):
+        original = self.open_process
+        for mode in ("running", "denied", "missing_creation", "wrong_pid"):
+            with self.subTest(mode=mode):
+                recovery._write_state(self.root, self.previous_successful_stop())
+                def uncertain_probe(pid, terminate_access=False):
+                    if mode == "denied":
+                        raise PermissionError("Cannot query previous process")
+                    process = original(pid, terminate_access)
+                    current = dict(self.identity)
+                    if mode == "missing_creation":
+                        current.pop("creation_filetime")
+                    elif mode == "wrong_pid":
+                        current["pid"] = 999
+                    process.identity.side_effect = lambda: current
+                    return process
+                self.factory.side_effect = uncertain_probe
+                self.assertFalse(self.prepare(target_pid=456)["success"])
+                self.assertEqual(recovery.blocked_state(self.root)["emergency_token"], "previous")
+        self.assert_not_stopped()
+
+    def test_unconfirmed_or_unknown_terminal_state_never_releases_active_ttl(self):
+        base = self.previous_successful_stop()
+        candidates = [dict(base, phase="emergency_termination_requested"),
+                      dict(base, phase="emergency_exit_unconfirmed"),
+                      dict(base, phase="emergency_failed_unresolved", termination_requested=True),
+                      dict(base, termination_result={"terminated_confirmed": False, "wait_status": 258}),
+                      dict(base, termination_result={"terminated_confirmed": True, "wait_status": 258}),
+                      dict(base, termination_result=None),
+                      dict(base, emergency_identity={"pid": 123, "exe": self.exe})]
+        self.factory.reset_mock()
+        for state in candidates:
+            with self.subTest(state=state):
+                recovery._write_state(self.root, state)
+                self.assertFalse(self.prepare(target_pid=456)["success"])
+        self.factory.assert_not_called()
+        self.assert_not_stopped()
+
     def test_pretermination_failure_allows_immediate_explicit_new_preparation(self):
         prepared = self.prepare()
         self.doc.write_bytes(b"intentional saved update")

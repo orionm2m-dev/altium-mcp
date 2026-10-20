@@ -313,8 +313,13 @@ Checkpoints are under `C:/Users/Public/altium_mcp/emergency_stop/`. Tokens are
 held in server memory and cannot be reused after restart. A consumed plan that
 failed before any termination attempt allows immediate explicit preparation with
 all checks repeated. If termination was attempted or its status is unknown, a new
-preparation waits for the previous 300-second plan to expire. The unresolved latch
-remains; ordinary script dispatch is blocked, while independent diagnostics/current
+preparation waits for the previous 300-second plan to expire. After a confirmed
+successful stop, another explicit preparation is allowed immediately only when a
+fresh process query proves the previous exact PID/creation identity has exited.
+An absent PID, an exited handle, or a different creation time after PID reuse is
+accepted; access denial, missing identity or a still-live previous process is not.
+This releases only the completed plan's TTL, not the script-dispatch latch.
+The unresolved latch remains; ordinary script dispatch is blocked, while independent diagnostics/current
 screenshots remain available. A new plan may supersede an expired one only after
 all preparation checks. The shared asyncio command lock serializes this MCP server. A separate
 nonblocking OS file lock serializes emergency/recovery state transitions across
