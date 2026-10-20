@@ -4469,13 +4469,31 @@ async def check_placement(ctx: Context, cmp_designators: list = None, clearance_
     logger.info(f"Placement check complete: {result.get('violation_count', '?')} violations")
     return json.dumps(result, indent=2)
 
+async def _prepare_screenshot_view(view_type, zoom_to):
+    """Skip script dispatch only for an explicitly requested diagnostic view."""
+    mode = view_type.lower()
+    if mode not in ("pcb", "sch", "current"):
+        return {"success": False, "error": "view_type must be pcb, sch or current"}
+    if mode == "current":
+        if zoom_to:
+            return {"success": False, "error": "zoom_to is unavailable for current-window diagnostics"}
+        return {"success": True, "result": {}}
+    params = {"view_type": mode}
+    if zoom_to:
+        params["designators"] = zoom_to
+    return await altium_bridge.execute_command("take_view_screenshot", params)
+
+
 @mcp.tool()
 async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = None):
     """
     Take a screenshot of the Altium window, returned as viewable image content.
 
     Args:
-        view_type (str): Type of view to capture - 'pcb' or 'sch'
+        view_type (str): 'pcb' or 'sch' focuses that editor through the script.
+            'current' captures the existing Altium window without script dispatch,
+            for diagnosing modal dialogs and script compilation failures.
+            Current mode does not identify a document or support zoom_to.
         zoom_to (list, optional): List of component designators (e.g. ["U12", "R42"]).
             PCB view only: Altium zooms to the bounding box of these components
             (plus a margin) before the capture, so the components fill the frame.
@@ -4490,13 +4508,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
     try:
         # First, execute the Altium command to ensure the right document type
         # is focused, optionally zooming to the requested components
-        params = {"view_type": view_type.lower()}
-        if zoom_to:
-            params["designators"] = zoom_to
-        response = await altium_bridge.execute_command(
-            "take_view_screenshot",
-            params
-        )
+        response = await _prepare_screenshot_view(view_type, zoom_to)
         
         # Check for success
         if not response.get("success", False):
@@ -4749,6 +4761,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
         # What was actually captured, as opposed to what was requested
         result["captured_kind"] = focused_kind or None
         result["captured_document"] = focused_document or None
+        result["script_focus_requested"] = view_type.lower() != "current"
         return [
             json.dumps(result),
             MCPImage(data=base64.b64decode(image_base64), format="png"),
