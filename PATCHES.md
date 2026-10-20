@@ -47,3 +47,13 @@ Invalid-PID absence is accepted only when opening the process; unknown/read-time
 errors remain blocking. `STILL_ACTIVE` is unconfirmed. No error alone proves exit,
 no recovery latch is cleared, and no process is launched or terminated by this
 check. Focused fake-kernel tests cover ended handles and unavailable SID queries.
+
+## 2026-10-20 — Reconcile a late unique probe result
+
+Recovery can reconcile one recorded `probe_pending` operation after its launcher
+has exited and its exact unique result arrives late. It verifies the recorded
+main process identity, configured executable, user, ready native main window,
+unchanged checkpoint and token-bound result. A live/unknown launcher or changed
+main session remains blocked. No new Stop/probe is dispatched, no manual-stop
+claim is introduced, and native PCB transaction idle is not certified. PID-only
+historical launcher creation identity remains explicitly unverified.

@@ -474,3 +474,13 @@ an exact matching instance with a non-`STILL_ACTIVE` exit code permits the next
 recovery check. Read errors, including WinError 31 and read-time WinError 87,
 remain blocking. This exit observation does not itself clear the recovery latch
 or prove that the surviving main application was restarted.
+
+### Late recovery probe results
+
+Calling `recover_script_executor` again with `manual_stop_confirmed=false` can
+reconcile an existing `probe_pending` result without another dispatch. The exact
+recorded main identity must still be live and ready; the launcher must have exited,
+and both the checkpoint and unique-token result must remain unchanged. The result
+reports `late_completion=true` and `no_new_dispatch=true`. Closing/replacing the
+main process invalidates this reconciliation; an old successful probe does not
+certify a new session. Recovery does not establish native PCB transaction idle.

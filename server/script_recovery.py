@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -196,12 +197,112 @@ def _blocked(state, reason, **extra):
         state=state, **extra)
 
 
+def _reconcile_late_probe(exe, exchange_dir, old):
+    """Reconcile one existing unique result; never launch Stop/probe or claim idle."""
+    import emergency_stop
+    try:
+        latch_path = Path(exchange_dir) / "script_recovery_state.json"
+        raw = latch_path.read_bytes()
+        if json.loads(raw) != old or old.get("phase") != "probe_pending":
+            raise ValueError("Pending probe checkpoint changed")
+        token = old.get("token", "")
+        if not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{32}", token) is None:
+            raise ValueError("Exact unique probe token is unavailable")
+        expected_path = (Path(exchange_dir) / "recovery" / token / "result.json").resolve()
+        if Path(old.get("probe_result_path", "")).resolve() != expected_path:
+            raise ValueError("Probe result path does not match this checkpoint")
+        result_raw = expected_path.read_bytes()
+        outcome = json.loads(result_raw.decode("utf-8-sig"))
+        if outcome != {"probe": "executor ok", "token": token}:
+            raise ValueError("Existing probe result does not match this recovery token")
+        expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity")
+        if (not isinstance(expected, dict) or type(expected.get("pid")) is not int
+                or expected["pid"] <= 0 or type(expected.get("creation_filetime")) is not int
+                or expected["creation_filetime"] <= 0):
+            raise ValueError("Recorded main-process identity is unavailable")
+        launches = old.get("launches", [])
+        probes = [item for item in launches if item.get("phase") == "probe"]
+        if (len(probes) != 1 or probes[0] != launches[-1]
+                or probes[0].get("exit_code") is not None
+                or type(probes[0].get("pid")) is not int or probes[0]["pid"] <= 0
+                or probes[0]["pid"] == expected["pid"]
+                or any(item.get("phase") != "stop" or item.get("exit_code") != 0
+                       for item in launches[:-1])):
+            raise ValueError("One exact pending probe launcher is required")
+        probe_pid = probes[0]["pid"]
+        for process in _launches.values():
+            if process.poll() is None:
+                raise ValueError("A tracked recovery launcher is still running")
+        owned = _launches.get(probe_pid)
+        if owned is not None:
+            if owned.poll() != 0:
+                raise ValueError("The tracked probe launcher exited unsuccessfully")
+            exit_evidence = {"source": "owned_popen", "exit_confirmed": True, "exit_code": 0}
+        else:
+            try:
+                probe = emergency_stop.WinProcess(probe_pid)
+            except OSError as error:
+                if getattr(error, "winerror", None) != 87:
+                    raise
+                exit_evidence = {"source": "pid_absent_at_open", "exit_confirmed": True,
+                                 "exit_code": None, "historical_creation_verified": False}
+            else:
+                with probe:
+                    observed = probe.exit_observation()
+                if (observed.get("pid") != probe_pid
+                        or type(observed.get("creation_filetime")) is not int
+                        or observed["creation_filetime"] <= 0
+                        or type(observed.get("exit_code")) is not int
+                        or observed["exit_code"] != 0):
+                    raise ValueError("Probe launcher is live or successful exit is unconfirmed")
+                exit_evidence = {"source": "query_handle_exited", "exit_confirmed": True,
+                                 "exit_code": 0, "historical_creation_verified": False,
+                                 "observed_creation_filetime_decimal": str(observed["creation_filetime"])}
+        with emergency_stop.WinProcess(expected["pid"]) as main:
+            current = main.identity()
+            emergency_stop._valid_identity(current, exe, expected["pid"])
+            if not emergency_stop._same_identity(current, expected):
+                raise ValueError("Main identity changed since the existing probe")
+            environment = inspect_environment(exe)
+            windows = environment.get("process_windows", {})
+            rows = windows.get(expected["pid"], windows.get(str(expected["pid"]), []))
+            if (environment.get("ready") is not True
+                    or environment.get("target_pid") != expected["pid"]
+                    or environment.get("configured_process_ids") != [expected["pid"]]
+                    or environment.get("foreground_confirmed") is not True
+                    or not any(w.get("class") == "TDocumentForm" for w in rows)
+                    or any(w.get("class") in {"#32770", "TMessageForm", "TShowException", "TPCBImportWizard"} for w in rows)
+                    or environment.get("dialog_handles") or environment.get("script_errors")):
+                raise ValueError("The recorded main application is not ready")
+            if not emergency_stop._same_identity(main.identity(), current):
+                raise ValueError("Main identity changed during reconciliation")
+            if latch_path.read_bytes() != raw or expected_path.read_bytes() != result_raw:
+                raise ValueError("Probe result or checkpoint changed during reconciliation")
+            state = json.loads(raw)
+            state["phase"] = "recovered"
+            state["late_probe_completion"] = {"reconciled": True, "launcher": exit_evidence,
+                "main_identity_unchanged_since_probe": True, "new_dispatches": 0,
+                "main_restarted_by_reconciliation": False}
+            state["launches"][-1].update(exit_confirmed=True,
+                exit_code=exit_evidence["exit_code"], completion="late_reconciled")
+            _write_state(exchange_dir, state)
+        _launches.pop(probe_pid, None)
+        return {"recovered": True, "blocked": False, "probe": outcome, "state": state,
+                "late_completion": True, "no_new_dispatch": True,
+                "native_transaction_idle_verified": False}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return _blocked(old, "Late probe not reconciled: " + str(error), no_new_dispatch=True)
+
+
 async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                   dispatch_timeout_seconds=8, manual_stop_confirmed=False, *, verified_stop=None):
     """Caller holds the shared bridge lock throughout this operation."""
     if not 1 <= timeout_seconds <= 60 or not 1 <= dispatch_timeout_seconds <= 15:
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
     old = blocked_state(exchange_dir)
+    if (old and old.get("phase") == "probe_pending" and not manual_stop_confirmed
+            and verified_stop is None):
+        return _reconcile_late_probe(exe, exchange_dir, old)
     fresh_emergency = bool(old and old.get("require_fresh_instance"))
     if fresh_emergency:
         import emergency_stop
