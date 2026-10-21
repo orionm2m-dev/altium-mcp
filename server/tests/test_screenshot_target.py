@@ -176,6 +176,24 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         self.factory.assert_not_called()
         self.bridge.execute_command.assert_not_awaited()
 
+    async def test_optional_child_failure_returns_verified_parent_image_with_error(self):
+        self.guard.children.side_effect = ValueError("Foreign child process")
+        result = await self.env["get_screenshot"](None, "current", window_handle=42)
+        metadata = json.loads(result[0])
+        self.assertTrue(metadata["success"])
+        self.assertIsNone(metadata["child_windows"])
+        self.assertEqual(metadata["child_windows_error"], "Foreign child process")
+        self.assertEqual(self.guard.verify.call_count, 3)
+        self.guard.close.assert_called_once()
+
+    async def test_parent_change_after_child_failure_still_refuses_image(self):
+        self.guard.children.side_effect = ValueError("Foreign child process")
+        self.guard.verify.side_effect = [None, None, ValueError("Parent changed")]
+        result = json.loads(await self.env["get_screenshot"](None, "current", window_handle=42))
+        self.assertFalse(result["success"])
+        self.assertEqual(list(Path(self.temp.name).iterdir()), [])
+        self.guard.close.assert_called_once()
+
     async def test_post_capture_identity_failure_returns_no_image_and_no_debug_file(self):
         self.guard.verify.side_effect = [None, ValueError("changed")]
         result = json.loads(await self.env["get_screenshot"](None, "current", window_handle=42))

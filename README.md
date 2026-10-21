@@ -150,6 +150,8 @@ The exact-capture worker uses per-monitor DPI awareness for physical bounds,
 restores its previous thread context afterward, and never resizes or moves the
 window. Metadata also lists descendant HWNDs, classes, text, enabled/visible
 state and physical screen rectangles; this inventory sends no control input.
+If optional child inspection fails, `child_windows_error` preserves the reason
+and the parent image is returned only after its identity is verified again.
 
 ### Read the current Altium environment
 

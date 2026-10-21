@@ -5013,9 +5013,15 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     mfcDC.DeleteDC()
                     win32gui.ReleaseDC(hwnd, hwndDC)
 
+                    child_windows = None
+                    child_windows_error = None
                     if target is not None:
                         target.verify()
-                    child_windows = target.children() if target is not None else None
+                        try:
+                            child_windows = target.children()
+                        except (OSError, ValueError) as error:
+                            child_windows_error = str(error)
+                        target.verify()
 
                     # Save a local copy of the screenshot for debugging (non-fatal if it fails)
                     try:
@@ -5048,6 +5054,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                         "exact_window_requested": target is not None,
                         "capture_dpi_awareness": "per_monitor_v2" if dpi_scope is not None else None,
                         "child_windows": child_windows,
+                        "child_windows_error": child_windows_error,
                         "pinned_process_identity": target.identity if target is not None else None,
                         "image_format": "PNG",
                         "encoding": "base64",
