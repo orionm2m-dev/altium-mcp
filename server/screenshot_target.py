@@ -68,7 +68,7 @@ class CaptureTarget:
             row = {"hwnd": hwnd, "class": win32gui.GetClassName(hwnd),
                 "text": win32gui.GetWindowText(hwnd), "enabled": bool(win32gui.IsWindowEnabled(hwnd)),
                 "visible": bool(win32gui.IsWindowVisible(hwnd)), "rect": list(win32gui.GetWindowRect(hwnd))}
-            if ((thread_id, pid) != win32process.GetWindowThreadProcessId(hwnd)
+            if ((thread_id, pid) != tuple(win32process.GetWindowThreadProcessId(hwnd))
                     or not win32gui.IsChild(self.hwnd, hwnd)):
                 raise ValueError("Child window changed during inspection")
             rows.append(row)

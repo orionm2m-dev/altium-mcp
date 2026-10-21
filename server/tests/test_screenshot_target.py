@@ -87,6 +87,8 @@ class TargetTests(unittest.TestCase):
         gui.IsWindowVisible.return_value = True
         gui.GetWindowRect.return_value = (10, 20, 110, 60)
         with patch.object(target, "win32gui", gui):
+            # Real pywin32 may return a list; sequence type is not an identity change.
+            target.win32process.GetWindowThreadProcessId.return_value = [7, 123]
             self.assertEqual(guard.children(), [{"hwnd": 55, "class": "TButton", "text": "Cancel",
                 "enabled": True, "visible": True, "rect": [10, 20, 110, 60]}])
             gui.IsChild.return_value = False
