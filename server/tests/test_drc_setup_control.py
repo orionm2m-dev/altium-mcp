@@ -92,6 +92,24 @@ class DrcInspectTests(unittest.TestCase):
         for args in ({"new":400},{"new":100001},{"new":True},{"expected":False}):
             self.assertTrue(self.set_limit(**args)["blocked"])
         self.assertTrue(self.call("set_limit")["blocked"]);control.CaptureTarget.assert_not_called()
+    def test_checkbox_read_timeout_blocks_limit_and_ok_before_input(self):
+        self.add_button()
+        control._message.side_effect=OSError("checkbox timeout")
+        self.assertTrue(self.set_limit()["blocked"])
+        self.assertTrue(self.call("ok",edit_hwnd=11,expected_limit=500,button_hwnd=14)["blocked"])
+        self.assertFalse(any(c.args[2]==0xC for c in control._message.call_args_list))
+        self.gui.PostMessage.assert_not_called()
+    def test_checkbox_check_state_change_after_write_rejects_verification(self):
+        state={"checked":1}
+        def change(*args):
+            if args[2]==0xF0:return state["checked"]
+            out=self.message(*args)
+            if args[2]==0xC:state["checked"]=0
+            return out
+        control._message.side_effect=change
+        r=self.set_limit();self.assertFalse(r["success"]);self.assertTrue(r["outcome_unknown"])
+        self.assertFalse(r["limit_readback_verified"])
+
     def test_native_rejection_not_retried(self):
         control._message.side_effect=lambda target,hwnd,msg,*args:0 if msg==0xC else 1
         r=self.set_limit();self.assertFalse(r["success"]);self.assertTrue(r["outcome_unknown"])
