@@ -35,6 +35,20 @@
       "title": "Design Rule Check (DRC)",
       "retrieved": "2026-10-21",
       "page_updated": "2026-10-08"
+    },
+    {
+      "id": "pcb-design-api",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-design-objects-interfaces-reference",
+      "title": "PCB API Design Objects Interfaces Reference",
+      "retrieved": "2026-10-22",
+      "qualification": "Legacy SDK documentation; not runtime qualification"
+    },
+    {
+      "id": "pcb-system-api",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference",
+      "title": "PCB API System Interfaces Reference",
+      "retrieved": "2026-10-22",
+      "qualification": "Legacy SDK documentation; not runtime qualification"
     }
   ],
   "full_articles_stored": false,

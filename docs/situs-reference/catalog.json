@@ -827,6 +827,64 @@
       ],
       "section_anchor": "",
       "runtime_verified": false
+    },
+    {
+      "id": "selection.native_flag",
+      "name": "Native Selected flag and graphical refresh",
+      "kind": "limit",
+      "summary": "Component.Selected is native selection state. AD26.9.1 observation df176e457ec549e6b3cf28ec3ebcdca2 showed its setter adding both selected components to indexed board selection and exact restoration, without graphical refresh or child-pad selection. This does not qualify Situs internal selection semantics.",
+      "source_ids": [
+        "pcb-design-api"
+      ],
+      "runtime_verified": false,
+      "reviewed": "2026-10-22",
+      "native_observations": [
+        {
+          "evidence_id": "df176e457ec549e6b3cf28ec3ebcdca2",
+          "observed_utc": "2026-10-21T21:37:50.926567+00:00",
+          "status": "OBSERVED_PASS",
+          "runtime": "Altium Designer 26.9.1",
+          "qualified_sequence": "Component.Selected setter; SelectecObjectCount/SelectecObject readback before/after; exact selection restoration",
+          "source_sha256": "cb5f13bd12d0f44ffa9b6db52a14f01140337206a6933d060f724038d7bdc80c",
+          "limits": "One candidate sequence only. Existing non-component selection preserved. No routing/save; Situs internal consumption and collection mutations unqualified.",
+          "declarations_sha256": "0d3296245f01c233de76419f44a0c1c341afec33ddf34b648b5a1a4ae05bdc6e"
+        }
+      ]
+    },
+    {
+      "id": "selection.native_indexed_readback",
+      "name": "SelectecObjectCount and SelectecObject indexed native selection",
+      "kind": "limit",
+      "summary": "SelectecObjectCount and SelectecObject[index] use the exact spelling Selectec. AD26.9.1 observation df176e457ec549e6b3cf28ec3ebcdca2 verified readback before/after two component selections and exact restoration: indexed counts 1/3/1, preserving the pre-existing non-component object. Broader inputs remain unqualified.",
+      "source_ids": [
+        "pcb-system-api"
+      ],
+      "runtime_verified": false,
+      "reviewed": "2026-10-22",
+      "native_observations": [
+        {
+          "evidence_id": "df176e457ec549e6b3cf28ec3ebcdca2",
+          "observed_utc": "2026-10-21T21:37:50.926567+00:00",
+          "status": "OBSERVED_PASS",
+          "runtime": "Altium Designer 26.9.1",
+          "qualified_sequence": "Component.Selected setter; SelectecObjectCount/SelectecObject readback before/after; exact selection restoration",
+          "source_sha256": "cb5f13bd12d0f44ffa9b6db52a14f01140337206a6933d060f724038d7bdc80c",
+          "limits": "One candidate sequence only. Existing non-component selection preserved. No routing/save; Situs internal consumption and collection mutations unqualified.",
+          "declarations_sha256": "0d3296245f01c233de76419f44a0c1c341afec33ddf34b648b5a1a4ae05bdc6e"
+        }
+      ]
+    },
+    {
+      "id": "selection.situs_selected_components",
+      "name": "Situs selected-component selection boundary",
+      "kind": "limit",
+      "summary": "OnSelectedComponents and BetweenSelectedComponents use Main with pads of selected components. A native selection/readback test passed, but did not invoke Situs and does not identify its internal selection source. Installed SelectedObjects_BeginUpdate/Clear/Add/EndUpdate mutations remain unqualified.",
+      "source_ids": [
+        "situs",
+        "pcb-system-api"
+      ],
+      "runtime_verified": false,
+      "reviewed": "2026-10-22"
     }
   ],
   "limitations": [

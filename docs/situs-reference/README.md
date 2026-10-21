@@ -1,7 +1,7 @@
 # Situs reference and capability review
 
 Reviewed **2026-10-21**. This package contains a compact, searchable reference
-from five official Altium pages, plus a separate review of this server's
+from seven official Altium pages, plus a separate review of this server's
 implementation. Full articles and private PCB/session receipts are not included.
 
 ## Public read-only tools
@@ -15,7 +15,7 @@ implementation. Full articles and private PCB/session receipts are not included.
 Examples: `Preferred`, `Layer Directions`, `situs.strategy.select`,
 `situs.rip_up.custom_checkbox`, and `situs.run.stop`.
 
-The reference has 75 entries: passes, strategies, directions, controls, rules
+The reference has 78 entries: passes, strategies, directions, controls, rules
 and important operating limits. Use [catalog.json](catalog.json) and
 [sources.json](sources.json) for exact IDs, links and retrieval dates.
 
@@ -80,3 +80,10 @@ Staging does not load or qualify the extension. See
 [native-extension-staging.md](native-extension-staging.md).
 
 The compiled active-board settings candidate has a dedicated [native strategy contract](native-strategy-settings-contract.md). Its runtime qualification remains separate from offline tests.
+
+## Native selection contract
+
+The [native selection review](native-selection-contract.md) separates the documented
+`Selected` property from indexed board selection and installed collection methods.
+It records metadata evidence and the remaining qualification boundary; no routing
+or selection mutation capability is promoted by this review.
