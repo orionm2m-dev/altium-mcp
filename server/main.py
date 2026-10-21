@@ -1517,8 +1517,10 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 @mcp.tool()
 async def stage_situs_native_extension(ctx: Context, action: str,
-        expected_plan_sha256: str = "", operation_id: str = "") -> str:
-    """Inspect or stage the fixed reviewed read-only Situs extension files.
+        expected_plan_sha256: str = "", operation_id: str = "", bundle: str = "readonly") -> str:
+    """Inspect or stage a fixed reviewed native Situs extension bundle.
+
+    bundle is readonly (default) or native_control; each has pinned source hashes.
 
     inspect returns a hash-bound plan for the configured X2.exe/System directory.
     install requires that exact expected_plan_sha256 and absent DLL/INS/RCS targets.
@@ -1533,6 +1535,9 @@ async def stage_situs_native_extension(ctx: Context, action: str,
     if action not in ("inspect", "install"):
         return json.dumps({"success": False, "action": action, "installed": False,
                            "native_action": False, "error": "action must be inspect or install"})
+    if bundle not in ("readonly", "native_control"):
+        return json.dumps({"success": False, "installed": False, "native_action": False,
+                           "error": "Unsupported fixed bundle"})
     import native_situs_install
     async with altium_bridge._command_lock:
         try:
@@ -1541,6 +1546,7 @@ async def stage_situs_native_extension(ctx: Context, action: str,
                 args = (altium_bridge.config.altium_exe_path, EXCHANGE_DIR)
                 if action == "install":
                     args += (expected_plan_sha256, operation_id)
+                args += (bundle,)
                 worker = asyncio.create_task(asyncio.to_thread(backend, *args))
                 cancelled = False
                 while True:
@@ -1591,6 +1597,32 @@ async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str
         operation_id=operation_id, expected_checked=expected_checked,
         checked=checked, timeout_seconds=timeout_seconds)
     return json.dumps(outcome)
+
+
+@mcp.tool()
+async def control_situs_strategy(ctx: Context, action: str, pcb_path: str,
+        target_pid: int, expected_creation_filetime: str, payload: dict | None = None,
+        operation_id: str = "", timeout_seconds: int = 15) -> str:
+    """Read/change active-board Situs strategy through the registered native module.
+
+    Requires NativeSitusControl installed and loaded, one ready configured process,
+    exact active PCB, PID and ft:<decimal FILETIME>. No UI input or script is used.
+    read_settings uses an empty payload and returns a full snapshot with its hash.
+    set_settings requires expected_snapshot_hash and changes: name, description,
+    prefer_orthogonal, or layer_directions [{layer_id,direction}]. Use only layer
+    IDs returned by the native snapshot. Direction values are 0..11. Passes,
+    ViaBias, presets, Rip-up and routing lifecycle are not exposed by this tool.
+    Writes compare complete native state and read back; no save/undo guarantee.
+    Repeated operation_id returns historical evidence only; unknown/partial
+    outcomes block further dispatch. No automatic retry, rollback or UI fallback.
+    """
+    import native_situs_service
+    result = await native_situs_service.control(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        action=action, pcb_path=pcb_path, target_pid=target_pid,
+        expected_creation_filetime=expected_creation_filetime, payload=payload,
+        operation_id=operation_id, timeout_seconds=timeout_seconds)
+    return json.dumps(result)
 
 
 @mcp.tool()

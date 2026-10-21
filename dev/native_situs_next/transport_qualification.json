@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "status": "compiled_not_loaded",
+  "native_calls_performed": false,
+  "installed": false,
+  "runtime_qualified": false,
+  "actions": [
+    "read_settings",
+    "set_settings"
+  ],
+  "process": "NativeSitusControl:ExecuteRequest",
+  "pure_protocol_tests": 15,
+  "sdk_parameter_api": {
+    "assembly": "Altium.SDK.dll",
+    "type": "DXP.ParameterList",
+    "members": [
+      {
+        "name": ".ctor(string parametersString)",
+        "metadata_signature": "2001010E"
+      },
+      {
+        "name": "get_Count() : int",
+        "metadata_signature": "200008"
+      },
+      {
+        "name": "GetParameterValue(string name) : string",
+        "metadata_signature": "20010E0E"
+      }
+    ],
+    "qualification": "Metadata observed and compiler resolved; runtime parsing via new process not qualified"
+  },
+  "source_urls": [
+    "https://www.altium.com/documentation/altium-designer/scripting/running-scripts",
+    "https://www.altium.com/documentation/altium-dxp-developer/system-api"
+  ],
+  "cli_boundary": "The -RServer:Process(Name=Value|Name=Value) framing is used by the existing qualified local RunScript launcher. New process delivery needs a native read-only probe; no official command-line guarantee inferred from the parameter-buffer documentation.",
+  "artifacts": [
+    {
+      "path": "dev/native_situs_next/build/NativeSitusControl.dll",
+      "size_bytes": 49152,
+      "sha256": "42cecbd3b6f1a7108d33d969c24f3a197b5c6839218b73f9538733bd8e00c7f3"
+    },
+    {
+      "path": "dev/native_situs_next/NativeSitusControl.ins",
+      "size_bytes": 310,
+      "sha256": "4fe5777bddb0f169dade363149123c34c5dad3aa0d4eb8dcc50643144646722a"
+    },
+    {
+      "path": "dev/native_situs_next/NativeSitusControl.rcs",
+      "size_bytes": 162,
+      "sha256": "f3d42f85c9d2c361131ab7f6cbc1070324e6856d44ee7e117e04721fccaca766"
+    }
+  ]
+}

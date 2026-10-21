@@ -1,4 +1,4 @@
-"""Stage the reviewed read-only Situs prototype; never launch or call Altium."""
+"""Stage a fixed reviewed native Situs bundle; never launch or call Altium."""
 from __future__ import annotations
 
 import hashlib
@@ -18,9 +18,29 @@ REVIEWED = (
      "81f90d23cba3e48048f2f95dcd74ce17be21990c5efd27828807b258c9b9b40e"),
 )
 
+CONTROL_REVIEWED = (
+    ("NativeSitusControl.dll", "build/NativeSitusControl.dll", 49152,
+     "42cecbd3b6f1a7108d33d969c24f3a197b5c6839218b73f9538733bd8e00c7f3"),
+    ("NativeSitusControl.ins", "NativeSitusControl.ins", 310,
+     "4fe5777bddb0f169dade363149123c34c5dad3aa0d4eb8dcc50643144646722a"),
+    ("NativeSitusControl.rcs", "NativeSitusControl.rcs", 162,
+     "f3d42f85c9d2c361131ab7f6cbc1070324e6856d44ee7e117e04721fccaca766"),
+)
+REVIEWED_BUNDLES = {
+    "readonly": ("native_situs", REVIEWED),
+    "native_control": ("native_situs_next", CONTROL_REVIEWED),
+}
 
-def _bundle_root():
-    return Path(__file__).resolve().parents[1] / "dev" / "native_situs"
+
+def _reviewed_bundle(bundle):
+    if not isinstance(bundle, str) or bundle not in REVIEWED_BUNDLES:
+        raise ValueError("bundle must be readonly or native_control")
+    return REVIEWED_BUNDLES[bundle]
+
+
+def _bundle_root(bundle="readonly"):
+    directory, _ = _reviewed_bundle(bundle)
+    return Path(__file__).resolve().parents[1] / "dev" / directory
 
 
 def _sha(data):
@@ -48,7 +68,8 @@ def _plain_path(path):
     return path.resolve()
 
 
-def _snapshot(exe, exchange_dir):
+def _snapshot(exe, exchange_dir, bundle="readonly"):
+    _, reviewed = _reviewed_bundle(bundle)
     executable = _plain_path(exe)
     exchange = _plain_path(exchange_dir)
     if executable.name.casefold() != "x2.exe" or not executable.is_file():
@@ -59,8 +80,8 @@ def _snapshot(exe, exchange_dir):
     if not system.is_dir():
         raise ValueError("Configured executable/System directory must exist")
     files, payloads = [], {}
-    for name, relative, size, digest in REVIEWED:
-        source = _plain_path(_bundle_root() / relative)
+    for name, relative, size, digest in reviewed:
+        source = _plain_path(_bundle_root(bundle) / relative)
         if not source.is_file() or source.stat().st_size != size:
             raise ValueError("Reviewed bundled artifact size mismatch: " + name)
         content = source.read_bytes()
@@ -72,7 +93,7 @@ def _snapshot(exe, exchange_dir):
         files.append(dict(name=name, source=str(source), target=str(target),
                           size=size, sha256=digest, target_exists=target.exists()))
         payloads[name] = content
-    snapshot = dict(schema_version=1, configured_exe=str(executable),
+    snapshot = dict(schema_version=1, bundle=bundle, configured_exe=str(executable),
                     executable_sha256=_sha(executable.read_bytes()),
                     target_system=str(system), exchange_directory=str(exchange), files=files,
                     registry_modified=False, dependencies_copied=False,
@@ -80,11 +101,11 @@ def _snapshot(exe, exchange_dir):
     return snapshot, payloads
 
 
-def inspect(exe, exchange_dir):
+def inspect(exe, exchange_dir, bundle="readonly"):
     """Return a hash-bound review plan; creates no files."""
     try:
-        snapshot, _ = _snapshot(exe, exchange_dir)
-        return dict(success=True, action="inspect", plan=snapshot,
+        snapshot, _ = _snapshot(exe, exchange_dir, bundle)
+        return dict(success=True, action="inspect", bundle=bundle, plan=snapshot,
                     plan_sha256=_sha(_canonical_json(snapshot).encode("ascii")),
                     can_install=not any(f["target_exists"] for f in snapshot["files"]),
                     installed=False, runtime_qualified=False)
@@ -147,7 +168,7 @@ def _rollback(owned, system):
     return results
 
 
-def install(exe, exchange_dir, expected_plan_sha256, operation_id=""):
+def install(exe, exchange_dir, expected_plan_sha256, operation_id="", bundle="readonly"):
     """Install exactly the reviewed three files; never overwrite or restart.
 
     The caller serializes this operation with its existing bridge lock.
@@ -161,13 +182,15 @@ def install(exe, exchange_dir, expected_plan_sha256, operation_id=""):
                   dependencies_copied=False, retry_allowed=False)
     owned, folder = [], None
     try:
+        _reviewed_bundle(bundle)
+        result["bundle"] = bundle
         if not isinstance(expected_plan_sha256, str) or re.fullmatch("[0-9a-f]{64}", expected_plan_sha256) is None:
             raise ValueError("Exact inspect plan SHA-256 required")
         operation_id = uuid.uuid4().hex if operation_id == "" else operation_id
         if not isinstance(operation_id, str) or re.fullmatch("[0-9a-f]{32}", operation_id) is None:
             raise ValueError("operation_id must be 32 lowercase hex characters")
         result["operation_id"] = operation_id
-        snapshot, payloads = _snapshot(exe, exchange_dir)
+        snapshot, payloads = _snapshot(exe, exchange_dir, bundle)
         actual = _sha(_canonical_json(snapshot).encode("ascii"))
         if actual != expected_plan_sha256:
             raise ValueError("Inspect plan changed; no files installed")

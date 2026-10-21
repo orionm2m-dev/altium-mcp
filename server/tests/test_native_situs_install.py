@@ -11,6 +11,8 @@ import native_situs_install as installer
 
 
 class InstallerTests(unittest.TestCase):
+    bundle_name = "readonly"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -23,23 +25,29 @@ class InstallerTests(unittest.TestCase):
         self.system.mkdir()
         self.exchange = self.root / "exchange"
         self.exchange.mkdir()
-        self.bundle = self.root / "bundle"
-        (self.bundle / "build").mkdir(parents=True)
-        real_bundle = installer._bundle_root()
-        for _, relative, _, _ in installer.REVIEWED:
-            (self.bundle / relative).write_bytes((real_bundle / relative).read_bytes())
-        self.patch = patch.object(installer, "_bundle_root", return_value=self.bundle)
+        self.bundles = {}
+        for name, (_, reviewed) in installer.REVIEWED_BUNDLES.items():
+            directory = self.root / name
+            (directory / "build").mkdir(parents=True)
+            real_bundle = installer._bundle_root(name)
+            for _, relative, _, _ in reviewed:
+                (directory / relative).write_bytes((real_bundle / relative).read_bytes())
+            self.bundles[name] = directory
+        self.bundle = self.bundles[self.bundle_name]
+        self.reviewed = installer.REVIEWED_BUNDLES[self.bundle_name][1]
+        self.patch = patch.object(installer, "_bundle_root", side_effect=lambda bundle="readonly": self.bundles[bundle])
         self.patch.start()
         self.addCleanup(self.patch.stop)
         self.op = "a" * 32
 
     def plan(self):
-        value = installer.inspect(self.exe, self.exchange)
+        value = installer.inspect(self.exe, self.exchange, self.bundle_name)
         self.assertTrue(value["success"], value)
         return value
 
     def install(self, plan=None, **changes):
-        args = dict(expected_plan_sha256=(plan or self.plan())["plan_sha256"], operation_id=self.op)
+        args = dict(expected_plan_sha256=(plan or self.plan())["plan_sha256"], operation_id=self.op,
+                    bundle=self.bundle_name)
         args.update(changes)
         return installer.install(self.exe, self.exchange, **args)
 
@@ -47,6 +55,7 @@ class InstallerTests(unittest.TestCase):
         result = self.plan()
         self.assertTrue(result["can_install"])
         self.assertEqual(len(result["plan"]["files"]), 3)
+        self.assertEqual(result["plan"]["bundle"], self.bundle_name)
         self.assertEqual(list(self.system.iterdir()), [])
         self.assertEqual(list(self.exchange.iterdir()), [])
         self.assertFalse(result["installed"])
@@ -58,8 +67,9 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(result["installed"])
         self.assertFalse(result["native_action"])
         self.assertFalse(result["launch_requested"])
-        self.assertEqual({p.name for p in self.system.iterdir()}, {f[0] for f in installer.REVIEWED})
-        for name, relative, _, digest in installer.REVIEWED:
+        self.assertEqual(result["bundle"], self.bundle_name)
+        self.assertEqual({p.name for p in self.system.iterdir()}, {f[0] for f in self.reviewed})
+        for name, relative, _, digest in self.reviewed:
             self.assertEqual(installer._sha((self.system / name).read_bytes()), digest)
         folder = Path(result["receipt_directory"])
         intent = json.loads((folder / "intent.json").read_text())
@@ -68,7 +78,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(receipt["installed_files"], result["installed_files"])
 
     def test_target_conflict_never_overwrites_existing_file(self):
-        target = self.system / installer.REVIEWED[0][0]
+        target = self.system / self.reviewed[0][0]
         target.write_bytes(b"unrelated existing content")
         result = self.install()
         self.assertFalse(result["success"])
@@ -76,7 +86,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(len(list(self.system.iterdir())), 1)
 
     def test_directory_conflict_is_not_deleted(self):
-        target = self.system / installer.REVIEWED[1][0]
+        target = self.system / self.reviewed[1][0]
         target.mkdir()
         result = self.install()
         self.assertFalse(result["success"])
@@ -84,7 +94,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_stale_target_plan_does_not_touch_conflicting_file(self):
         plan = self.plan()
-        target = self.system / installer.REVIEWED[2][0]
+        target = self.system / self.reviewed[2][0]
         target.write_bytes(b"new")
         result = self.install(plan)
         self.assertFalse(result["success"])
@@ -99,15 +109,15 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(list(self.system.iterdir()), [])
 
     def test_unreviewed_source_bytes_refused(self):
-        source = self.bundle / installer.REVIEWED[0][1]
+        source = self.bundle / self.reviewed[0][1]
         data = source.read_bytes()
         source.write_bytes(b"x" + data[1:])
-        self.assertFalse(installer.inspect(self.exe, self.exchange)["success"])
+        self.assertFalse(installer.inspect(self.exe, self.exchange, self.bundle_name)["success"])
         self.assertEqual(list(self.system.iterdir()), [])
 
     def test_missing_source_refused(self):
-        (self.bundle / installer.REVIEWED[1][1]).unlink()
-        self.assertFalse(installer.inspect(self.exe, self.exchange)["success"])
+        (self.bundle / self.reviewed[1][1]).unlink()
+        self.assertFalse(installer.inspect(self.exe, self.exchange, self.bundle_name)["success"])
 
     def test_invalid_plan_and_operation_id_refused(self):
         for change in (dict(expected_plan_sha256="x"), dict(operation_id="../bad"),
@@ -151,8 +161,8 @@ class InstallerTests(unittest.TestCase):
         with patch.object(installer, "_publish", side_effect=race):
             result = self.install()
         self.assertFalse(result["success"])
-        self.assertEqual((self.system / installer.REVIEWED[1][0]).read_bytes(), b"other writer")
-        self.assertFalse((self.system / installer.REVIEWED[0][0]).exists())
+        self.assertEqual((self.system / self.reviewed[1][0]).read_bytes(), b"other writer")
+        self.assertFalse((self.system / self.reviewed[0][0]).exists())
 
     def test_changed_owned_content_is_preserved_on_rollback(self):
         original = installer._publish
@@ -168,7 +178,7 @@ class InstallerTests(unittest.TestCase):
             result = self.install()
         self.assertFalse(result["success"])
         self.assertTrue(result["partial_files_remaining"])
-        self.assertEqual((self.system / installer.REVIEWED[0][0]).read_bytes(), b"external modification")
+        self.assertEqual((self.system / self.reviewed[0][0]).read_bytes(), b"external modification")
         self.assertEqual(result["rollback"][0]["status"], "preserved")
 
     def test_repeated_operation_id_is_never_replayed(self):
@@ -183,7 +193,7 @@ class InstallerTests(unittest.TestCase):
         publish.assert_not_called()
 
     def test_partial_write_owned_bytes_can_be_rolled_back(self):
-        target = self.system / installer.REVIEWED[0][0]
+        target = self.system / self.reviewed[0][0]
         content = b"abcdef"
         with target.open("xb", buffering=0) as stream:
             stream.write(content[:3])
@@ -194,7 +204,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(target.exists())
 
     def test_identity_change_preserves_target(self):
-        target = self.system / installer.REVIEWED[0][0]
+        target = self.system / self.reviewed[0][0]
         target.write_bytes(b"same")
         result = installer._rollback([dict(path=target, identity=(-1, -1), written=4, content=b"same")], self.system.resolve())
         self.assertEqual(result[0]["status"], "preserved")
@@ -237,6 +247,60 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("reparse", result["error"])
         resolve.assert_not_called()
+
+
+class NativeControlInstallerTests(InstallerTests):
+    bundle_name = "native_control"
+
+    def test_old_default_bundle_remains_readonly(self):
+        result = installer.inspect(self.exe, self.exchange)
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["bundle"], "readonly")
+        self.assertEqual({f["name"] for f in result["plan"]["files"]},
+                         {f[0] for f in installer.REVIEWED})
+
+    def test_plan_from_other_bundle_is_refused_without_writes(self):
+        readonly = installer.inspect(self.exe, self.exchange)
+        control = self.plan()
+        self.assertNotEqual(readonly["plan_sha256"], control["plan_sha256"])
+        for bundle, plan in (("native_control", readonly), ("readonly", control)):
+            result = installer.install(self.exe, self.exchange, plan["plan_sha256"], self.op, bundle)
+            self.assertFalse(result["success"])
+        self.assertEqual(list(self.system.iterdir()), [])
+        self.assertEqual(list(self.exchange.iterdir()), [])
+
+    def test_fixed_bundles_coexist_without_replacing_old_module(self):
+        old = installer.inspect(self.exe, self.exchange)
+        installed_old = installer.install(self.exe, self.exchange, old["plan_sha256"], "b" * 32)
+        self.assertTrue(installed_old["success"], installed_old)
+        old_bytes = {f[0]: (self.system / f[0]).read_bytes() for f in installer.REVIEWED}
+        control = self.install()
+        self.assertTrue(control["success"], control)
+        self.assertEqual(len(list(self.system.iterdir())), 6)
+        for name, content in old_bytes.items():
+            self.assertEqual((self.system / name).read_bytes(), content)
+
+    def test_invalid_bundle_never_reads_source_or_creates_files(self):
+        for invalid in ("", "../native_situs_next", "Native_Control", "other", None, [], 1):
+            with patch.object(installer, "_bundle_root") as source:
+                read = installer.inspect(self.exe, self.exchange, invalid)
+                write = installer.install(self.exe, self.exchange, "a" * 64, self.op, invalid)
+                self.assertFalse(read["success"])
+                self.assertFalse(write["success"])
+                source.assert_not_called()
+        self.assertEqual(list(self.system.iterdir()), [])
+        self.assertEqual(list(self.exchange.iterdir()), [])
+
+    def test_reused_operation_id_across_bundles_is_not_replayed(self):
+        old = installer.inspect(self.exe, self.exchange)
+        with patch.object(installer, "_publish", side_effect=OSError("first attempt stopped")):
+            first = installer.install(self.exe, self.exchange, old["plan_sha256"], self.op)
+        self.assertFalse(first["success"])
+        with patch.object(installer, "_publish") as publish:
+            result = self.install()
+        self.assertFalse(result["success"])
+        publish.assert_not_called()
+        self.assertEqual(list(self.system.iterdir()), [])
 
 class PublicInstallerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -289,14 +353,16 @@ class PublicInstallerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].name, "stage_situs_native_extension")
         self.assertEqual(set(tools[0].inputSchema["properties"]),
-                         {"action", "expected_plan_sha256", "operation_id"})
+                         {"action", "expected_plan_sha256", "operation_id", "bundle"})
         self.assertEqual(tools[0].inputSchema["required"], ["action"])
+        self.assertEqual(tools[0].inputSchema["properties"]["bundle"]["default"], "readonly")
 
     async def test_inspect_uses_configured_paths_and_background_thread_inside_claim(self):
         import threading
         main_thread = threading.get_ident()
-        def inspect(exe, exchange):
+        def inspect(exe, exchange, bundle):
             self.assertEqual((exe, exchange), (self.exe, self.exchange))
+            self.assertEqual(bundle, "readonly")
             self.assertTrue(self.lock.locked())
             self.assertTrue(self.claim_active)
             self.assertNotEqual(threading.get_ident(), main_thread)
@@ -312,7 +378,7 @@ class PublicInstallerTests(unittest.IsolatedAsyncioTestCase):
         def install(*args):
             self.assertTrue(self.lock.locked())
             self.assertTrue(self.claim_active)
-            self.assertEqual(args, (self.exe, self.exchange, "a" * 64, "b" * 32))
+            self.assertEqual(args, (self.exe, self.exchange, "a" * 64, "b" * 32, "readonly"))
             return dict(success=True, installed=True, native_action=False)
         with patch.object(installer, "install", side_effect=install) as run:
             result = await self.call(dict(action="install", expected_plan_sha256="a" * 64,
@@ -320,6 +386,23 @@ class PublicInstallerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["installed"])
         self.assertFalse(result["native_action"])
         run.assert_called_once()
+
+    async def test_explicit_control_bundle_forwarded_without_path_input(self):
+        with patch.object(installer, "inspect", return_value=dict(success=True, installed=False)) as read:
+            await self.call(dict(action="inspect", bundle="native_control"))
+        read.assert_called_once_with(self.exe, self.exchange, "native_control")
+        with patch.object(installer, "install", return_value=dict(success=True, installed=True)) as write:
+            await self.call(dict(action="install", bundle="native_control", expected_plan_sha256="a" * 64,
+                                 operation_id="b" * 32))
+        write.assert_called_once_with(self.exe, self.exchange, "a" * 64, "b" * 32, "native_control")
+
+    async def test_unknown_bundle_never_claims_or_dispatches_backend(self):
+        with patch.object(installer, "inspect") as read, patch.object(installer, "install") as write:
+            result = await self.call(dict(action="install", bundle="../native_situs_next"))
+        self.assertFalse(result["success"])
+        self.assertEqual(self.claim_calls, [])
+        read.assert_not_called()
+        write.assert_not_called()
 
     async def test_invalid_action_never_claims_or_dispatches_backend(self):
         with patch.object(installer, "inspect") as read, patch.object(installer, "install") as write:

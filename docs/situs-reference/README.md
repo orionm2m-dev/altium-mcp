@@ -78,3 +78,5 @@ for the fixed reviewed DLL/INS/RCS prototype. It requires a fresh matching plan,
 refuses existing targets, and records verified hashes with partial-failure rollback.
 Staging does not load or qualify the extension. See
 [native-extension-staging.md](native-extension-staging.md).
+
+The compiled active-board settings candidate has a dedicated [native strategy contract](native-strategy-settings-contract.md). Its runtime qualification remains separate from offline tests.
