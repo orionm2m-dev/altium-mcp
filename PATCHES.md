@@ -1,5 +1,18 @@
 # Changes
 
+## 2026-10-21 — Resume a completed Stop without dispatching it again
+
+Added `resume_completed_stop` for an exact `blocked_after_stop` token with one
+persisted successful Stop-launch exit. Successful normal-start evidence is
+matched to the pinned current process, while old PID-only identity/delivery
+limits remain explicit. Under both recovery locks, guarded focus is followed by
+one private single-use capability and the existing unique probe path. Unknown,
+stale, changed or active-launcher evidence is refused; no manual-stop claim,
+latch deletion, repeated Stop or document mutation is introduced. Mocked tests
+cover one probe, invalid/stale identities, focus and receipt races, active PIDs,
+capability reuse, cancellation and failed-probe latching.
+
+
 ## 2026-10-21 — Accept the observed unowned AD26 framework shell
 
 AD26 also presents an unowned `TDocumentForm` alongside one unowned, empty-title

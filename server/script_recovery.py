@@ -383,7 +383,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
             return _blocked(old, reason)
     if verified_stop is not None:
         from pending_stop_wizard_resume import _VerifiedPendingStop
-        if (not isinstance(verified_stop, _VerifiedPendingStop)
+        from completed_stop_resume import _VerifiedCompletedStop
+        if (not isinstance(verified_stop, (_VerifiedPendingStop, _VerifiedCompletedStop))
                 or manual_stop_confirmed or fresh_emergency):
             return _blocked(old or {}, "Invalid internal verified-Stop capability")
     pending = []
@@ -491,6 +492,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                 except (OSError, ValueError):
                     outcome = None  # File may still be being written.
                 if outcome == {"probe": "executor ok", "token": token}:
+                    if verified_stop is not None and hasattr(verified_stop, "validate_after_probe"):
+                        verified_stop.validate_after_probe(exe, exchange_dir, state)
                     state["phase"] = "recovered"
                     _write_state(exchange_dir, state)
                     return {"recovered": True, "blocked": False, "probe": outcome,

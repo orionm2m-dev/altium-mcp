@@ -1442,6 +1442,33 @@ async def cancel_import_wizard_and_resume_pending_stop(
 
 
 @mcp.tool()
+async def resume_completed_stop(ctx: Context, target_pid: int, recovery_token: str,
+                                timeout_seconds: int = 30,
+                                dispatch_timeout_seconds: int = 8) -> str:
+    """Focus the recorded main session and probe after one already completed Stop.
+
+    Requires the exact blocked_after_stop token, one persisted successful Stop
+    exit, a matching successful normal-start process identity, and no active or
+    uncertain launcher. Restores/focuses the guarded main window, then permits
+    one unique read-only probe. No repeated Stop, manual-stop assertion, latch
+    deletion, document save, process termination or mutation replay. Historical
+    PID-only Stop identity and delivery remain explicitly unverified; only a
+    matching fresh probe establishes executor availability, not PCB idle.
+    """
+    import completed_stop_resume
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = await completed_stop_resume.resume_locked(
+                    altium_bridge.config.altium_exe_path, EXCHANGE_DIR, target_pid,
+                    recovery_token, timeout_seconds, dispatch_timeout_seconds)
+        except OSError as error:
+            outcome = {"recovered": False, "blocked": True, "error": str(error),
+                       "stop_redispatched": False, "manual_stop_confirmed": False}
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
 async def start_altium(ctx: Context) -> str:
     """Explicit normal cold start of the configured executable only.
 

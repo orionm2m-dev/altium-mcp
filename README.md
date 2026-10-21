@@ -137,6 +137,27 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Continue after an already completed Stop
+
+`resume_completed_stop(target_pid, recovery_token, timeout_seconds=30,
+dispatch_timeout_seconds=8)` handles a `blocked_after_stop` checkpoint whose one
+Stop launcher already returned exit code zero. It verifies that exact token,
+the successful normal-start receipt, current configured process identity and
+receipt chronology; active, uncertain or reused live launcher PIDs are refused.
+It restores the guarded main window to foreground and allows one fresh unique
+read-only probe through the existing recovery path. It never dispatches another
+Stop, asserts manual confirmation, deletes a recovery latch, saves a document or
+replays a mutation. Only the matching new probe result marks recovery complete.
+
+The old PID-only Stop receipt proves recorded launcher completion, not delivery
+of Stop or historical process-creation identity; these limits remain explicit
+in the result. Failed focus leaves the original latch unchanged. Failed/cancelled
+probe remains blocked. The bridge lock and OS claim cover the entire operation.
+
+```powershell
+python -m unittest discover -s server/tests -p test_completed_stop_resume.py -v
+```
+
 ## Available Tools
 
 The server provides several tools to interact with Altium Designer:
