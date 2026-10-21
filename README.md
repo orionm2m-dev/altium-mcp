@@ -120,6 +120,9 @@ fixed reviewed extension files in the configured Altium System directory.
 It never replaces files or launches/restarts Altium. Installation receipts
 verify staged bytes; extension loading and native operation remain separate
 qualification steps. See the [staging contract](docs/situs-reference/native-extension-staging.md).
+The installed prototype passed three native read commands on AD26.9.1: Heartbeat,
+command-state readback and typed board-capability readback. Strategy read/write
+and progress remain unqualified; see the [native module contract](docs/situs-reference/native-module-contract.md).
 
 ### Explicit window focus
 

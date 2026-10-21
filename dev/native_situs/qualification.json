@@ -1,5 +1,5 @@
 {
-  "status": "COMPILED_NOT_LOADED",
+  "status": "LOADED_THREE_READ_COMMANDS_VERIFIED",
   "purpose": "Read-only bootstrap/command-state qualification; not full Situs support",
   "bootstrap": "CSharpPlugin.PluginFactory.InvokePluginFactory(DXP.IClient) -> DXP.ServerModule subclass",
   "bootstrap_evidence": [
@@ -30,16 +30,17 @@
   "routing_dispatch": false,
   "document_save": false,
   "ui_automation": false,
-  "installed": false,
-  "loaded": false,
-  "load_qualification": "First invoke Heartbeat only, then read command states. Each call uses a new receipt id. Loading requires separate reviewed installation and load qualification.",
+  "installed": true,
+  "loaded": true,
+  "load_qualification": "On Altium Designer 26.9.1, the installed module was loaded after a normal restart and all three read-only commands produced fresh correlated successful receipts. Source commit f03ded1; exact binary hash recorded below. This is not full Situs support.",
   "unload": "No background threads, timers or IPC listeners. Installed managed DXP.IClient.StopServer is bool(string moduleName, bool unloadFlag), not the legacy one-argument signature; second-argument semantics must be verified before any use. A normal close of the exact managed Altium session after unsaved-document review remains the fallback before exact-file removal. No blanket termination.",
   "compile": "Uses local Roslyn csc.dll and installed AD26 .NET 8 runtime reference metadata, no package download. build.ps1 arguments specify AltiumSystem and CompilerPath; no private paths in source.",
   "missing_runtime_evidence": [
-    "first-party bootstrap shape is observed, not yet verified for this DLL",
-    "native command-state call on this server untested",
-    "concurrent control/progress not implemented",
-    "Typed EDP interface acquisition and SitusStrategyValid are not runtime-qualified"
+    "Native strategy content read/write and other EDP interface members",
+    "Pass order/repetition, via effort, orthogonal preference and layer directions",
+    "Rip-up settings and native router start/pause/resume/stop/reset execution",
+    "Concurrent control and progress reporting",
+    "Hot registration, unload and other Altium versions"
   ],
   "edp_capability_probe": {
     "assembly": "Altium.Edp.Interfaces.dll",
@@ -48,8 +49,53 @@
     "guid": "C2A6A58A-7C6A-415F-B935-40BD7CFFA5CA",
     "acquisition": "Internal_GetCurrentPCBBoard object, safe as IPCB_Board with exact path, then safe as IPCB_Board_SaveLoadParameters; no pointer casts",
     "read_only_call": "SitusStrategyValid only after interface capability check",
-    "boundary": "Installed EDP metadata is not a proven public SDK acquisition contract; null is reported without fallback"
+    "boundary": "Safe typed interface acquisition and SitusStrategyValid=true were observed on AD26.9.1. This does not establish a public SDK contract for every EDP member or qualify setters."
   },
   "error_receipt": "Exceptions return a failure JSON in ref parameters; no modal or retry; file may be absent on a guard/query failure.",
-  "registration_boundary": "INS/RCS syntax matches observed first-party files. A supported registration package/Developer-install route has not been exercised; no hot registration is established. Client.StartServer requires a known registered server. Install/load and possible required restart remain separate runtime qualification."
+  "registration_boundary": "The installed INS/RCS bootstrap and native known-server loading were exercised after a normal restart on AD26.9.1. Hot registration, Developer/EPD package installation and unloading remain unqualified.",
+  "full_situs_support": false,
+  "native_only_policy": "Missing operations require application-native interfaces through MCP or the native module. No Windows UIA, focus, synthesized input or window/button-message fallback, including modal dialogs.",
+  "runtime_qualification": {
+    "checked_date": "2026-10-21",
+    "altium_version": "26.9.1",
+    "source_commit": "f03ded1",
+    "dll_sha256": "cf4f117c9b8c3cafca29d4a09c4a4149ea99ec809cdf7c847f75ede1242d6b64",
+    "scope": "Three read-only commands on one pinned process and exact active PCB; not full Situs support",
+    "process_identity_verified": true,
+    "fresh_correlated_receipts": true,
+    "commands": [
+      {
+        "command": "NativeSitusReadOnly:Heartbeat",
+        "result": "PASS",
+        "verified": "Loaded module execution and receipt creation"
+      },
+      {
+        "command": "NativeSitusReadOnly:ReadCommandState",
+        "result": "PASS",
+        "verified": "Native state queries for Start, Setup, Pause, Stop and Reset; no action launched",
+        "observed_enabled": [
+          "Start",
+          "Setup",
+          "Reset"
+        ],
+        "observed_disabled": [
+          "Pause",
+          "Stop"
+        ],
+        "all_visible": true,
+        "all_checked": false,
+        "boundary": "Observed command flags do not qualify routing lifecycle or progress"
+      },
+      {
+        "command": "NativeSitusReadOnly:ReadBoardCapabilities",
+        "result": "PASS",
+        "board_save_load_parameters_supported": true,
+        "situs_strategy_valid": true,
+        "boundary": "Typed acquisition and this query only; strategy contents and mutations unqualified"
+      }
+    ],
+    "evidence": "Full correlated native receipts retained in the local runtime audit; private project paths and process identifiers are not distributed",
+    "payload_runtime_qualified_field": false,
+    "payload_field_interpretation": "The unchanged prototype reports runtime_qualified:false conservatively. This external record qualifies only the listed command paths, exact binary and observed version; it is not a full-module capability claim."
+  }
 }
