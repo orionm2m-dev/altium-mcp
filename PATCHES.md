@@ -1,5 +1,15 @@
 # Changes
 
+## 2026-10-21 — Address observed TXPBitBtn controls with one client message pair
+
+A native Situs OK BM_CLICK was queued but left the dialog open. TXPBitBtn now
+uses one control-client-center WM_LBUTTONDOWN/UP pair; standard buttons retain
+BM_CLICK. Exact button, pinned dialog/main and client bounds are rechecked before
+each message. There is no global input, screen positioning or automatic retry.
+Attempted/posted counts and partial delivery remain separate from completion.
+Mocked tests cover the pair, unchanged standard buttons, invalid bounds, partial
+post failure and identity change between messages.
+
 ## 2026-10-21 — Narrow inspection and button control for Situs Setup
 
 Added `control_situs_setup` with inspect/OK/Cancel/Route All only. Process identity,

@@ -1,4 +1,4 @@
-"""Exact Situs setup inspection and one whitelisted button message."""
+"""Exact Situs setup inspection and one whitelisted control gesture."""
 import win32gui
 import win32process
 from screenshot_target import CaptureTarget
@@ -53,6 +53,8 @@ def _buttons(target):
 def control(exe, action, target_hwnd, expected_main_title):
     result = {"success": False, "action": action, "button_message_attempted": False,
         "button_message_posted": False, "completion_verified": False, "script_dispatched": False,
+        "message_pair_attempted": False, "message_pair_posted": False,
+        "messages_attempted": 0, "messages_posted": 0, "planned_messages": 0,
         "document_save_requested": False, "retry_performed": False,
         "document_binding": "exact main-window title (filename only); full path is not verified"}
     target = None
@@ -76,16 +78,36 @@ def control(exe, action, target_hwnd, expected_main_title):
         if len(selected) != 1:
             raise ValueError("Exactly one visible enabled whitelisted action button is required")
         button = selected[0]
-        if _button(target, button["hwnd"]) != button or _main(target, expected_main_title) != main:
-            raise ValueError("Button or main window changed before dispatch")
-        target.verify()
-        result.update(button=button, button_message_attempted=True)
-        win32gui.PostMessage(button["hwnd"], 0x00F5, 0, 0)  # One BM_CLICK; no fallback gesture.
-        return dict(result, success=True, button_message_posted=True,
-            outcome="button message posted; inspect subsequent UI to establish completion")
+        pair = button["class"] == "TXPBitBtn"
+        messages = [(0x00F5, 0, 0)]  # BM_CLICK for standard/VCL buttons that support it.
+        rect = None
+        if pair:
+            rect = tuple(win32gui.GetClientRect(button["hwnd"]))
+            left, top, right, bottom = rect
+            x, y = (left + right) // 2, (top + bottom) // 2
+            if (right <= left or bottom <= top or not 0 <= x <= 32767 or not 0 <= y <= 32767):
+                raise ValueError("TXPBitBtn has invalid control-client bounds")
+            position = x | (y << 16)
+            messages = [(0x0201, 1, position), (0x0202, 0, position)]
+            result.update(control_client_rect=list(rect), control_client_point=[x, y])
+        result.update(button=button, dispatch_method="control_client_down_up" if pair else "bm_click",
+            planned_messages=len(messages))
+        for message, keys, position in messages:
+            if (_button(target, button["hwnd"]) != button or _main(target, expected_main_title) != main
+                    or (pair and tuple(win32gui.GetClientRect(button["hwnd"])) != rect)):
+                raise ValueError("Button or main window changed before control message")
+            target.verify()
+            result.update(button_message_attempted=True, message_pair_attempted=pair)
+            result["messages_attempted"] += 1
+            win32gui.PostMessage(button["hwnd"], message, keys, position)
+            result["messages_posted"] += 1
+        return dict(result, success=True, button_message_posted=True, message_pair_posted=pair,
+            partial_dispatch=False,
+            outcome="control message(s) posted; inspect subsequent UI to establish completion")
     except Exception as error:
         return dict(result, error=str(error), blocked=not result["button_message_attempted"],
-            outcome_unknown=result["button_message_attempted"])
+            outcome_unknown=result["button_message_attempted"],
+            partial_dispatch=0 < result["messages_posted"] < result["planned_messages"])
     finally:
         if target is not None:
             target.close()

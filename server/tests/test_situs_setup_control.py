@@ -32,6 +32,7 @@ class SitusTests(unittest.TestCase):
         self.gui = Mock()
         self.gui.EnumChildWindows.side_effect = lambda hwnd, callback, data: [callback(h, data) for h in self.rows]
         self.gui.IsChild.return_value = True
+        self.gui.GetClientRect.return_value = (0, 0, 100, 20)
         self.gui.GetClassName.side_effect = lambda hwnd: self.rows[hwnd]["class"]
         self.gui.GetWindowText.side_effect = lambda hwnd: self.rows[hwnd]["text"]
         self.gui.IsWindowVisible.side_effect = lambda hwnd: self.rows[hwnd]["visible"]
@@ -54,7 +55,7 @@ class SitusTests(unittest.TestCase):
         self.gui.PostMessage.assert_not_called()
         self.target.close.assert_called_once()
 
-    def test_ok_and_cancel_post_exactly_one_message_without_completion_claim(self):
+    def test_custom_ok_pair_and_standard_cancel_message_without_completion_claim(self):
         for action, hwnd in [("ok", 11), ("cancel", 12)]:
             with self.subTest(action=action):
                 self.gui.PostMessage.reset_mock()
@@ -62,14 +63,21 @@ class SitusTests(unittest.TestCase):
                 self.assertTrue(result["success"], result)
                 self.assertTrue(result["button_message_posted"])
                 self.assertFalse(result["completion_verified"])
-                self.gui.PostMessage.assert_called_once_with(hwnd, 0xF5, 0, 0)
+                if action == "ok":
+                    self.assertEqual([c.args for c in self.gui.PostMessage.call_args_list],
+                        [(hwnd, 0x201, 1, 50 | (10 << 16)), (hwnd, 0x202, 0, 50 | (10 << 16))])
+                    self.assertTrue(result["message_pair_posted"])
+                    self.assertEqual(result["messages_posted"], 2)
+                else:
+                    self.gui.PostMessage.assert_called_once_with(hwnd, 0xF5, 0, 0)
+                    self.assertFalse(result["message_pair_attempted"])
         self.gui.SetForegroundWindow.assert_not_called()
         self.gui.SendMessage.assert_not_called()
 
     def test_route_all_requires_observed_live_button(self):
         self.assertTrue(self.call("route_all")["blocked"])
         self.gui.PostMessage.assert_not_called()
-        self.rows[14] = dict(self.rows[11], text="Route All")
+        self.rows[14] = dict(self.rows[11], text="Route All", **{"class": "TButton"})
         result = self.call("route_all")
         self.assertTrue(result["success"], result)
         self.gui.PostMessage.assert_called_once_with(14, 0xF5, 0, 0)
@@ -112,6 +120,32 @@ class SitusTests(unittest.TestCase):
         self.target.api.title.side_effect = [TITLE, TITLE, "Other.PcbDoc"]
         self.assertTrue(self.call("ok")["blocked"])
         self.gui.PostMessage.assert_not_called()
+
+    def test_invalid_client_rect_blocks_without_any_message(self):
+        for rect in [(0, 0, 0, 20), (0, 0, 100, 0), (0, 0, 100000, 20)]:
+            self.gui.GetClientRect.return_value = rect
+            self.assertTrue(self.call("ok")["blocked"])
+        self.gui.PostMessage.assert_not_called()
+
+    def test_second_message_failure_reports_partial_pair_without_retry(self):
+        self.gui.PostMessage.side_effect = [None, OSError("up failed")]
+        result = self.call("ok")
+        self.assertFalse(result["success"])
+        self.assertTrue(result["message_pair_attempted"])
+        self.assertFalse(result["message_pair_posted"])
+        self.assertTrue(result["partial_dispatch"])
+        self.assertEqual((result["messages_attempted"], result["messages_posted"]), (2, 1))
+        self.assertEqual(self.gui.PostMessage.call_count, 2)
+
+    def test_identity_change_after_down_refuses_up(self):
+        def down(*args):
+            self.rows[11]["text"] = "Changed"
+        self.gui.PostMessage.side_effect = down
+        result = self.call("ok")
+        self.assertFalse(result["success"])
+        self.assertTrue(result["partial_dispatch"])
+        self.assertEqual((result["messages_attempted"], result["messages_posted"]), (1, 1))
+        self.gui.PostMessage.assert_called_once()
 
     def test_post_failure_is_not_retried_and_completion_stays_unknown(self):
         self.gui.PostMessage.side_effect = OSError("Cannot queue")

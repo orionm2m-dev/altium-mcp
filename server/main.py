@@ -1387,14 +1387,16 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 @mcp.tool()
 async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
                               expected_main_title: str) -> str:
-    """Inspect exact Situs Setup, or post one OK, Cancel or Route All button message.
+    """Inspect exact Situs Setup, or address one OK, Cancel or Route All control.
 
     Binds to the configured process, exact TSitusSetup HWND and exact main title
     containing the scratch PcbDoc filename. The title does not verify a full path.
     Inspect first to observe available buttons. Only a unique live same-process
     standard/VCL button with the requested whitelisted caption is eligible.
-    No keyboard, coordinates, checkbox changes, script dispatch, fallback or
-    retry. Posting is reported separately from unverified action completion.
+    TXPBitBtn uses one targeted client-center mouse-down/up message pair; other
+    supported buttons use BM_CLICK. No global mouse/keyboard, screen coordinates,
+    checkbox changes, script dispatch, fallback or retry. Each message is guarded;
+    partial posting is reported separately from unverified action completion.
     """
     import situs_setup_control
     async with altium_bridge._command_lock:

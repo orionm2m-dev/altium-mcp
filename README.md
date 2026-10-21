@@ -147,11 +147,14 @@ not full-path verification. Inspection lists same-process standard/VCL buttons
 and counts skipped foreign descendants such as embedded webviews.
 
 An action requires one visible enabled button with exactly the whitelisted
-caption, rechecked before one `PostMessage(BM_CLICK)`. No keyboard, coordinates,
-checkbox/settings changes, script, fallback gesture or retry is used. The result
-records message posting, with `completion_verified: false`; inspect the UI
-again before concluding that the dialog closed or routing began. Both bridge
-and OS recovery locks cover the operation; no recovery latch is changed.
+caption. `TXPBitBtn` uses one targeted `WM_LBUTTONDOWN`/`WM_LBUTTONUP` pair at the
+center of its `GetClientRect` bounds; other supported buttons use one `BM_CLICK`.
+Button, dialog, main title and bounds are rechecked before each message. No global
+mouse/keyboard, screen coordinates, checkbox/settings changes, script, fallback
+gesture or retry is used. Attempted/posted counts and a partial-pair flag preserve
+uncertain outcomes, with `completion_verified: false`; inspect the UI again
+before concluding the dialog closed or routing began. Both bridge and OS recovery
+locks cover the operation; no recovery latch is changed.
 
 ### Capture a specific observed Altium dialog
 
