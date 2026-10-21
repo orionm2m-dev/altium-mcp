@@ -1491,20 +1491,35 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 @mcp.tool()
 async def control_drc_setup(ctx: Context, action: str, target_hwnd: int,
-                            expected_main_title: str) -> str:
-    """Read the observed native Design Rule Checker dialog and all same-process children.
+                            expected_main_title: str, edit_hwnd: int | None = None,
+                            expected_limit: int | None = None, new_limit: int | None = None,
+                            button_hwnd: int | None = None) -> str:
+    """Inspect DRC Report Options, increase its result limit, or close with OK/Cancel.
 
-    Currently inspect only. Pins the configured process, exact TDesignRuleCheckForm
-    HWND and exact main title containing the scratch PcbDoc filename. Full document
-    path is not verified. Returns raw control classes, captions, HWNDs, parent,
-    geometry, styles and supported checkbox states. No focus, input, script, rule
-    change, DRC execution, document save or recovery-latch change. Read-only
-    inspection does not take the bridge command lock and can observe a modal
-    dialog while its opening native command is waiting.
+    Pins the configured process, exact TDesignRuleCheckForm HWND and exact main
+    title containing the scratch PcbDoc filename; full path is not verified.
+    inspect reads raw child inventory and the unique visible TXPSpinEdit through
+    bounded WM_GETTEXT. set_limit requires its observed edit_hwnd and expected_limit;
+    one WM_SETTEXT can only increase to <=100000, then verifies the field and that
+    all other controls stayed unchanged. ok additionally requires that expected
+    limit still reads back; ok/cancel require the exact observed button_hwnd.
+    Only one targeted button gesture, no global input or retries. No rule toggle,
+    Run button, script dispatch, document save or recovery change. Closure and
+    persistence require separate inspection/reopening. Read-only inspect avoids
+    the bridge lock; mutations are serialized and claim the emergency guard.
     """
     import drc_setup_control
-    return json.dumps(drc_setup_control.control(altium_bridge.config.altium_exe_path,
-        action, target_hwnd, expected_main_title), indent=2)
+    args = (altium_bridge.config.altium_exe_path, action, target_hwnd,
+            expected_main_title, edit_hwnd, expected_limit, new_limit, button_hwnd)
+    if action == "inspect":
+        return json.dumps(drc_setup_control.control(*args), indent=2)
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = drc_setup_control.control(*args)
+        except OSError as error:
+            outcome = {"success": False, "blocked": True, "error": str(error), "input_attempted": False}
+    return json.dumps(outcome, indent=2)
 
 
 @mcp.tool()
