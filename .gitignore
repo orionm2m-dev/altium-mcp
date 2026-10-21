@@ -12,6 +12,7 @@ wheels/
 *.log
 *.json
 !server/resources/**/*.json
+!docs/altium-api-reference/*.json
 *.png
 *.dxt
 

@@ -1,5 +1,10 @@
 # Development harness
 
+For official declarations and language boundaries, start with the local
+[Altium scripting API reference](../docs/altium-api-reference/README.md).
+Its documented catalog is separate from native qualification and the lint's
+negative compatibility evidence.
+
 ## Safety rules
 
 - **Never save anything on the N: drive.** It hosts the shared corporate

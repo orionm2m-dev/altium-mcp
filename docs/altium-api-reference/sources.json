@@ -1,0 +1,137 @@
+{
+  "edition": "2026-10-21.1",
+  "sources": [
+    {
+      "id": "pcb-system",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference",
+      "title": "PCB API System Interfaces reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2013-11-08",
+      "response_sha256": "b6a8b551ab32b46905e377002cdc7da8a1fdd72a85d761f570c14dd8ed074abf",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "pcb-objects",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-design-objects-interfaces-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-design-objects-interfaces-reference",
+      "title": "PCB API Design Objects Interfaces reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2018-10-22",
+      "response_sha256": "82046c7a26c4ca9d23a6469f43a071135c6a5fe4b0f7cb054d0f5761edd15b45",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "system",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/system-api",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/system-api",
+      "title": "System API",
+      "retrieved": "2026-10-21",
+      "page_updated": "2018-10-23",
+      "response_sha256": "f4d3adfa257d7b13d6c89795178cd9a5edf4e124ca76b57f5874bc2c22e2cb22",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "pcb-functions",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-functions-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-functions-reference",
+      "title": "PCB API Functions reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2013-11-08",
+      "response_sha256": "749fabf93f863613cee394b363050cc920d24ff0fd7ea1ee6e984545ed878667",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "pcb-types",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-types-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-types-reference",
+      "title": "PCB API Types reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2013-11-08",
+      "response_sha256": "c0190f2458aae1547fb2bf48dbdae55bb33f3107a57cec26d16985e15aa5c421",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "pcb-constants",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-constants-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-constants-reference",
+      "title": "PCB API Constants reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2013-11-08",
+      "response_sha256": "9ec160a2338b6874c6508a3befb8eb5599bd106f2bebadded9e41efdc9608eb4",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "script-differences",
+      "url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/delphi-differences",
+      "final_url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/delphi-differences",
+      "title": "Differences between DelphiScript and Delphi",
+      "retrieved": "2026-10-21",
+      "page_updated": "2021-07-23",
+      "response_sha256": "30213c91b5882d7d11420e689ecda1342cf98b129b28e3efcea41f4daeb154bb",
+      "status": "DOCUMENTED",
+      "documented_platform": "Altium Designer scripting documentation",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "script-functions",
+      "url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/functions",
+      "final_url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/functions",
+      "title": "Functions",
+      "retrieved": "2026-10-21",
+      "page_updated": "2021-07-14",
+      "response_sha256": "6ee8e74479ad1bd2fe5b220fb2cd4b343e49ff8062ae757ac67719ad191a9d80",
+      "status": "DOCUMENTED",
+      "documented_platform": "Altium Designer scripting documentation",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "script-keywords",
+      "url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/keywords",
+      "final_url": "https://www.altium.com/documentation/altium-designer/scripting/delphiscript/keywords",
+      "title": "Keywords",
+      "retrieved": "2026-10-21",
+      "page_updated": "2021-07-22",
+      "response_sha256": "592ab54f53803a8983c3f7f76e5e300c6da0dda48d2d51b471eeaacf27fa4ce6",
+      "status": "DOCUMENTED",
+      "documented_platform": "Altium Designer scripting documentation",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "script-examples",
+      "url": "https://www.altium.com/documentation/altium-designer/scripting/examples-reference",
+      "final_url": "https://www.altium.com/documentation/altium-designer/scripting/examples-reference",
+      "title": "Scripting Examples Reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2026-09-10",
+      "response_sha256": "66c1d9702a6eb73ad4f5b43e3c69a92e6febba7e8ef5138635a8d9d1bef3fd18",
+      "status": "DOCUMENTED",
+      "documented_platform": "Altium Designer scripting documentation",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    },
+    {
+      "id": "sdk-reference",
+      "url": "https://www.altium.com/documentation/altium-dxp-developer/delphi-sdk-reference",
+      "final_url": "https://www.altium.com/documentation/altium-dxp-developer/delphi-sdk-reference",
+      "title": "Delphi SDK Reference",
+      "retrieved": "2026-10-21",
+      "page_updated": "2018-02-26",
+      "response_sha256": "d3aaaaeb724c31b7a7ea79163324138c33db9cf8ffd1051e6e44734d9d4e0179",
+      "status": "DOCUMENTED",
+      "documented_platform": "Delphi SDK reference",
+      "local_storage": "Curated declarations and paraphrases only; full HTML not retained."
+    }
+  ]
+}
