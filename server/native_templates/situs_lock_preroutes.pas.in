@@ -5,17 +5,27 @@ begin
     if Value then Result := 'true' else Result := 'false';
 end;
 
-procedure SettingsReceipt(Stage, BeforeValue, AfterValue, ErrorCode: String;
-                          Success, SetterAttempted, Changed, AlreadySatisfied: Boolean);
-var Lines: TStringList;
+function SettingsReceipt(Stage, BeforeValue, AfterValue, ErrorCode: String;
+                         Success, SetterAttempted, Changed, AlreadySatisfied: Boolean): Boolean;
+var Lines: TStringList; ReceiptPath: String;
 begin
+    Result := False;
+    // Partial markers and the terminal receipt each have a distinct immutable
+    // path. Never truncate a file that the external observer may have open.
+    if (Stage = 'entered') or (Stage = 'before_options') or
+       (Stage = 'before_getter') or (Stage = 'before_setter') then
+        ReceiptPath := __RECEIPT_BASE__ + '.' + Stage + '.json'
+    else
+        ReceiptPath := __RECEIPT_PATH__;
+    if FileExists(ReceiptPath) then Exit;
     Lines := TStringList.Create;
     try
         Lines.Text := __METADATA__ + ',"stage":"' + Stage + '","success":' + SettingsBool(Success) +
           ',"before":' + BeforeValue + ',"after":' + AfterValue +
           ',"setter_attempted":' + SettingsBool(SetterAttempted) + ',"changed":' + SettingsBool(Changed) +
           ',"already_satisfied":' + SettingsBool(AlreadySatisfied) + ',"error":"' + ErrorCode + '"}';
-        Lines.SaveToFile(__RECEIPT_PATH__);
+        Lines.SaveToFile(ReceiptPath);
+        Result := True;
     finally
         Lines.Free;
     end;
@@ -45,18 +55,19 @@ var Board: IPCB_Board; Options: IPCB_SystemOptions; BeforeValue, AfterValue: Boo
 begin
     // Existing receipt means this operation already entered. Never replay it.
     if FileExists(__RECEIPT_PATH__) then Exit;
-    SettingsReceipt('entered', 'null', 'null', '', False, False, False, False);
+    if FileExists(__ENTERED_PATH__) then Exit;
+    if not SettingsReceipt('entered', 'null', 'null', '', False, False, False, False) then Exit;
     if PCBServer = nil then Exit;
     Board := PCBServer.GetPCBBoardByPath(__PCB_PATH__);
     if not SettingsGuard(Board) then
-    begin SettingsReceipt('guard_failed', 'null', 'null', 'exact_document_or_idle_guard', False, False, False, False); Exit; end;
-    SettingsReceipt('before_options', 'null', 'null', '', False, False, False, False);
+    begin if not SettingsReceipt('guard_failed', 'null', 'null', 'exact_document_or_idle_guard', False, False, False, False) then Exit; Exit; end;
+    if not SettingsReceipt('before_options', 'null', 'null', '', False, False, False, False) then Exit;
     Options := PCBServer.SystemOptions;
     if Options = nil then
-    begin SettingsReceipt('guard_failed', 'null', 'null', 'system_options_missing', False, False, False, False); Exit; end;
-    SettingsReceipt('before_getter', 'null', 'null', '', False, False, False, False);
+    begin if not SettingsReceipt('guard_failed', 'null', 'null', 'system_options_missing', False, False, False, False) then Exit; Exit; end;
+    if not SettingsReceipt('before_getter', 'null', 'null', '', False, False, False, False) then Exit;
     BeforeValue := Options.LockPreRoutes;
     if not SettingsGuard(Board) then
-    begin SettingsReceipt('guard_failed', SettingsBool(BeforeValue), 'null', 'identity_changed_after_read', False, False, False, False); Exit; end;
+    begin if not SettingsReceipt('guard_failed', SettingsBool(BeforeValue), 'null', 'identity_changed_after_read', False, False, False, False) then Exit; Exit; end;
 __OPERATION_BODY__
 end;

@@ -13,6 +13,7 @@ import re
 TEMPLATE = Path(__file__).with_name("native_templates") / "situs_lock_preroutes.pas.in"
 STAGES = {"entered", "guard_failed", "before_options", "before_getter", "expected_state_mismatch",
           "before_setter", "readback_failed", "completed"}
+PARTIAL_STAGES = ("entered", "before_options", "before_getter", "before_setter")
 
 
 def _path(value, suffix, label):
@@ -93,10 +94,16 @@ def build_lock_preroutes_program(pcb_path, operation_id, receipt_path, action="i
     begin SettingsReceipt('readback_failed', SettingsBool(BeforeValue), SettingsBool(AfterValue), 'requested_state_not_observed', False, True, BeforeValue <> AfterValue, False); Exit; end;
     SettingsReceipt('completed', SettingsBool(BeforeValue), SettingsBool(AfterValue), '', True, True, BeforeValue <> AfterValue, False);"""
         body = re.sub(r"\b(DESIRED|EXPECTED)\b", lambda m: {"DESIRED": desired, "EXPECTED": expected}[m.group()], body)
+    # Every path is written at most once. A polling reader may open an earlier
+    # marker without preventing the next stage from being created on Windows.
+    body = re.sub(r"SettingsReceipt\(([^;]*?)\);", r"if not SettingsReceipt(\1) then Exit;", body)
+    receipt_base = str(PureWindowsPath(receipt_path).with_suffix(""))
     substitutions = {"__METADATA__": _literal(prefix), "__RECEIPT_PATH__": _literal(receipt_path),
+                     "__RECEIPT_BASE__": _literal(receipt_base),
+                     "__ENTERED_PATH__": _literal(receipt_base + ".entered.json"),
                      "__PCB_PATH__": _literal(request["pcb_path"]), "__OPERATION_BODY__": body}
     source = TEMPLATE.read_text(encoding="utf-8")
-    return re.sub(r"__METADATA__|__RECEIPT_PATH__|__PCB_PATH__|__OPERATION_BODY__",
+    return re.sub(r"__METADATA__|__RECEIPT_PATH__|__RECEIPT_BASE__|__ENTERED_PATH__|__PCB_PATH__|__OPERATION_BODY__",
                   lambda m: substitutions[m.group()], source)
 
 
@@ -150,13 +157,29 @@ def parse_settings_receipt(data, request):
 
 
 def read_settings_receipt(path, request):
-    """Read only a bounded operation receipt; missing is unknown, never a replay."""
+    """Read a terminal receipt or the newest immutable partial-stage marker.
+
+    The terminal path is never overwritten. Stage paths are derived here rather
+    than accepted from a receipt, and their content must match their stage name.
+    Historical single-file receipts remain readable for audit purposes.
+    """
     path = Path(path)
+    expected_stage = None
     if not path.exists():
-        return {"success": False, "stage": "not_observed", "completion_verified": False,
-                "setting_readback_verified": False, "outcome_unknown": True, "retry_allowed": False}
+        for stage in reversed(PARTIAL_STAGES):
+            candidate = path.with_name(path.stem + "." + stage + ".json")
+            if candidate.exists():
+                path = candidate
+                expected_stage = stage
+                break
+        else:
+            return {"success": False, "stage": "not_observed", "completion_verified": False,
+                    "setting_readback_verified": False, "outcome_unknown": True, "retry_allowed": False}
     with path.open("rb") as stream:
         data = stream.read(65537)
     if len(data) > 65536:
         raise ValueError("oversized native settings receipt")
-    return parse_settings_receipt(data.decode("utf-8-sig"), request)
+    result = parse_settings_receipt(data.decode("utf-8-sig"), request)
+    if expected_stage is not None and result["stage"] != expected_stage:
+        raise ValueError("immutable settings marker stage does not match its filename")
+    return result
