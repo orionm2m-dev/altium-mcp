@@ -358,7 +358,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 
-    async def failed_copper_return(self):
+    async def failed_copper_return(self, legacy_pending=True):
         def launch(exe,argument):
             launcher=self.launch_native(exe,argument)
             self.publish_native(stage='readback_failed',success=False,return_verified=False,
@@ -367,15 +367,81 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             return launcher
         self.launch.side_effect=launch
         result=await self.call()
-        self.assertTrue(result['outcome_unknown'])
-        self.assertFalse(result['success'])
-        return self.root/'situs_partial'/OP
+        self.assertFalse(result['outcome_unknown'] or result['success'])
+        self.assertTrue(result['executor_return_known'] and result['diagnostics_required'])
+        folder=self.root/'situs_partial'/OP
+        if legacy_pending:
+            # Historical format: earlier service versions blocked even though
+            # this exact immutable terminal already proved native return.
+            legacy=dict(result,outcome_unknown=True,service_completion_verified=False)
+            legacy.pop('executor_return_known',None)
+            (folder/'result.json').write_text(json.dumps(legacy),'utf-8')
+            state=json.loads((self.root/'script_recovery_state.json').read_text('utf-8'))
+            state['phase']='situs_partial_pending'
+            state.pop('recovery_basis',None);state.pop('executor_recovery_performed',None)
+            state.pop('routing_validation_passed',None)
+            service.script_recovery._write_state(self.root,state)
+        return folder
 
     async def reconcile(self,**changes):
         args=dict(qualification_root=self.qualification,operation_id=OP,target_pid=PID,
                   expected_creation_filetime=CREATED)
         args.update(changes)
         return await service.reconcile_known_return(EXE,self.root,self.lock,**args)
+
+    async def test_exact_copper_failure_automatically_releases_executor_not_geometry(self):
+        folder=await self.failed_copper_return(legacy_pending=False)
+        result=json.loads((folder/'result.json').read_text('utf-8'))
+        self.assertFalse(result['success'] or result['outcome_unknown'] or result['routing_success']
+            or result['routing_return_verified'] or result['copper_validation_passed']
+            or result['current_state_rechecked'] or result['drc_completed'])
+        self.assertTrue(result['executor_return_known'] and result['service_completion_verified']
+            and result['diagnostics_required'])
+        self.assertTrue(result['native_receipt']['outcome_unknown'])
+        self.assertEqual(result['native_receipt']['error'],'old_free_copper_changed_or_snapshot_incomplete')
+        self.assertIsNone(service.script_recovery.blocked_state(self.root))
+        state=json.loads((self.root/'script_recovery_state.json').read_text('utf-8'))
+        self.assertEqual(state['recovery_basis'],'selected_tp_known_return_with_copper_validation_failure')
+        self.assertIs(state['routing_validation_passed'],False)
+        self.assertFalse((folder/'known_return_reconciliation.json').exists())
+        self.launch.assert_called_once()
+
+    async def test_pair_exact_copper_failure_releases_executor_without_reconcile(self):
+        self.partner='J1'
+        folder=await self.failed_copper_return(legacy_pending=False)
+        result=json.loads((folder/'result.json').read_text('utf-8'))
+        self.assertTrue(result['executor_return_known'])
+        self.assertFalse(result['success'] or result['outcome_unknown'] or result['copper_validation_passed'])
+        self.assertIsNone(service.script_recovery.blocked_state(self.root))
+        self.assertEqual(result['partner_designator'],'J1')
+
+    async def test_exact_failure_with_live_launcher_stays_unknown(self):
+        def launch(exe,argument):
+            launcher=self.launch_native(exe,argument)
+            self.publish_native(stage='readback_failed',success=False,return_verified=False,
+                old_copper_preserved=False,error='old_free_copper_changed_or_snapshot_incomplete',
+                after_copper_records=['changed'],after_copper_count=1)
+            return launcher
+        self.launch.side_effect=launch;self.code=None
+        result=await self.call()
+        self.assertFalse(result['success'] or result['executor_return_known'])
+        self.assertTrue(result['outcome_unknown']);self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+
+    async def test_exact_failure_final_receipt_failure_keeps_executor_pending(self):
+        def launch(exe,argument):
+            launcher=self.launch_native(exe,argument)
+            self.publish_native(stage='readback_failed',success=False,return_verified=False,
+                old_copper_preserved=False,error='old_free_copper_changed_or_snapshot_incomplete',
+                after_copper_records=['changed'],after_copper_count=1)
+            return launcher
+        self.launch.side_effect=launch;original=service._write
+        def fail(path,data):
+            if path.name=='result.json' and data.get('executor_return_known'):
+                raise OSError('Final proof persistence failed')
+            return original(path,data)
+        with patch.object(service,'_write',side_effect=fail):result=await self.call()
+        self.assertFalse(result['success'] or result['executor_return_known'] or result['service_completion_verified'])
+        self.assertTrue(result['outcome_unknown']);self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
 
     async def test_reconcile_known_return_preserves_failed_route_and_original_evidence(self):
         folder=await self.failed_copper_return()
@@ -572,6 +638,26 @@ def registered_wrapper(exchange='exchange', lock=None, name='route_situs_selecte
     env=dict(Context=Context,json=json,os=os,mcp=mcp,altium_bridge=bridge,EXCHANGE_DIR=exchange)
     exec(compile(ast.Module(body=nodes,type_ignores=[]),'actual_selected_tp_wrapper','exec'),env)
     return mcp,lock
+
+
+class KnownReturnPredicateTests(unittest.TestCase):
+    def test_every_exact_condition_is_required(self):
+        value=dict(stage='readback_failed',error='old_free_copper_changed_or_snapshot_incomplete',
+            success=False,return_verified=False,old_copper_preserved=False,terminal=True,outcome_unknown=True,
+            route_attempted=True,selection_attempted=True,selection_restored=True,lock_preroutes_verified=True,
+            before_snapshot_complete=True,after_snapshot_complete=True)
+        self.assertTrue(service._known_copper_validation_failure(value))
+        for field,valid in value.items():
+            missing=dict(value);missing.pop(field)
+            with self.subTest(field=field,kind='missing'):
+                self.assertFalse(service._known_copper_validation_failure(missing))
+            wrong=dict(value,**{field:(not valid if type(valid) is bool else 'other')})
+            with self.subTest(field=field,kind='wrong'):
+                self.assertFalse(service._known_copper_validation_failure(wrong))
+            if type(valid) is bool:
+                with self.subTest(field=field,kind='number'):
+                    self.assertFalse(service._known_copper_validation_failure(dict(value,**{field:int(valid)})))
+        self.assertFalse(service._known_copper_validation_failure(None))
 
 
 class PublicWrapperTests(unittest.IsolatedAsyncioTestCase):

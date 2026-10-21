@@ -74,6 +74,23 @@ def _preflight(request, receipt_path):
     return source
 
 
+def _known_copper_validation_failure(receipt):
+    """Exact parsed terminal that proves executor return but rejects geometry.
+
+    This predicate never accepts missing or merely truthy fields. The caller
+    must also verify the fixed request/source, finished launcher, exact process
+    identity and read-only environment. The native receipt is not rewritten.
+    """
+    return (isinstance(receipt, dict)
+        and receipt.get('stage') == 'readback_failed'
+        and receipt.get('error') == 'old_free_copper_changed_or_snapshot_incomplete'
+        and all(receipt.get(key) is False for key in ('success', 'return_verified', 'old_copper_preserved'))
+        and all(receipt.get(key) is True for key in (
+            'terminal', 'outcome_unknown', 'route_attempted', 'selection_attempted',
+            'selection_restored', 'lock_preroutes_verified',
+            'before_snapshot_complete', 'after_snapshot_complete')))
+
+
 async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_path,
                   component_designator, expected_net, target_pid,
                   expected_creation_filetime, operation_id='', timeout_seconds=15,
@@ -88,11 +105,15 @@ async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_pa
     The module does not save,
     select a strategy, change rules, toggle LockPreRoutes, invoke DRC or use UI.
     Locks and the pinned HANDLE survive caller cancellation through bounded
-    observation. Unknown/partial outcomes retain the pending latch; no replay.
+    observation. Unknown/partial execution retains the pending latch; no replay.
+    An exact known return with failed copper validation releases the executor,
+    while the route stays failed and diagnostics remain required.
     """
     result = dict(success=False, dispatch_attempted=False, outcome_unknown=False,
                   retry_allowed=False, replayed=False, current_state_rechecked=False,
                   routing_attempted=None, routing_return_verified=False,
+                  executor_return_known=False, copper_validation_passed=False,
+                  routing_success=False, diagnostics_required=False,
                   drc_completed=False, connectivity_verified=False,
                   route_completeness_verified=False, board_saved=False,
                   process_identity_verified=False, pid_verified_by_native=False)
@@ -152,6 +173,7 @@ async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_pa
                             # write. Never promote that unfinished finalization.
                             historical.update(success=False, outcome_unknown=True,
                                 service_completion_verified=False, routing_return_verified=False,
+                                executor_return_known=False, copper_validation_passed=False,
                                 error='Earlier operation still has a pending recovery latch; no replay')
                         return historical
                     return dict(result, replayed=True, outcome_unknown=True,
@@ -230,17 +252,25 @@ async def _execute(exe, exchange, folder, project, receipt_path, process,
         result['readiness_after'] = _environment(exe, result['target_pid'])
         result.update(native_receipt=receipt, launcher_exit_code=code,
                       process_identity_verified=True)
-        verified = code == 0 and terminal and receipt['outcome_unknown'] is False
+        launcher_returned = type(code) is int and code == 0
+        verified = launcher_returned and terminal and receipt['outcome_unknown'] is False
+        known_copper_failure = launcher_returned and terminal and _known_copper_validation_failure(receipt)
+        execution_known = bool(verified or known_copper_failure)
         result.update(success=bool(verified and receipt['success']),
-                      outcome_unknown=not verified, service_completion_verified=bool(verified),
+                      outcome_unknown=not execution_known, service_completion_verified=execution_known,
+                      executor_return_known=execution_known, diagnostics_required=bool(known_copper_failure),
+                      copper_validation_passed=bool(verified and receipt.get('old_copper_preserved') is True),
                       current_state_rechecked=bool(verified and receipt['success']))
         if receipt is not None:
             result.update(routing_attempted=receipt.get('route_attempted'),
                           routing_return_verified=bool(verified and receipt['return_verified']))
-        if verified:
+        if execution_known:
             result['error'] = receipt.get('error', '')
-            state.update(phase='recovered', recovery_basis='fixed_selected_tp_request_returned',
-                         executor_recovery_performed=False)
+            basis = ('selected_tp_known_return_with_copper_validation_failure' if known_copper_failure
+                     else 'fixed_selected_tp_request_returned')
+            state.update(phase='recovered', recovery_basis=basis, executor_recovery_performed=False)
+            if known_copper_failure:
+                state['routing_validation_passed'] = False
         else:
             result['error'] = 'Native selected-TP return, readback or launcher exit was not verified'
     except Exception as error:
@@ -253,6 +283,7 @@ async def _execute(exe, exchange, folder, project, receipt_path, process,
     except (OSError, ValueError, TypeError) as error:
         result.update(success=False, outcome_unknown=result['dispatch_attempted'],
                       service_completion_verified=False, routing_return_verified=False,
+                      executor_return_known=False, copper_validation_passed=False,
                       current_state_rechecked=False, service_receipt_persisted=False,
                       error='Service receipt finalization failed: ' + str(error))
         if state is not None:
@@ -356,14 +387,7 @@ async def reconcile_known_return(exe, exchange_dir, command_lock, *, qualificati
                         or original.get('service_receipt_persisted') is not True):
                     raise ValueError('Saved service evidence does not establish a returned failed request')
                 receipt = native.read_partial_receipt(receipt_path, request)
-                if (receipt.get('stage') != 'readback_failed'
-                        or receipt.get('error') != 'old_free_copper_changed_or_snapshot_incomplete'
-                        or receipt.get('success') is not False
-                        or receipt.get('return_verified') is not False
-                        or receipt.get('old_copper_preserved') is not False
-                        or any(receipt.get(key) is not True for key in (
-                            'route_attempted', 'selection_attempted', 'selection_restored',
-                            'lock_preroutes_verified', 'before_snapshot_complete', 'after_snapshot_complete'))
+                if (not _known_copper_validation_failure(receipt)
                         or receipt != original.get('native_receipt')):
                     raise ValueError('Exact known copper-validation failure and complete native return evidence required')
                 launches = pending.get('launches')
