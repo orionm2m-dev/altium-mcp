@@ -1,5 +1,19 @@
 # Changes
 
+## 2026-10-21 — Explicit process-scoped main window focus
+
+Added public `focus_altium(target_pid)` for restoring and foregrounding the exact
+configured Altium main window without script execution or input injection.
+Process/user/creation identity, unique main window, responsiveness and absence
+of other visible forms are checked before and after actions. Asynchronous
+restoration and foreground verification are bounded; Windows focus denial is
+reported without retries. Recovery state and documents are untouched. Bridge
+and cross-process locks prevent overlapping recovery, including cancellation
+while a focus worker is finishing. Mocked tests cover identity/refusal, window
+changes, bounded restore, foreground denial, public schema and cancellation.
+Native window activation remains to be qualified through the public tool.
+
+
 ## 2026-10-20 — Exact import-wizard inspection and cancellation
 
 Added `control_import_wizard` as a public diagnostic/cancel tool that remains

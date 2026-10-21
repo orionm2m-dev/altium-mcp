@@ -35,6 +35,7 @@ import script_guard
 import script_recovery
 import emergency_stop
 import altium_lifecycle
+import altium_focus
 import import_wizard_control
 
 # Configure logging
@@ -1452,6 +1453,39 @@ async def start_altium(ctx: Context) -> str:
     """
     async with altium_bridge._command_lock:
         outcome = altium_lifecycle.start(altium_bridge.config.altium_exe_path, EXCHANGE_DIR)
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
+async def focus_altium(ctx: Context, target_pid: int) -> str:
+    """Restore and foreground one exact configured Altium process main window.
+
+    Requires a positive explicit PID, verified executable and Windows user, one
+    configured process and one visible responsive TDocumentForm. Refuses modal
+    dialogs, a disabled main window, ambiguous instances or changed identity.
+    Restores a minimized window and requests foreground once; reports whether
+    Windows actually granted it. No keyboard/mouse input, script dispatch,
+    document open/save, recovery-latch change or native-idle claim. Available
+    while script execution is latched; does not recover the script executor.
+    """
+    async with altium_bridge._command_lock:
+        worker = asyncio.create_task(asyncio.to_thread(altium_focus.focus,
+            altium_bridge.config.altium_exe_path, EXCHANGE_DIR, target_pid))
+        try:
+            outcome = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # A cancelled request must not release the lock while its worker
+            # can still restore or activate the native window.
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not worker.cancelled():
+                worker.exception()
+            raise
     return json.dumps(outcome, indent=2)
 
 

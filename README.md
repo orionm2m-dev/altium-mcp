@@ -113,6 +113,26 @@ This approach bundles all dependencies in `server/lib/` and sets `PYTHONPATH` to
 
 When launching claude for the first time, the server will automatically try to locate your Altium Designer installation. It will search for all directories that start with `C:\Program Files\Altium\AD*` and use the one with the largest revision number. If it cannot find any, you will be prompted to select the Altium executable (X2.EXE) manually when you first run the server. Altium's DelphiScript scripting is used to create an API between the mcp server and Altium. 
 
+### Explicit window focus
+
+`focus_altium(target_pid)` restores a minimized main window and requests foreground
+focus for one explicitly identified configured Altium process. It verifies the
+executable, Windows user, process creation identity and exact `TDocumentForm`
+window. Multiple/uncertain instances, additional visible forms, disabled windows,
+modal dialogs and unresponsive UI are refused. If Windows denies foreground
+activation, the result reports that separately from any completed restoration;
+no synthetic keyboard or mouse input is used.
+
+This tool works while script execution is latched. It does not dispatch scripts,
+open or save documents, clear recovery state, or certify native executor/PCB idle.
+Inspect the result, then explicitly run the appropriate recovery probe. The
+bridge lock remains held until the bounded focus worker finishes, even if the
+request is cancelled. Offline mocked tests do not qualify native activation:
+
+```powershell
+python -m unittest discover -s server/tests -p test_altium_focus.py -v
+```
+
 ## Available Tools
 
 The server provides several tools to interact with Altium Designer:
