@@ -22,5 +22,15 @@ normal start separately.
 
 This command does not cancel a modal import wizard. It refuses dispatch when a
 modal is present. No window-button action, keyboard input, focus operation or
-Windows UI Automation is included. Compile/runtime qualification of the fixed
-DelphiScript remains separate from the offline builder/service tests.
+Windows UI Automation is included.
+
+On AD26.9.1 on 2026-10-21, the fixed program from commit `8a10420` compiled and
+completed the exact native close. The target count changed from one to zero,
+loaded document count from 25 to 24, and module count remained 33. The active
+PCB and other inventory descriptors were preserved. A subsequent ordinary exit
+completed with zero main/launcher exit codes. The application removed the target
+from its saved restore list; no preference file was edited externally. One cold
+start then completed without the import wizard, and a native module read passed
+in the new process. This is a verified prevention for the observed obsolete
+document restoration; it is not a generic importer cancellation facility or a
+guarantee about every future startup.

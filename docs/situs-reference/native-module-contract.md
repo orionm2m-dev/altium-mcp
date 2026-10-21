@@ -1,4 +1,4 @@
-# Native Situs module: verified read-only contract
+# Native Situs modules: bounded runtime qualification
 
 The compiled `NativeSitusReadOnly` extension was installed, loaded and checked on
 Altium Designer 26.9.1 on 2026-10-21. Three read-only commands passed with fresh,
@@ -44,12 +44,25 @@ external qualification in [qualification.json](../../dev/native_situs/qualificat
 records only the three verified command paths, version and binary hash.
 It does not reinterpret that payload field as a universal success claim.
 
-## Work that remains unqualified
+## Separate control module and remaining gaps
 
-Native strategy read/write, pass order and repetition, via effort, orthogonal
-preference, layer-direction settings, rip-up settings, router start/pause/resume/
-stop/reset execution, and progress reporting require their own implementation
-and runtime checks. A true `SitusStrategyValid()` value does not close these gaps.
+The separate `NativeSitusControl` module, source commit `b4626f5`, has now passed
+`read_settings` and a native layer-direction roundtrip on AD26.9.1. Its reviewed
+DLL SHA-256 is
+`42cecbd3b6f1a7108d33d969c24f3a197b5c6839218b73f9538733bd8e00c7f3`.
+Top/Bottom Auto/Auto changed to Horizontal/Vertical and returned to Auto/Auto;
+the full restored snapshot and hash equal the original. A native read passed
+again after normal exit and cold start. The production file hash was unchanged,
+with no board save or routing launch. This qualification belongs to the control
+module, not the three-command read-only prototype. See its
+[settings contract](native-strategy-settings-contract.md) and
+[external qualification](../../dev/native_situs_next/transport_qualification.json).
+
+Strategy name/description writes, pass order and repetition, via effort,
+orthogonal preference writes, other layer-direction values, global preset CRUD,
+rip-up settings, router start/pause/resume/stop/reset execution and progress
+reporting still require their own implementation or runtime checks.
+A true `SitusStrategyValid()` value does not close these gaps.
 The separately verified global Lock All Pre-routes tool retains its own
 [narrow contract](native-settings-contract.md); it is not attributed to this DLL.
 

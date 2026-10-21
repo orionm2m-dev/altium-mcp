@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "status": "compiled_not_loaded",
-  "native_calls_performed": false,
-  "installed": false,
-  "runtime_qualified": false,
+  "status": "loaded_read_and_layer_direction_roundtrip_verified",
+  "native_calls_performed": true,
+  "installed": true,
+  "runtime_qualified": true,
   "actions": [
     "read_settings",
     "set_settings"
@@ -27,13 +27,13 @@
         "metadata_signature": "20010E0E"
       }
     ],
-    "qualification": "Metadata observed and compiler resolved; runtime parsing via new process not qualified"
+    "qualification": "Metadata and compiler resolved; bounded parameter parsing and registered native process delivery passed with correlated read/set/restore receipts on AD26.9.1."
   },
   "source_urls": [
     "https://www.altium.com/documentation/altium-designer/scripting/running-scripts",
     "https://www.altium.com/documentation/altium-dxp-developer/system-api"
   ],
-  "cli_boundary": "The -RServer:Process(Name=Value|Name=Value) framing is used by the existing qualified local RunScript launcher. New process delivery needs a native read-only probe; no official command-line guarantee inferred from the parameter-buffer documentation.",
+  "cli_boundary": "The fixed -RServer:Process(Name=Value|Name=Value) delivery to NativeSitusControl:ExecuteRequest was observed on AD26.9.1, including a fresh read after cold start. This is runtime evidence for this registered command and fixed transport, not a universal command-line guarantee.",
   "artifacts": [
     {
       "path": "dev/native_situs_next/build/NativeSitusControl.dll",
@@ -50,5 +50,40 @@
       "size_bytes": 162,
       "sha256": "f3d42f85c9d2c361131ab7f6cbc1070324e6856d44ee7e117e04721fccaca766"
     }
-  ]
+  ],
+  "full_situs_support": false,
+  "source_commit": "b4626f5",
+  "runtime_qualification_date": "2026-10-21",
+  "altium_version": "26.9.1",
+  "qualification_scope": [
+    "read_settings",
+    "set_settings.layer_directions: observed Auto/Auto to Horizontal/Vertical and restoration"
+  ],
+  "qualification_basis": "Fresh correlated public MCP/native receipts in the retained local audit; private process and project identifiers omitted",
+  "new_process_native_read_verified": true,
+  "full_snapshot_restored": true,
+  "full_snapshot_hash_restored": true,
+  "production_file_hash_unchanged": true,
+  "document_save_requested": false,
+  "routing_started": false,
+  "persistence_verified": false,
+  "undo_verified": false,
+  "atomicity_verified": false,
+  "other_strategy_setters_runtime_qualified": false,
+  "unqualified_setters": [
+    "name",
+    "description",
+    "prefer_orthogonal",
+    "layer_directions values not used in the observed roundtrip"
+  ],
+  "full_support_gaps": [
+    "pass editing and repetition",
+    "ViaBias writes",
+    "global preset CRUD",
+    "Rip-up Violations",
+    "nonmodal whole-board start",
+    "pause/resume/stop/reset execution",
+    "progress"
+  ],
+  "payload_runtime_flag": "The unchanged prototype reports runtime_qualified=false. This external record qualifies only the named read and layer-direction paths for the pinned binary/version."
 }
