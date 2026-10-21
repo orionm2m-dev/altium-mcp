@@ -1,5 +1,19 @@
 # Changes
 
+## 2026-10-21 — Bind windowless error acknowledgment to explicit visual evidence
+
+The observed Error dialog exposes only empty TXPExtPanel controls and its OK
+button; its Undeclared identifier text is visible only in the image. Added an
+explicit caller visual confirmation path for that case. The exact public
+screenshot receipt, PNG SHA256, configured process creation/SID/executable and
+window identity must match; a fresh pinned same-method PrintWindow capture must
+reproduce the full PNG before one gesture. Readable conflicting text cannot be
+overridden. Classification is labeled caller attestation, never OCR. A timed-out
+capture remains read-only with its own resources, and no input is permitted.
+Tests cover evidence/pixel tampering, foreign identity, absent classification,
+PNG encoding/GDI cleanup, worker DPI cleanup and no-input refusals. Native
+qualification remains the caller's next separate step.
+
 ## 2026-10-21 — Explicit acknowledgment of an inspected script identifier error
 
 Added public acknowledge_script_error with inspect/acknowledge only. It pins the

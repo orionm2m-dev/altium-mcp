@@ -89,6 +89,29 @@ class ErrorDialogTests(unittest.TestCase):
         self.gui.PostMessage.assert_not_called()
         self.gui.SetForegroundWindow.assert_not_called()
 
+    def test_windowless_message_requires_visual_evidence_before_one_gesture(self):
+        import script_error_visual
+        self.rows[11].update(content="", **{"class": "TXPExtPanel"})
+        evidence = {"classification": "undeclared_identifier", "receipt_path": "receipt.json", "image_sha256": "a" * 64}
+        self.assertTrue(self.call()["visual_confirmation_eligible"])
+        self.assertTrue(self.call("acknowledge")["blocked"])
+        with patch.object(script_error_visual, "verify", return_value={"fresh_image_matches": True}) as verify:
+            result = self.call("acknowledge", visual_confirmation=evidence)
+            self.assertTrue(result["success"], result)
+            self.assertTrue(result["visual_evidence"]["fresh_image_matches"])
+            verify.assert_called_once_with(self.target, evidence)
+        self.assertEqual(self.send.call_count, 2)
+
+    def test_visual_evidence_failure_or_conflicting_readable_text_cannot_click(self):
+        import script_error_visual
+        self.rows[11]["content"] = ""
+        with patch.object(script_error_visual, "verify", side_effect=ValueError("Live image changed")) as verify:
+            self.assertTrue(self.call("acknowledge", visual_confirmation={})["blocked"])
+            self.rows[11]["content"] = "Save the document?"
+            self.assertTrue(self.call("acknowledge", visual_confirmation={})["blocked"])
+            self.assertEqual(verify.call_count, 1)
+        self.send.assert_not_called()
+
     def test_wrong_pid_dialog_title_main_or_process_identity_refuses(self):
         self.assertTrue(self.call("acknowledge", target_pid=999)["blocked"])
         self.assertTrue(self.call("acknowledge", expected_main_title="Other.PrjScr")["blocked"])
@@ -199,9 +222,10 @@ class PublicToolTests(unittest.IsolatedAsyncioTestCase):
             altium_bridge=SimpleNamespace(_command_lock=lock, config=SimpleNamespace(altium_exe_path="configured.exe")))
         exec(compile(ast.Module(body=[node], type_ignores=[]), "error_public", "exec"), env)
         with patch.object(control, "control", side_effect=service) as call:
-            result = json.loads(await env["acknowledge_script_error"](None, "acknowledge", 123, 42, TITLE, TEXT, 12))
+            evidence = {"classification": "undeclared_identifier", "receipt_path": "receipt.json", "image_sha256": "a" * 64}
+            result = json.loads(await env["acknowledge_script_error"](None, "acknowledge", 123, 42, TITLE, TEXT, 12, evidence))
             self.assertTrue(result["success"])
-            call.assert_called_once_with("configured.exe", "acknowledge", 123, 42, TITLE, TEXT, 12)
+            call.assert_called_once_with("configured.exe", "acknowledge", 123, 42, TITLE, TEXT, 12, evidence)
         self.assertFalse(lock.locked())
         self.assertFalse(flags["claimed"])
 

@@ -62,18 +62,20 @@ def _snapshot(target, target_pid, expected_title):
     buttons = [row for row in visible if "button" in row["class"].casefold()
                or "btn" in row["class"].casefold()]
     error_text = classification["text"] if classification else ""
+    unique_ok = bool(len(buttons) == 1 and buttons[0]["class"] in BUTTON_CLASSES
+        and _caption(buttons[0]["text"]) == "ok" and buttons[0]["enabled"])
+    windowless_text = not any(row["text"].strip() for row in visible if row not in buttons)
     eligible = bool(classification and classification["kind"] == "compile"
         and re.search(r"\bundeclared\s+identifier\b", error_text, re.IGNORECASE)
-        and len(buttons) == 1 and buttons[0]["class"] in BUTTON_CLASSES
-        and _caption(buttons[0]["text"]) == "ok" and buttons[0]["enabled"])
+        and unique_ok)
     return {"main_window": main, "children": children, "error_text": error_text,
-        "acknowledgment_allowed": eligible, "button": buttons[0] if len(buttons) == 1 else None,
+        "acknowledgment_allowed": eligible, "visual_confirmation_eligible": unique_ok and windowless_text, "button": buttons[0] if len(buttons) == 1 else None,
         "classification": classification,
         "refusal_reason": None if eligible else "Readable Undeclared identifier text and one supported enabled OK button are required"}
 
 
 def control(exe, action, target_pid, target_hwnd, expected_main_title,
-            expected_error_text="", button_hwnd=None):
+            expected_error_text="", button_hwnd=None, visual_confirmation=None):
     result = {"success": False, "action": action, "input_attempted": False,
         "messages_attempted": 0, "messages_completed": 0, "planned_messages": 0,
         "dialog_closed_verified": False, "executor_recovered": False,
@@ -90,16 +92,21 @@ def control(exe, action, target_pid, target_hwnd, expected_main_title,
         if action == "acknowledge":
             if not expected_error_text or type(button_hwnd) is not int or button_hwnd <= 0:
                 raise ValueError("acknowledge requires inspected expected_error_text and button_hwnd")
-        elif expected_error_text or button_hwnd is not None:
+        elif expected_error_text or button_hwnd is not None or visual_confirmation is not None:
             raise ValueError("Acknowledgment arguments are not valid for inspect")
         target = CaptureTarget(exe, target_hwnd)
         snapshot = _snapshot(target, target_pid, expected_main_title)
         result.update(identity=target.identity, dialog=target.window, **snapshot)
         if action == "inspect":
             return dict(result, success=True, no_input=True)
-        if (not snapshot["acknowledgment_allowed"] or snapshot["error_text"] != expected_error_text
-                or snapshot["button"]["hwnd"] != button_hwnd):
-            raise ValueError("Dialog does not match the inspected informational error and OK button")
+        if visual_confirmation is not None:
+            if (not snapshot["visual_confirmation_eligible"]
+                    or not re.fullmatch(r"Undeclared identifier:\s*\S[^\r\n]*", expected_error_text, re.IGNORECASE)):
+                raise ValueError("Visual confirmation is only for a windowless Undeclared identifier message with unique OK")
+        elif not snapshot["acknowledgment_allowed"] or snapshot["error_text"] != expected_error_text:
+            raise ValueError("Dialog does not match the inspected informational error text")
+        if snapshot["button"] is None or snapshot["button"]["hwnd"] != button_hwnd:
+            raise ValueError("Dialog does not match the inspected OK button")
         button = snapshot["button"]
         pair = button["class"] == "TXPBitBtn"
         messages, rect = [(0x00F5, 0, 0)], None
@@ -114,6 +121,12 @@ def control(exe, action, target_pid, target_hwnd, expected_main_title,
             result.update(control_client_rect=list(rect), control_client_point=[x, y])
         result.update(dispatch_method="control_client_down_up" if pair else "bm_click",
                       planned_messages=len(messages))
+        if visual_confirmation is not None:
+            import script_error_visual
+            result["visual_evidence"] = script_error_visual.verify(target, visual_confirmation)
+            result.update(acknowledgment_allowed=True, acknowledgment_basis="verified caller visual confirmation")
+        else:
+            result["acknowledgment_basis"] = "readable error text"
         for message, wparam, lparam in messages:
             if (_snapshot(target, target_pid, expected_main_title) != snapshot
                     or (pair and tuple(win32gui.GetClientRect(button_hwnd)) != rect)):

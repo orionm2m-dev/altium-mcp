@@ -143,7 +143,8 @@ python -m unittest discover -s server/tests -p test_altium_focus.py -v
 accepts `inspect` or `acknowledge`. Inspect first. It pins the configured executable,
 Windows user and process creation identity, exact `Error` / `TMessageForm`, and
 main-window title. Bounded `WM_GETTEXT` reads child contents that cross-process
-`GetWindowText` can miss; unreadable or windowless message text cannot qualify.
+`GetWindowText` can miss. Windowless text needs the separate visual evidence
+path below; a title alone cannot qualify.
 
 Acknowledgment additionally requires `expected_error_text` and `button_hwnd`
 returned by inspection. Only **Undeclared identifier** with one visible enabled
@@ -155,6 +156,21 @@ there is no retry, global input, activation, Stop, new script, termination, save
 or recovery-latch change. A successful gesture does not certify closure or a
 recovered executor. Inspect the environment afterward, then use the existing
 explicit recovery workflow. Native qualification remains separate.
+
+For the observed windowless VCL message, first view the exact image returned by
+public `get_screenshot(view_type="current", window_handle=...)`. Then optionally
+pass `visual_confirmation` with exactly `receipt_path` (absolute saved public
+receipt), `image_sha256` (SHA256 of its adjacent PNG), and
+`classification: "undeclared_identifier"`. Continue to provide the displayed
+`expected_error_text` and observed `button_hwnd`. This is **caller visual
+attestation, not OCR**. The receipt must bind to the same PID creation, executable,
+Windows user, HWND, Error title and TMessageForm class. A fresh independent pinned
+PrintWindow capture, with the same per-monitor DPI and PNG encoding, must match
+the complete PNG hash before the gesture. Capture timeout, changed pixels, altered
+file or conflicting readable text refuses input. The capture worker has its own
+pin and cannot send input, including after timeout. Structural checks continue
+between down/up; pixels are compared before the gesture because pressing the
+button changes its appearance. No automatic retry is performed.
 
 ### Inspect or control Situs Setup
 

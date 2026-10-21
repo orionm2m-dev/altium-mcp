@@ -1407,7 +1407,8 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
                                    target_hwnd: int, expected_main_title: str,
                                    expected_error_text: str = "",
-                                   button_hwnd: int | None = None) -> str:
+                                   button_hwnd: int | None = None,
+                                   visual_confirmation: dict | None = None) -> str:
     """Inspect or acknowledge one exact owned Undeclared identifier error.
 
     inspect reads a pinned configured Altium Error/TMessageForm and its child
@@ -1420,6 +1421,13 @@ async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
     client-center down/up pair for TXPBitBtn. No global input, activation, retry,
     Stop, script, process termination, save or recovery-latch change. A delivered
     gesture does not prove dialog closure or executor recovery; inspect next.
+    For windowless message text only, visual_confirmation may supply exactly
+    receipt_path (absolute public get_screenshot receipt), image_sha256 (its PNG)
+    and classification='undeclared_identifier'. The caller must have viewed that
+    exact image. Its pinned identity and fresh same-method full-image hash must
+    match before input; this is explicit visual attestation, not machine OCR.
+    Any readable conflicting message refuses this path. expected_error_text and
+    observed button_hwnd are still required. No automatic capture/click retry.
     """
     import script_error_control
     async with altium_bridge._command_lock:
@@ -1427,7 +1435,7 @@ async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
             with emergency_stop.emergency_claim(EXCHANGE_DIR):
                 outcome = script_error_control.control(altium_bridge.config.altium_exe_path,
                     action, target_pid, target_hwnd, expected_main_title,
-                    expected_error_text, button_hwnd)
+                    expected_error_text, button_hwnd, visual_confirmation)
         except OSError as error:
             outcome = {"success": False, "blocked": True, "error": str(error),
                        "input_attempted": False, "stop_dispatched": False,
