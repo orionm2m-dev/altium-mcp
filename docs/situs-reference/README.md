@@ -34,13 +34,13 @@ recovery must never be presented as a qualified router lifecycle control.
 
 ## What the current tools cover
 
-The [capability matrix](capabilities.json) records **10 available, 10 partial,
-14 missing, 3 probe-only and 1 blocked** capabilities. Available is deliberately
+The [capability matrix](capabilities.json) records **11 available, 10 partial,
+13 missing, 3 probe-only and 1 blocked** capabilities. Available is deliberately
 narrow: read the supported actions and qualification boundary of each entry.
 It does not mean that every field of the corresponding dialog is controllable.
 
 The principal gaps are typed setup/start and job state, strategy selection and
-editing, pass ordering, Layer Directions, Lock All Pre-routes, structured Setup
+editing, pass ordering, Layer Directions, structured Setup
 Report/progress, fanout execution and native router Stop/Pause/Reset. Generic
 script execution and installed command names do not fill these gaps. In the
 observed custom Rip-up checkbox, the native check query did not distinguish the
@@ -64,3 +64,9 @@ retained local evidence; private evidence is intentionally outside this generic
 package. Re-review affected records after implementation/runtime changes. Do not
 promote a missing, blocked or probe-only feature because a similar API appears
 in documentation. Unknown search terms mean unknown, not unsupported.
+
+## Qualified native Lock All Pre-routes command
+
+`control_situs_native_settings` reads or sets the global PCB `LockPreRoutes` option without UI Automation or foreground activation. The dedicated public transport was verified on AD26.9.1: inspect, set false to true, and restore true to false, each with exact process/board guards and correlated readback. Forty-five offline tests cover validation, precision, state comparison, background readiness, cancellation and no replay. No board save, routing completion or persistence across restarts is implied. See [native-settings-contract.md](native-settings-contract.md).
+
+The capability matrix now includes this narrow incremental review at commit `a8b4955`. Other entries retain their earlier reviewed commits and boundaries; they have not been promoted because a new prototype compiles. The C# extension in `dev/native_situs` remains compile-only and is not installed or runtime-qualified.

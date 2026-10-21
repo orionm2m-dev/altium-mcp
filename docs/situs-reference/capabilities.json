@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "status": "CAPABILITY_MATRIX_PROPOSAL_READ_ONLY_AUDIT",
-  "checked_utc": "2026-10-21T12:20:40.839984+00:00",
-  "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+  "status": "INCREMENTAL_CAPABILITY_REVIEW",
+  "checked_utc": "2026-10-21T14:51:12.618593+00:00",
+  "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf",
   "checked_runtime_version": "Altium Designer 26.9.1",
-  "scope": "Current registered MCP source and bounded captured native evidence; no native calls, repository edits or tests executed for this audit.",
+  "scope": "Incremental review of native Lock All Pre-routes only. Other entries retain their individual earlier reviewed commit and observations; this is not a whole-server live audit.",
   "status_definitions": {
     "available": "A dedicated registered tool supports the named narrow capability; qualification boundary still applies.",
     "partial": "Registered support covers only part of the named capability or completion/branch qualification is incomplete.",
@@ -33,7 +33,8 @@
     "search_altium_api",
     "set_pcb_keepouts",
     "set_pcb_routing",
-    "set_pcb_rules"
+    "set_pcb_rules",
+    "control_situs_native_settings"
   ],
   "source_manifest": {
     "server/AltiumScript/pcb_document.pas": {
@@ -49,8 +50,8 @@
       "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
     },
     "server/main.py": {
-      "sha256": "f7f660098543eb413b17d9bb14dbbd42991e3efcd33e530675b595192372fb31",
-      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+      "sha256": "86475922aa1610571ee350e677f0715916cb73807eccb30b3a421bdd34bfa3b5",
+      "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf"
     },
     "server/script_guard.py": {
       "sha256": "7b95b5b5bc58d10af6c4f040112e676ff6c7de9c4e3071360b8376b5742bc897",
@@ -59,6 +60,18 @@
     "server/situs_setup_control.py": {
       "sha256": "263649062a2a6be66855a35e9d522c01cbb7a2777ad41b1ca62ce2befaf1a60e",
       "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/situs_native_settings_service.py": {
+      "sha256": "534c9540844a85bda53610db1117d0c66262c7dce874a3f1d5b8a73e1be19949",
+      "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf"
+    },
+    "server/situs_native_settings.py": {
+      "sha256": "f0110cd5876e94364ca3e7100a76d00113a975d73e24b4e22a7d39bb91455203",
+      "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf"
+    },
+    "server/native_templates/situs_lock_preroutes.pas.in": {
+      "sha256": "9f5c1b3ecbf6460474d57d79b9ef885a41a013777028a057f4c36531fc8d3d52",
+      "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf"
     }
   },
   "capabilities": [
@@ -471,19 +484,32 @@
       "id": "situs.lock_pre_routes",
       "name": "Lock All Pre-routes setting",
       "setting_or_function": "Lock All Pre-routes setting",
-      "status": "missing",
-      "registered_tools": [],
-      "supported_actions": [],
-      "implementation_refs": [
-        "server/situs_setup_control.py:69",
-        "server/main.py:3149"
+      "status": "available",
+      "registered_tools": [
+        "control_situs_native_settings"
       ],
-      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "supported_actions": [
+        "inspect",
+        "set with expected-state comparison and correlated readback"
+      ],
+      "implementation_refs": [
+        "server/main.py:1519",
+        "server/situs_native_settings_service.py",
+        "server/situs_native_settings.py",
+        "server/native_templates/situs_lock_preroutes.pas.in"
+      ],
+      "checked_commit": "a8b4955bb59825f1f1bcb13dcebbee320c4ed9cf",
       "checked_runtime_version": "Altium Designer 26.9.1",
-      "native_qualified_actions": [],
-      "runtime_verified": false,
-      "qualification_boundary": "No dedicated setting getter/setter or exact checkbox support; control_situs_setup only singles out Rip-up. Per-object locked on added geometry is a separate feature.",
-      "evidence_ids": [],
+      "native_qualified_actions": [
+        "Dedicated public inspect returned global LockPreRoutes=false with exact process and board guards",
+        "Dedicated public set false to true followed by true to false; both assignments and original restoration independently read back"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Qualified on one managed AD26.9.1 session and an exact active test PCB. This is a global PCB system option, not a per-board setting or object Locked flag. No routing, board save or preference persistence was tested. No UI Automation or foreground activation is used by the command. Expected FILETIME uses ft:decimal text; unknown dispatch remains recovery-blocked.",
+      "evidence_ids": [
+        "EV_NATIVE_LOCK_INSPECT_20261021",
+        "EV_NATIVE_LOCK_ROUNDTRIP_RESTORED_20261021"
+      ],
       "installed_commands": []
     },
     {
