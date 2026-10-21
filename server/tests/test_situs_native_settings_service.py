@@ -57,6 +57,79 @@ class PublicFiletimeTests(unittest.IsolatedAsyncioTestCase):
                     service.normalize_public_filetime(value)
 
 
+class NativeReadinessTests(unittest.TestCase):
+    def setUp(self):
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.environment = {"ready": False, "foreground_confirmed": False,
+                            "target_pid": PID, "configured_process_ids": [PID]}
+        self.stack.enter_context(patch.object(service.script_recovery, "inspect_environment",
+                                              side_effect=lambda exe: dict(self.environment)))
+        self.crash = self.stack.enter_context(patch.object(service.script_guard, "blocking_crash_report", return_value=None))
+        self.main = {"hwnd": 42, "pid": PID, "thread_id": 7, "class": "TDocumentForm",
+                     "enabled": True, "minimized": True, "owner_hwnd": 0, "title": "PCB"}
+        self.rows = [self.main]
+        self.api = Mock()
+        self.api.windows.side_effect = lambda pid: [dict(row) for row in self.rows]
+        self.api.responsive.return_value = True
+        self.api.matches.return_value = True
+        self.stack.enter_context(patch.object(service.altium_focus, "WindowAPI", return_value=self.api))
+        self.addCleanup(self.assert_no_focus_or_input)
+
+    def assert_no_focus_or_input(self):
+        self.api.restore.assert_not_called()
+        self.api.activate.assert_not_called()
+        self.api.foreground.assert_not_called()
+        self.assertTrue(all(call[0] in {"windows", "responsive", "matches"} for call in self.api.mock_calls))
+
+    def test_background_and_minimized_are_allowed_without_activation(self):
+        result = service._environment(EXE, PID)
+        self.assertFalse(result["foreground_required"])
+        self.assertFalse(result["native_idle_verified"])
+        self.assertTrue(result["main_responsive"])
+        self.assertTrue(result["minimized"])
+        self.api.responsive.assert_called_once_with(42)
+        self.api.matches.assert_called_once_with(self.main)
+
+    def test_disabled_main_is_refused(self):
+        self.main["enabled"] = False
+        with self.assertRaises(ValueError): service._environment(EXE, PID)
+
+    def test_modal_unknown_and_ambiguous_windows_are_refused(self):
+        for cls in ("#32770", "TMessageForm", "TSitusSetup", "UnknownPopup", "TDocumentForm"):
+            self.rows = [self.main, dict(self.main, hwnd=99, **{"class": cls})]
+            with self.subTest(cls=cls), self.assertRaises(ValueError): service._environment(EXE, PID)
+        self.rows = []
+        with self.assertRaises(ValueError): service._environment(EXE, PID)
+
+    def test_unresponsive_or_changed_main_is_refused(self):
+        self.api.responsive.return_value = False
+        with self.assertRaises(ValueError): service._environment(EXE, PID)
+        self.api.responsive.return_value = True
+        self.api.matches.return_value = False
+        with self.assertRaises(ValueError): service._environment(EXE, PID)
+
+    def test_multiple_processes_modal_inventory_or_crash_are_refused(self):
+        base = dict(self.environment)
+        for changes in ({"configured_process_ids": [PID, 999]}, {"target_pid": 999},
+                        {"dialog_handles": [9]}, {"unresolved_launch_ids": [8]},
+                        {"script_errors": [{"kind": "native_crash"}]}):
+            self.environment = dict(base, **changes)
+            with self.assertRaises(ValueError): service._environment(EXE, PID)
+        self.environment = base
+        self.crash.return_value = {"blocked": True}
+        with self.assertRaises(ValueError): service._environment(EXE, PID)
+        self.api.windows.assert_not_called()
+
+    def test_only_observed_blank_same_thread_framework_is_allowed(self):
+        framework = dict(self.main, hwnd=99, title="", **{"class": "TApplication"})
+        self.rows = [self.main, framework]
+        self.assertEqual(service._environment(EXE, PID)["main_hwnd"], 42)
+        for changes in ({"thread_id": 9}, {"enabled": False}, {"title": "Popup"}, {"owner_hwnd": 55}):
+            self.rows = [self.main, dict(framework, **changes)]
+            with self.assertRaises(ValueError): service._environment(EXE, PID)
+
+
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -81,6 +154,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.environment = self.stack.enter_context(patch.object(service.script_recovery, "inspect_environment",
             return_value={"ready": True, "target_pid": PID, "configured_process_ids": [PID]}))
         self.stack.enter_context(patch.object(service.script_guard, "blocking_crash_report", return_value=None))
+        self.main = {"hwnd": 42, "pid": PID, "thread_id": 7, "class": "TDocumentForm",
+                     "enabled": True, "minimized": True, "owner_hwnd": 0, "title": "Background PCB"}
+        self.api = Mock()
+        self.api.windows.side_effect = lambda pid: [dict(self.main)]
+        self.api.responsive.return_value = True
+        self.api.matches.return_value = True
+        self.stack.enter_context(patch.object(service.altium_focus, "WindowAPI", return_value=self.api))
         self.launch = self.stack.enter_context(patch.object(service.script_recovery, "_launch", side_effect=self.launch_native))
         self.stack.enter_context(patch.object(service, "time", SimpleNamespace(monotonic=lambda: self.clock)))
         self.stack.enter_context(patch.object(service.asyncio, "sleep", side_effect=self.sleep))
@@ -140,6 +220,18 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Sandbox", source)
         self.assertEqual(self.process.identity.call_count, 3)
         self.assertEqual(self.environment.call_count, 3)
+
+    async def test_background_minimized_instance_dispatches_without_focus_or_input(self):
+        self.environment.return_value.update(ready=False, foreground_confirmed=False,
+                                             reason="Bring Altium forward and handle its dialog manually")
+        result = await self.run_control()
+        self.assertTrue(result["success"])
+        self.assertFalse(result["readiness_before_dispatch"]["foreground_required"])
+        self.assertTrue(result["readiness_before_dispatch"]["minimized"])
+        self.api.restore.assert_not_called()
+        self.api.activate.assert_not_called()
+        self.api.foreground.assert_not_called()
+        self.launch.assert_called_once()
 
     async def test_set_compare_readback_and_exact_request(self):
         self.mode = "set"

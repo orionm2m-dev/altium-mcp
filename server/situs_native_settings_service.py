@@ -14,6 +14,7 @@ import re
 import time
 import uuid
 
+import altium_focus
 import emergency_stop
 import script_guard
 import script_lint
@@ -52,12 +53,32 @@ def _identity(process, exe, pid, created):
 
 
 def _environment(exe, pid):
+    """Read-only readiness for a fixed native program, independent of focus.
+
+    Common recovery readiness requires foreground because it also serves UI
+    recovery. Retain its process/modal inventory, but independently query the
+    exact main HWND for enabled state, stable identity and WM_NULL response.
+    No restore, activate, foreground request or input is issued. Responsiveness
+    is not native idle; the fixed Pascal program still checks process depths.
+    """
     value = script_recovery.inspect_environment(exe)
-    if (value.get("ready") is not True or value.get("target_pid") != pid
-            or value.get("configured_process_ids") != [pid]):
-        raise ValueError(value.get("reason") or "Exactly one ready configured Altium instance is required")
+    if (value.get("target_pid") != pid or value.get("configured_process_ids") != [pid]
+            or value.get("unresolved_launch_ids") or value.get("script_errors")
+            or value.get("dialog_handles")):
+        raise ValueError("Exactly one configured Altium instance without modal/recovery blockers is required")
     if script_guard.blocking_crash_report(exe):
         raise ValueError("A native crash report blocks dispatch")
+    api = altium_focus.WindowAPI()
+    # _select_main is read-only: windows, responsive and matches only. It also
+    # rejects unknown forms, disabled/ambiguous main frames and framework shells
+    # outside the narrow already-observed blank TApplication owner case.
+    main = altium_focus._select_main(api, pid)
+    if main.get("pid") != pid:
+        raise ValueError("Main window belongs to a different process")
+    return {"main_hwnd": main["hwnd"], "main_thread_id": main["thread_id"],
+            "minimized": main["minimized"], "main_responsive": True,
+            "foreground_required": False, "focus_or_input_requested": False,
+            "native_idle_verified": False}
 
 
 def _base(request, pid, created):
@@ -168,7 +189,7 @@ async def _execute(exe, exchange, folder, process, before, request, result, crea
     project.write_text("[Design]\nVersion=1.0\n\n[Document1]\nDocumentPath=SitusSettings.pas\n", encoding="utf-8")
     result["source_sha256"] = hashlib.sha256(pas.read_bytes()).hexdigest()
     _identity(process, exe, result["target_pid"], created)
-    _environment(exe, result["target_pid"])
+    result["readiness_before_dispatch"] = _environment(exe, result["target_pid"])
     # Latch before Popen: crash/cancellation across dispatch cannot permit replay.
     state = dict(phase="native_settings_pending", token=request["operation_id"],
                  native_settings_receipt=str(native_path), launches=[], process_identity=before)
@@ -198,7 +219,7 @@ async def _execute(exe, exchange, folder, process, before, request, result, crea
     after = _identity(process, exe, result["target_pid"], created)
     if not emergency_stop._same_identity(before, after):
         raise ValueError("Process identity changed during native operation")
-    _environment(exe, result["target_pid"])
+    result["readiness_after"] = _environment(exe, result["target_pid"])
     result.update(process_identity_verified=True, launcher_exit_code=exit_code,
                   native_receipt=native, current_state_rechecked=bool(native and native.get("setting_readback_verified")))
     safe_return = (exit_code == 0 and native and native.get("stage") in TERMINAL_STAGES
