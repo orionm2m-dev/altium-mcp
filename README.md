@@ -137,6 +137,25 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Acknowledge an inspected script identifier error
+
+`acknowledge_script_error(action, target_pid, target_hwnd, expected_main_title)`
+accepts `inspect` or `acknowledge`. Inspect first. It pins the configured executable,
+Windows user and process creation identity, exact `Error` / `TMessageForm`, and
+main-window title. Bounded `WM_GETTEXT` reads child contents that cross-process
+`GetWindowText` can miss; unreadable or windowless message text cannot qualify.
+
+Acknowledgment additionally requires `expected_error_text` and `button_hwnd`
+returned by inspection. Only **Undeclared identifier** with one visible enabled
+supported OK control qualifies. Save/confirmation/native-crash dialogs, changed
+text or identity, other visible forms, and ambiguous buttons refuse input. It
+rechecks before one bounded BM_CLICK (standard/VCL), or a control-client down/up
+pair for TXPBitBtn. Attempted/completed counts retain partial or uncertain delivery;
+there is no retry, global input, activation, Stop, new script, termination, save
+or recovery-latch change. A successful gesture does not certify closure or a
+recovered executor. Inspect the environment afterward, then use the existing
+explicit recovery workflow. Native qualification remains separate.
+
 ### Inspect or control Situs Setup
 
 `control_situs_setup(action, target_hwnd, expected_main_title)` accepts `inspect`,

@@ -1385,6 +1385,38 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 
 
 @mcp.tool()
+async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
+                                   target_hwnd: int, expected_main_title: str,
+                                   expected_error_text: str = "",
+                                   button_hwnd: int | None = None) -> str:
+    """Inspect or acknowledge one exact owned Undeclared identifier error.
+
+    inspect reads a pinned configured Altium Error/TMessageForm and its child
+    text through bounded WM_GETTEXT, returning the exact error text and OK HWND.
+    acknowledge requires that expected_error_text and button_hwnd plus the same
+    target PID, dialog HWND and exact main title. Only a readable Undeclared
+    identifier message with one supported enabled OK button is eligible. Changed,
+    ambiguous, foreign, unreadable, save/confirmation or native-crash dialogs
+    are refused. Revalidates before each bounded message: one BM_CLICK, or one
+    client-center down/up pair for TXPBitBtn. No global input, activation, retry,
+    Stop, script, process termination, save or recovery-latch change. A delivered
+    gesture does not prove dialog closure or executor recovery; inspect next.
+    """
+    import script_error_control
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = script_error_control.control(altium_bridge.config.altium_exe_path,
+                    action, target_pid, target_hwnd, expected_main_title,
+                    expected_error_text, button_hwnd)
+        except OSError as error:
+            outcome = {"success": False, "blocked": True, "error": str(error),
+                       "input_attempted": False, "stop_dispatched": False,
+                       "script_dispatched": False, "executor_recovered": False}
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
 async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
                               expected_main_title: str, checkbox_hwnd: int | None = None,
                               expected_checked: bool | None = None) -> str:

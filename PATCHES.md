@@ -1,5 +1,20 @@
 # Changes
 
+## 2026-10-21 — Explicit acknowledgment of an inspected script identifier error
+
+Added public acknowledge_script_error with inspect/acknowledge only. It pins the
+configured process and exact Error/TMessageForm plus main title, reads child text
+with bounded WM_GETTEXT, and accepts only Undeclared identifier with one supported
+OK control. Acknowledgment requires the observed text and button HWND, repeated
+identity/content checks, and at most one bounded gesture. No Stop, new script,
+termination, save, activation or latch mutation occurs. Partial/uncertain delivery
+is retained; closure and executor recovery are separate observations. Mocked tests
+cover exact binding, text/class/button refusal, edit-content reads, both locks and
+partial delivery. Native qualification has not been performed by the developer.
+
+References: [GetWindowText](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtextw),
+[WM_GETTEXT](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-gettext).
+
 ## 2026-10-21 — Read and explicitly enable the Situs Rip-up checkbox
 
 Inspect reports the exact Rip-up Violations After Routing control and check state.
