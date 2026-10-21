@@ -151,6 +151,53 @@ def inspect_environment(exe_path, required_stopped_pids=()):
     return result
 
 
+def _manual_stop_background_environment(exe, environment, previous_state):
+    """Qualify background readiness after an explicit manual Stop confirmation.
+
+    This does not activate a window or establish native transaction idleness.
+    It supplements a foreground-only refusal with an independent exact-main
+    responsiveness check and a verified process identity on the same HANDLE.
+    """
+    import emergency_stop
+    # Runtime import avoids the native service's import of this module.
+    from situs_native_settings_service import _environment
+
+    pid = environment.get("target_pid")
+    if (environment.get("ready") is not False
+            or environment.get("foreground_confirmed") is not False
+            or type(pid) is not int or pid <= 0
+            or environment.get("configured_process_ids") != [pid]
+            or environment.get("unresolved_launch_ids")
+            or environment.get("script_errors") or environment.get("dialog_handles")):
+        raise ValueError("Manual Stop background preflight has another unresolved blocker")
+    with emergency_stop.WinProcess(pid) as process:
+        before = process.identity()
+        emergency_stop._valid_identity(before, exe, pid)
+        if type(before.get("creation_filetime")) is not int or before["creation_filetime"] <= 0:
+            raise ValueError("Manual Stop process creation identity is unavailable")
+        recorded = (previous_state or {}).get("process_identity")
+        if recorded is not None and (not isinstance(recorded, dict)
+                or not emergency_stop._same_identity(recorded, before)):
+            raise ValueError("Manual Stop process differs from the pending operation")
+        readiness = _environment(exe, pid)
+        if (readiness.get("main_responsive") is not True
+                or type(readiness.get("main_hwnd")) is not int or readiness["main_hwnd"] <= 0
+                or readiness.get("foreground_required") is not False
+                or readiness.get("focus_or_input_requested") is not False):
+            raise ValueError("Exact background main-window readiness was not verified")
+        after = process.identity()
+        emergency_stop._valid_identity(after, exe, pid)
+        if not emergency_stop._same_identity(before, after):
+            raise ValueError("Manual Stop process identity changed during readiness check")
+    result = dict(environment, ready=True, ui_responsive=True,
+                  foreground_required=False, focus_or_input_requested=False,
+                  native_idle_verified=False,
+                  manual_stop_background_identity=after,
+                  manual_stop_background_readiness=readiness)
+    result.pop("reason", None)
+    return result
+
+
 def _launch(exe, argument):
     # Preserve Altium's raw process syntax without cmd.exe, shell escaping or
     # inherited MCP pipes. The returned handle belongs to X2, not a shell.
@@ -409,6 +456,15 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     recorded_pending = [item["pid"] for item in (old or {}).get("launches", [])
                         if item.get("pid") and item.get("exit_code") is None]
     environment = restarted["environment"] if restarted is not None else inspect_environment(exe, recorded_pending)
+    if (manual_stop_confirmed and environment.get("ready") is False
+            and environment.get("foreground_confirmed") is False
+            and not environment.get("unresolved_launch_ids")
+            and not environment.get("script_errors") and not environment.get("dialog_handles")):
+        try:
+            environment = _manual_stop_background_environment(exe, environment, old)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            return _blocked(old or {}, "Manual Stop background readiness failed: " + str(error),
+                            environment=environment)
     if not environment.get("ready"):
         return _blocked(old or {}, environment.get("reason", "Preflight failed"),
                         environment=environment)

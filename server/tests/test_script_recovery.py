@@ -135,6 +135,147 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.launcher.call_count, 1)
         self.assertNotIn("EditScript:Stop", self.launcher.call_args.args[0])
 
+    def install_manual_background(self):
+        self.environment.update(ready=False, foreground_confirmed=False,
+            reason="Bring Altium forward and handle its dialog manually",
+            dialog_handles=[], script_errors=[], unresolved_launch_ids=[])
+        self.background_identity = {"pid": 10, "creation_filetime": 133777777777777777,
+            "exe": emergency_stop._canonical("C:/Altium/X2.EXE"),
+            "user_sid": "test-user", "running": True}
+        self.background_process = Mock()
+        self.background_process.__enter__ = Mock(return_value=self.background_process)
+        self.background_process.__exit__ = Mock(return_value=False)
+        self.background_process.identity.side_effect = lambda: dict(self.background_identity)
+        self.background_factory = self.stack.enter_context(patch.object(
+            emergency_stop, "WinProcess", return_value=self.background_process))
+        self.stack.enter_context(patch.object(emergency_stop, "_current_sid", return_value="test-user"))
+        self.background_readiness = Mock(return_value={"main_responsive": True,
+            "main_hwnd": 101, "foreground_required": False,
+            "focus_or_input_requested": False, "native_idle_verified": False})
+        self.stack.enter_context(patch.dict(sys.modules, {"situs_native_settings_service":
+            SimpleNamespace(_environment=self.background_readiness)}))
+        old = {"phase": "native_settings_pending", "launches": [],
+               "process_identity": dict(self.background_identity)}
+        recovery._write_state(self.root, old)
+        return old
+
+    def test_manual_stop_background_readiness_launches_only_read_only_probe(self):
+        self.install_manual_background()
+        result = self.run_recovery(manual_stop_confirmed=True)
+        self.assertTrue(result["recovered"])
+        self.assertEqual(self.launcher.call_count, 1)
+        self.assertNotIn("EditScript:Stop", self.launcher.call_args.args[0])
+        self.background_factory.assert_called_once_with(10)
+        self.background_readiness.assert_called_once_with("C:/Altium/X2.EXE", 10)
+        self.assertEqual(self.background_process.identity.call_count, 2)
+        qualified = result["state"]["environment"]
+        self.assertFalse(qualified["foreground_confirmed"])
+        self.assertFalse(qualified["foreground_required"])
+        self.assertFalse(qualified["focus_or_input_requested"])
+        self.assertFalse(qualified["native_idle_verified"])
+        self.assertEqual(qualified["manual_stop_background_identity"], self.background_identity)
+        self.assertNotIn("reason", qualified)
+        self.assertFalse(result["native_transaction_idle_verified"])
+        self.assert_no_termination()
+        self.background_process.terminate.assert_not_called()
+
+    def test_background_recovery_requires_explicit_manual_stop_confirmation(self):
+        old = self.install_manual_background()
+        self.assertTrue(self.run_recovery()["blocked"])
+        self.background_factory.assert_not_called()
+        self.background_readiness.assert_not_called()
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_never_removes_modal_crash_or_pending_blocker(self):
+        old = self.install_manual_background()
+        baseline = dict(self.environment)
+        for change in ({"dialog_handles": [102]}, {"script_errors": [{"kind": "native_crash"}]},
+                       {"unresolved_launch_ids": [99]}, {"configured_process_ids": [10, 11]},
+                       {"target_pid": None}, {"target_pid": True},
+                       {"foreground_confirmed": True, "ui_responsive": False}):
+            with self.subTest(change=change):
+                self.environment.clear()
+                self.environment.update(baseline, **change)
+                self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+        self.background_factory.assert_not_called()
+        self.background_readiness.assert_not_called()
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_requires_exact_running_process_user_and_creation(self):
+        old = self.install_manual_background()
+        baseline = dict(self.background_identity)
+        for change in ({"pid": 11}, {"exe": "C:/Other/X2.EXE"}, {"user_sid": "other-user"},
+                       {"running": False}, {"creation_filetime": None},
+                       {"creation_filetime": True}, {"creation_filetime": 0},
+                       {"creation_filetime": -1}, {"creation_filetime": "133777777777777777"},
+                       {"creation_filetime": 133777777777777778}):
+            with self.subTest(change=change):
+                self.background_identity = dict(baseline, **change)
+                self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+        self.background_readiness.assert_not_called()
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_rejects_invalid_recorded_identity_without_dispatch(self):
+        old = self.install_manual_background()
+        for recorded in ([], "unknown", {}, {"pid": 10}):
+            with self.subTest(recorded=recorded):
+                state = dict(old, process_identity=recorded)
+                recovery._write_state(self.root, state)
+                self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+                self.assertEqual(recovery.blocked_state(self.root), state)
+        self.background_readiness.assert_not_called()
+        self.launcher.assert_not_called()
+
+    def test_manual_background_rechecks_identity_on_same_handle(self):
+        old = self.install_manual_background()
+        self.background_process.identity.side_effect = [dict(self.background_identity),
+            dict(self.background_identity, creation_filetime=133777777777777778)]
+        result = self.run_recovery(manual_stop_confirmed=True)
+        self.assertTrue(result["blocked"])
+        self.assertIn("identity changed", result["error"])
+        self.background_factory.assert_called_once_with(10)
+        self.background_readiness.assert_called_once()
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_readiness_rejection_preserves_latch(self):
+        old = self.install_manual_background()
+        for error in (ValueError("unknown or disabled main window"),
+                      OSError("read-only query failed")):
+            with self.subTest(error=str(error)):
+                self.background_readiness.side_effect = error
+                self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_readiness_requires_complete_read_only_proof(self):
+        old = self.install_manual_background()
+        baseline = dict(self.background_readiness.return_value)
+        for change in ({"main_responsive": False}, {"main_hwnd": None}, {"main_hwnd": True},
+                       {"main_hwnd": 0}, {"foreground_required": True},
+                       {"focus_or_input_requested": True}):
+            with self.subTest(change=change):
+                self.background_readiness.return_value = dict(baseline, **change)
+                self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+        self.launcher.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
+    def test_manual_background_still_blocks_tracked_pending_launcher(self):
+        old = self.install_manual_background()
+        pending = Mock()
+        pending.poll.return_value = None
+        recovery._launches[99] = pending
+        self.assertTrue(self.run_recovery(manual_stop_confirmed=True)["blocked"])
+        self.background_factory.assert_not_called()
+        self.background_readiness.assert_not_called()
+        self.launcher.assert_not_called()
+        pending.kill.assert_not_called()
+        pending.terminate.assert_not_called()
+        self.assertEqual(recovery.blocked_state(self.root), old)
+
     def install_fresh_emergency(self):
         previous = {"pid": 5, "creation_filetime": 133777777777777771,
                     "exe": emergency_stop._canonical("C:/Altium/X2.EXE"),
