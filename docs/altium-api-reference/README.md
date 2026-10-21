@@ -66,3 +66,8 @@ Existing implementation findings remain in [PCB primitives](../../dev/PCB_PRIMIT
 [routing](../../dev/PCB_ROUTING.md), [polygons](../../dev/PCB_POLYGONS.md) and the
 [development guide](../../dev/README.md). They are not silently merged into
 official-documentation evidence.
+
+Router settings and the reviewed public-tool coverage are indexed separately in
+[the Situs reference](../situs-reference/README.md), exposed through
+`search_situs_reference` and `get_situs_capabilities`. These lookups do not expand
+the lint allowlist or certify a documented process on the installed runtime.

@@ -211,3 +211,9 @@ Evidence retained in the VYBRO project under
 gesture). These are external qualification artifacts, not API documentation.
 The DRC numeric limit had separately been verified as 5000 after reopening;
 that numeric result does not imply that custom checkbox state was machine-read.
+
+For router controls, documented settings and implementation gaps, use the
+[Situs reference and capability review](../docs/situs-reference/README.md).
+Its read-only lookup tools keep official documentation separate from runtime
+qualification. Missing controls require implementation and scratch qualification
+before production use; a generic script probe is not a typed public tool.

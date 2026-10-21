@@ -1237,6 +1237,28 @@ async def search_altium_api(ctx: Context, query: str, limit: int = 10) -> str:
 
 
 @mcp.tool()
+async def search_situs_reference(ctx: Context, query: str, limit: int = 10) -> str:
+    """Search local Situs settings documentation and reviewed MCP capabilities.
+
+    Read-only and offline. Documentation is not a runtime allowlist; missing
+    matches mean unknown. Capability statuses retain their qualification bounds.
+    """
+    import situs_reference
+    return json.dumps(situs_reference.search(query, limit), indent=2)
+
+
+@mcp.tool()
+async def get_situs_capabilities(ctx: Context) -> str:
+    """Return the complete saved Situs capability review and its commit/date.
+
+    Does not inspect Altium or perform native qualification. Historical verified
+    actions do not qualify other actions, inputs, boards or runtime versions.
+    """
+    import situs_reference
+    return json.dumps(situs_reference.get_capabilities(), indent=2)
+
+
+@mcp.tool()
 async def lint_altium_script(ctx: Context, script: str, declarations: str = "",
                              declarations_file: str = "") -> str:
     """Read-only DelphiScript preflight with the same input precedence as Run.

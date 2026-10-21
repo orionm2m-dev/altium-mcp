@@ -705,3 +705,18 @@ unavailable and the mandatory negative compatibility checks still run.
 ```powershell
 python -m unittest discover -s server/tests -p test_api_reference.py -v
 ```
+
+### Situs documentation and capability coverage
+
+`search_situs_reference(query, limit=10)` and `get_situs_capabilities()` read the
+[local Situs reference](docs/situs-reference/README.md) without accessing Altium.
+The reference has 75 documented entries from five official pages and a separate
+38-capability implementation review. It distinguishes available, partial,
+blocked, missing and probe-only features. It does not turn documented settings
+into callable APIs or qualify untested native branches.
+
+Use this review before planning a routing run. Strategy/pass editing, layer
+directions, lock controls, custom-checkbox state, structured reports and native
+router lifecycle are not all covered by current tools. Router Stop is not the
+scripting debugger's Stop. Read the per-action bounds and reviewed commit before
+relying on a capability.
