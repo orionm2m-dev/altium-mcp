@@ -749,3 +749,17 @@ selection. The original copper-validation failure remains failed; reconciliation
 never retries, rolls back or declares routing successful. New native variants
 need runtime qualification after offline tests before their use is treated as
 verified. Existing single-TP generated source is pinned for historical evidence.
+
+### Automatic script-error handling is read-only
+
+The general bridge and `run_altium_script` retain recognized compile/runtime
+errors and native crash evidence without dismissing dialogs, posting/sending
+window messages, activating windows, stopping the executor or retrying commands.
+Automatic UI dismissal is disabled unconditionally. The error result preserves
+the exact diagnostic text; sandbox results also retain the last logged stage.
+It reports `blocked=true`, `recovery_needed=true` and zero dialogs closed for
+errors detected after dispatch; the mutation outcome remains unknown.
+
+Use only a verified native recovery path before dispatching again. A recognized
+error does not authorize an older explicit UI acknowledgment tool, nor does a
+recovery request imply that any error dialog has already been resolved.

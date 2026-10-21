@@ -66,11 +66,13 @@ class SandboxGuardTests(unittest.TestCase):
             exec(compile(ast.Module(body=[method], type_ignores=[]), "sandbox_guard_test", "exec"), environment)
             with patch.dict(sys.modules, {"dialogs": native_dialogs}), \
                  patch.object(script_guard, "_window_process", side_effect=lambda hwnd: (hwnd, exe)), \
-                 patch.object(script_guard, "stop_script_executor") as stop:
+                 patch.object(script_guard, "stop_script_executor") as stop, \
+                 patch.object(script_guard, "dismiss_script_errors", side_effect=AssertionError("automatic UI dismissal forbidden")) as dismiss:
                 result = json.loads(self.loop.run_until_complete(environment["_run_altium_script_locked"](
                     None, "anything", 12, "", "")))
         broad.assert_not_called()
         stop.assert_not_called()
+        dismiss.assert_not_called()
         self.assertEqual(popen.call_count, 0 if window_class == "TShowException" and not crash_after_launch else 1)
         return result, user32.PostMessageW, clock.now
 
@@ -110,12 +112,17 @@ class SandboxGuardTests(unittest.TestCase):
         close.assert_not_called()
         self.assertFalse(result["retry_performed"])
 
-    def test_compile_error_captured_and_only_exact_dialog_closed_without_stop(self):
+    def test_compile_error_captured_without_any_dialog_action_or_stop(self):
         result, close, elapsed = self.run_case("Undeclared identifier: SomeFunction")
         self.assertEqual(elapsed, 2)
         self.assertEqual(result["script_errors"][0]["kind"], "compile")
-        self.assertEqual(result["dialogs_dismissed"], 1)
-        close.assert_called_once_with(1, 0x0010, 0, 0)
+        self.assertEqual(result["dialogs_dismissed"], 0)
+        self.assertEqual(result["dialogs_closed"], 0)
+        self.assertTrue(result["blocked"])
+        self.assertTrue(result["recovery_needed"])
+        self.assertTrue(result["native_error_acknowledgment_required"])
+        self.assertFalse(result["automatic_ui_actions"])
+        close.assert_not_called()
         self.assertFalse(result["executor_stop_dispatched"])
         self.assertFalse(result["retry_performed"])
         self.assertTrue(result["requires_recovery_probe"])
@@ -126,7 +133,11 @@ class SandboxGuardTests(unittest.TestCase):
         self.assertEqual(elapsed, 2)
         self.assertEqual(result["script_errors"][0]["kind"], "runtime")
         self.assertEqual(result["last_step_reached"], "before risky statement")
-        close.assert_called_once()
+        close.assert_not_called()
+        self.assertEqual(result["dialogs_dismissed"], 0)
+        self.assertTrue(result["blocked"])
+        self.assertTrue(result["recovery_needed"])
+        self.assertFalse(result["automatic_ui_actions"])
         self.assertFalse(result["executor_recovered"])
 
     def test_ambiguous_instances_capture_error_without_closing_dialog(self):

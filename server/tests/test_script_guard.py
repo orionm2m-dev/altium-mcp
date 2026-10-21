@@ -127,7 +127,7 @@ class BridgeGuardTests(unittest.TestCase):
         async def sleep(_):clock.now+=3
         guard=SimpleNamespace(blocking_crash_report=Mock(return_value=preexisting_crash),
                               find_script_errors=Mock(return_value=failures),
-                              dismiss_script_errors=Mock(return_value=closed),
+                              dismiss_script_errors=Mock(side_effect=AssertionError("automatic UI dismissal forbidden")),
                               stop_script_executor=Mock())
         calls=[]
         async def run():calls.append("run");return True
@@ -140,6 +140,7 @@ class BridgeGuardTests(unittest.TestCase):
             obj=SimpleNamespace(config=SimpleNamespace(altium_exe_path="X2.EXE"),run_altium_script=run)
             result=asyncio.run(env["_execute_command_locked"](obj,"set_pcb_routing",{},120))
         self.assertEqual(calls,[] if preexisting_crash else ["run"])
+        guard.dismiss_script_errors.assert_not_called()
         return result,guard,clock.now
 
     def test_known_script_failure_returns_promptly_without_retry_or_success_claim(self):
@@ -152,6 +153,12 @@ class BridgeGuardTests(unittest.TestCase):
         self.assertFalse(result["executor_recovered"])
         self.assertFalse(result["executor_stop_dispatched"])
         self.assertEqual(result["mutation_state"],"unknown")
+        self.assertEqual(result["dialogs_closed"],0)
+        self.assertEqual(result["dialogs_dismissed"],0)
+        self.assertTrue(result["blocked"])
+        self.assertTrue(result["recovery_needed"])
+        self.assertTrue(result["native_error_acknowledgment_required"])
+        self.assertFalse(result["automatic_ui_actions"])
         guard.stop_script_executor.assert_not_called()
 
     def test_native_crash_before_dispatch_never_runs_script(self):
@@ -178,6 +185,18 @@ class BridgeGuardTests(unittest.TestCase):
         result,guard,_=self.run_case([error],[])
         self.assertFalse(result["executor_stop_dispatched"])
         guard.stop_script_executor.assert_not_called()
+
+    def test_automatic_failure_paths_have_no_ui_dismiss_or_stop_calls(self):
+        tree=ast.parse((ROOT/"main.py").read_text(encoding="utf-8"))
+        bridge=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=="AltiumBridge")
+        methods=[next(n for n in bridge.body if isinstance(n,ast.AsyncFunctionDef) and n.name=="_execute_command_locked"),
+                 next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=="_run_altium_script_locked")]
+        forbidden={"dismiss_script_errors","_dismiss_altium_dialogs","PostMessageW","SendMessageW", "stop_script_executor"}
+        for method in methods:
+            for node in ast.walk(method):
+                if isinstance(node,ast.Call):
+                    name=node.func.attr if isinstance(node.func,ast.Attribute) else getattr(node.func,"id","")
+                    self.assertNotIn(name,forbidden,method.name)
 
     def test_public_result_keeps_script_failure_evidence(self):
         tree=ast.parse((ROOT/"main.py").read_text(encoding="utf-8"))

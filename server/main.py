@@ -321,7 +321,8 @@ class AltiumBridge:
                 if not RESPONSE_FILE.exists() and time.time() - start_time >= 2:
                     failures = script_guard.find_script_errors(self.config.altium_exe_path)
                     if failures:
-                        closed = script_guard.dismiss_script_errors(self.config.altium_exe_path, failures)
+                        # Automatic error handling is read-only. Do not dismiss a
+                        # dialog or send window messages, even for recognized errors.
                         stopped = False
                         stop_error = ""
                         # Stop is dispatched only by bounded recover_script_executor.
@@ -330,7 +331,11 @@ class AltiumBridge:
                         return {
                             "success": False, "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
                             "command": command, "script_errors": failures,
-                            "dialogs_closed": len(closed),
+                            "dialogs_closed": 0, "dialogs_dismissed": 0,
+                            "automatic_ui_actions": False, "blocked": True,
+                            "recovery_needed": True, "native_error_acknowledgment_required": True,
+                            "recovery": "Error retained without UI actions. Inspect the exact failure and use "
+                                        "a verified native recovery path; do not replay the command.",
                             "executor_stop_dispatched": stopped, "executor_stop_error": stop_error,
                             "executor_recovered": False, "requires_recovery_probe": True,
                             "mutation_state": "unknown", "retry_performed": False,
@@ -1292,10 +1297,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     APIs remain warnings. Use lint_altium_script to inspect without dispatch.
 
     The script runs in a SEPARATE script project to isolate source helpers.
-    A paused global script executor can still block other MCP tools. Only
-    recognized, revalidated script-error dialogs are dismissed; save/confirm
-    prompts remain untouched. Script errors return immediately without Stop
-    or retry. Use recover_script_executor before any further dispatch.
+    A paused global script executor can still block other MCP tools. Automatic
+    error handling is read-only: recognized script errors are retained without
+    dismissing dialogs, sending window messages, changing focus, Stop or retry.
+    Errors return blocked/recovery-needed with the exact text and last stage.
+    Resolve the error through a verified native recovery path before dispatch.
 
     Writing the script:
     - Call SandboxLog('...') before each risky statement. The log is flushed
@@ -1389,8 +1395,7 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
         if not SANDBOX_RESULT.exists() and time.time() - start >= 2:
             failures = script_guard.find_script_errors(altium_bridge.config.altium_exe_path)
             if failures:
-                closed = script_guard.dismiss_script_errors(
-                    altium_bridge.config.altium_exe_path, failures)
+                # Read-only diagnostics only: error dialogs remain untouched.
                 steps = (SANDBOX_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
                          if SANDBOX_LOG.exists() else [])
                 return json.dumps({"preflight": preflight,
@@ -1398,12 +1403,15 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
                     "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
                     "script_errors": failures, "steps": steps,
                     "last_step_reached": steps[-1] if steps else None,
-                    "dialogs_dismissed": len(closed),
+                    "dialogs_dismissed": 0, "dialogs_closed": 0,
+                    "automatic_ui_actions": False, "blocked": True,
+                    "recovery_needed": True, "native_error_acknowledgment_required": True,
                     "dialogs": [item["text"] for item in failures],
                     "executor_stop_dispatched": False, "executor_recovered": False,
                     "requires_recovery_probe": True, "retry_performed": False,
                     "mutation_state": "unknown",
-                    "recovery": "Use recover_script_executor; do not replay the failed script.",
+                    "recovery": "Error retained without UI actions. Inspect the exact failure and use "
+                                "a verified native recovery path; do not replay the failed script.",
                 }, indent=2)
 
     steps = []
