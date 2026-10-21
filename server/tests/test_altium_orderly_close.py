@@ -160,6 +160,59 @@ class CloseTests(unittest.IsolatedAsyncioTestCase):
         self.main.exit_observation.assert_not_called()
         self.assertIsNotNone(close.script_recovery.blocked_state(self.root))
 
+    async def test_teardown_identity_loss_can_precede_handle_signal_by_multiple_polls(self):
+        self.main.wait.side_effect=[{'wait_status':258}]*4+[{'wait_status':0}]
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       ValueError('Target is not running')]
+        result=await self.run_close()
+        self.assertTrue(result['success'],result)
+        self.assertTrue(result['exact_main_exited'])
+        self.assertTrue(result['teardown_identity_query_unavailable'])
+        self.assertGreaterEqual(self.clock,0.3)
+        self.assertEqual(self.main.identity.call_count,4)
+        self.api.windows.assert_not_called()
+        self.factory.assert_called_once_with(PID,synchronize_access=True)
+        self.launch.assert_called_once_with(EXE,close.QUIT_ARGUMENT)
+
+    async def test_teardown_token_loss_waits_boundedly_without_requery_or_ui(self):
+        self.main.wait.return_value={'wait_status':258}
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       OSError('Process token unavailable')]
+        result=await self.run_close()
+        self.assertFalse(result['success'])
+        self.assertTrue(result['outcome_unknown'])
+        self.assertFalse(result['exact_main_exited'])
+        self.assertTrue(result['teardown_identity_query_unavailable'])
+        self.assertIn('bounded wait',result['error'])
+        self.assertGreaterEqual(self.clock,1)
+        self.assertLess(self.clock,1.2)
+        self.assertEqual(self.main.identity.call_count,4)
+        self.main.exit_observation.assert_not_called()
+        self.api.windows.assert_not_called()
+        self.factory.assert_called_once_with(PID,synchronize_access=True)
+        self.launch.assert_called_once()
+        self.assertIsNotNone(close.script_recovery.blocked_state(self.root))
+
+    async def test_delayed_teardown_signal_still_requires_exact_exit_identity(self):
+        self.main.wait.side_effect=[{'wait_status':258}]*3+[{'wait_status':0}]
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       OSError('Token gone')]
+        self.main.exit_observation.return_value=dict(pid=PID,creation_filetime=1,exit_code=0)
+        result=await self.run_close()
+        self.assertFalse(result['success'])
+        self.assertTrue(result['outcome_unknown'])
+        self.assertFalse(result['exact_main_exited'])
+        self.assertIn('Exited process identity changed',result['error'])
+        self.factory.assert_called_once_with(PID,synchronize_access=True)
+        self.api.windows.assert_not_called()
+
+    async def test_identity_unavailable_before_quit_does_not_enter_teardown_wait(self):
+        self.main.identity.side_effect=ValueError('Target is not running')
+        result=await self.run_close()
+        self.assertFalse(result['dispatch_attempted'])
+        self.launch.assert_not_called()
+        self.main.wait.assert_not_called()
+
     async def test_pending_launcher_after_main_exit_not_complete(self):
         self.launcher.poll.return_value=None
         result=await self.run_close();self.assertTrue(result['exact_main_exited'])

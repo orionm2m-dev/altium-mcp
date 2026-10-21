@@ -207,6 +207,7 @@ async def close(exe, exchange_dir, command_lock, read_inventory=None, *, pcb_pat
                         script_recovery._write_state(exchange, state)
                         deadline = time.monotonic() + timeout_seconds
                         api = altium_focus.WindowAPI()
+                        teardown_identity_unavailable = False
                         while True:
                             waited = main.wait(0)
                             code = launcher.poll()
@@ -228,25 +229,27 @@ async def close(exe, exchange_dir, command_lock, read_inventory=None, *, pcb_pat
                                     break
                             elif waited.get('wait_status') != 258:
                                 raise ValueError('Unexpected process wait state')
-                            else:
+                            elif not teardown_identity_unavailable:
                                 try:
                                     _identity(main, exe, target_pid, created)
-                                except (OSError, ValueError):
-                                    # Normal exit can occur between the nonblocking
-                                    # wait and identity query. A dying process may
-                                    # no longer expose its token/image path. Only
-                                    # the SAME pinned HANDLE becoming signalled
-                                    # allows another iteration to verify PID,
-                                    # creation time and exit code; never reopen PID.
-                                    if main.wait(0).get('wait_status') == 0:
-                                        continue
-                                    raise
-                                rows = api.windows(target_pid)
-                                blockers = [r for r in rows if r.get('class') in BLOCKING_CLASSES
-                                            or r.get('class') not in {'TDocumentForm', 'TApplication'}]
-                                if blockers:
-                                    result.update(dialogs=blockers, error='Native dialog blocks exit; no prompt answered')
-                                    break
+                                except (OSError, ValueError) as error:
+                                    # Quit was already dispatched after exact identity
+                                    # and clean-inventory checks. During teardown,
+                                    # token/image/running queries may fail before the
+                                    # pinned HANDLE becomes signalled. From here use
+                                    # only that HANDLE and the owned launcher until
+                                    # the original deadline; no PID reopen, further
+                                    # identity query, window observation or new input.
+                                    teardown_identity_unavailable = True
+                                    result.update(teardown_identity_query_unavailable=True,
+                                                  teardown_identity_error=str(error))
+                                else:
+                                    rows = api.windows(target_pid)
+                                    blockers = [r for r in rows if r.get('class') in BLOCKING_CLASSES
+                                                or r.get('class') not in {'TDocumentForm', 'TApplication'}]
+                                    if blockers:
+                                        result.update(dialogs=blockers, error='Native dialog blocks exit; no prompt answered')
+                                        break
                             if time.monotonic() >= deadline:
                                 result['error'] = 'Normal exit was not verified within the bounded wait; no retry'
                                 break
