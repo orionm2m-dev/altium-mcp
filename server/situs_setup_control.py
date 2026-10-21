@@ -54,12 +54,15 @@ def _checkbox(target, hwnd):
             or _caption(row["text"]) != RIP_UP_CAPTION):
         raise ValueError("Unsupported exact Rip-up checkbox class, caption or button style")
     state = _message(target, hwnd, 0x00F0)  # BM_GETCHECK; never a state-changing message.
-    if state not in {0, 1}:
+    if not custom_xp and state not in {0, 1}:
         raise ValueError("Rip-up checkbox state is indeterminate or unsupported")
     if (_button(target, hwnd) != {k: v for k, v in row.items() if k != "button_type"}
             or win32gui.GetWindowLong(hwnd, -16) & 0xF != row["button_type"]):
         raise ValueError("Checkbox changed during state read")
     target.verify()
+    if custom_xp:
+        return dict(row, raw_bm_getcheck=state, state_known=False,
+            state_error="Observed AD26.9.1 TXPCheckBox returns zero for both visual states; BM_GETCHECK is not a state getter. No blind toggle permitted.")
     return dict(row, checked=bool(state))
 
 
@@ -130,30 +133,9 @@ def control(exe, action, target_hwnd, expected_main_title, checkbox_hwnd=None, e
                 return dict(result, success=True, no_input=True, checkbox_state_verified=True,
                     already_enabled=True, checked_after=True)
             target.verify()
-            custom_xp = checkbox["class"] == "TXPCheckBox" and checkbox["button_type"] == 0
-            if custom_xp:
-                rect = tuple(win32gui.GetClientRect(checkbox_hwnd))
-                left, top, right, bottom = rect
-                x, y = (left+right)//2, (top+bottom)//2
-                if right <= left or bottom <= top or not 0 <= x <= 32767 or not 0 <= y <= 32767:
-                    raise ValueError("TXPCheckBox has invalid control-client bounds")
-                messages = [(0x201, 1, x | (y << 16)), (0x202, 0, x | (y << 16))]
-                result.update(control_client_rect=list(rect), control_client_point=[x,y],
-                    dispatch_method="bounded_control_client_down_up", planned_messages=2)
-                for msg, wp, lp in messages:
-                    if (_checkbox(target, checkbox_hwnd) != checkbox or _main(target, expected_main_title) != main
-                            or tuple(win32gui.GetClientRect(checkbox_hwnd)) != rect):
-                        raise ValueError("TXPCheckBox or main window changed before gesture message")
-                    target.verify()
-                    result.update(checkbox_message_attempted=True, message_pair_attempted=True)
-                    result["messages_attempted"] += 1
-                    _message(target, checkbox_hwnd, msg, wp, lp)
-                    result["messages_completed"] += 1
-                result["message_pair_completed"] = True
-            else:
-                result.update(checkbox_message_attempted=True, planned_messages=1, messages_attempted=1)
-                _message(target, checkbox_hwnd, 0x00F5)  # One BM_CLICK for a standard checkbox.
-                result["messages_completed"] = 1
+            result.update(checkbox_message_attempted=True, planned_messages=1, messages_attempted=1)
+            _message(target, checkbox_hwnd, 0x00F5)  # One BM_CLICK for a standard checkbox.
+            result["messages_completed"] = 1
             result["checkbox_message_completed"] = True
             after = _checkbox(target, checkbox_hwnd)
             if (after != dict(checkbox, checked=True) or _main(target, expected_main_title) != main):

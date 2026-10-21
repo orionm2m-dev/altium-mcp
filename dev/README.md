@@ -181,3 +181,33 @@ so a wedge there still leaves everything useful already on disk.
 - [`SHEET_DUPLICATION.md`](SHEET_DUPLICATION.md) - copying a schematic sheet.
   The document iterator recurses, so `Container.ObjectId = 32` (not
   `ObjectId`) is what identifies the objects a sheet actually owns.
+
+
+### Native qualification: custom checkbox state (2026-10-21)
+
+In Altium Designer 26.9.1, the Situs `Rip-up Violations After Routing`
+control was observed as `TXPCheckBox`, style low bits `0`. One exact
+control-client down/up gesture visibly changed it from unchecked to checked.
+`BM_GETCHECK` nevertheless returned `0` both before and after. A zero reply
+must therefore **not** be interpreted as unchecked for this custom control.
+The gesture was not repeated; the checked state was verified from a fresh
+screenshot before starting Route All.
+
+`control_situs_setup.inspect` now exposes `raw_bm_getcheck`,
+`state_known: false` and `state_error`, with no `checked` Boolean for that
+class/style. `enable_rip_up` refuses it before input, including repeated
+requests. The prior custom gesture implementation is removed. A future
+implementation needs a qualified native state getter or an explicit fresh
+visual receipt bound to the exact process, dialog and control, with a new
+post-action image; a blind retry is unsafe because it can toggle the option off.
+Standard checkbox behavior remains supported. DRC custom checkbox inspection
+likewise reports an unqualified raw reply and blocks limit/OK operations that
+claim verification of every checkbox.
+
+Evidence retained in the VYBRO project under
+`Info/Research/Situs_qualification_2026-10-21/`:
+`rules_setup_capture/01_get_screenshot.1.png` (before) and
+`rules_route_all_started/00_get_screenshot.1.png` (checked after the single
+gesture). These are external qualification artifacts, not API documentation.
+The DRC numeric limit had separately been verified as 5000 after reopening;
+that numeric result does not imply that custom checkbox state was machine-read.

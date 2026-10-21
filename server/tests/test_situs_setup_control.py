@@ -177,57 +177,37 @@ class SitusTests(unittest.TestCase):
         self.add_checkbox()
         self.rows[14]["class"]="TXPCheckBox"
         self.gui.GetWindowLong.return_value=0
-        def message(target,hwnd,msg,*args):
-            if msg==0xF0:return int(self.checked)
-            if msg==0x202:self.checked=True
-            self.assertIn(msg,{0x201,0x202})
-            return 0
-        self.message.side_effect=message
+        self.message.side_effect=lambda *args:0
 
-    def test_custom_xp_zero_style_reads_and_enables_with_single_bounded_pair(self):
+    def test_custom_xp_zero_reply_is_unknown_not_false(self):
         self.custom_checkbox()
-        inspected=self.call()
-        self.assertTrue(inspected["success"],inspected)
-        self.assertFalse(inspected["checkboxes"][0]["checked"])
-        result=self.enable()
-        self.assertTrue(result["success"],result)
-        self.assertTrue(result["checkbox_state_verified"])
-        self.assertTrue(result["message_pair_completed"])
-        self.assertEqual([c.args[2:] for c in self.message.call_args_list if c.args[2]!=0xF0],
-            [(0x201,1,50 | (10<<16)),(0x202,0,50 | (10<<16))])
+        result=self.call();self.assertTrue(result["success"],result)
+        checkbox=result["checkboxes"][0]
+        self.assertEqual(checkbox["raw_bm_getcheck"],0)
+        self.assertFalse(checkbox["state_known"]);self.assertNotIn("checked",checkbox)
+        self.assertIn("state_error",checkbox)
+        self.assertTrue(all(c.args[2]==0xF0 for c in self.message.call_args_list))
+
+    def test_custom_xp_nonzero_reply_still_unqualified(self):
+        self.custom_checkbox();self.message.side_effect=lambda *args:1
+        checkbox=self.call()["checkboxes"][0]
+        self.assertEqual(checkbox["raw_bm_getcheck"],1);self.assertNotIn("checked",checkbox)
+        self.assertFalse(checkbox["state_known"])
+
+    def test_custom_enable_and_repeat_are_blocked_before_any_gesture(self):
+        self.custom_checkbox()
+        for expected in (False,True,False):
+            result=self.enable(expected)
+            self.assertFalse(result["success"]);self.assertTrue(result["blocked"])
+            self.assertFalse(result["checkbox_message_attempted"])
+            self.assertFalse(result["checkbox_state_verified"])
+        self.assertTrue(all(c.args[2]==0xF0 for c in self.message.call_args_list))
         self.gui.PostMessage.assert_not_called()
 
     def test_zero_style_on_other_checkbox_stays_refused(self):
         self.add_checkbox();self.gui.GetWindowLong.return_value=0
         self.assertTrue(self.enable()["blocked"])
         self.message.assert_not_called()
-
-    def test_custom_pair_no_checked_readback_is_unknown_no_fallback(self):
-        self.custom_checkbox();self.message.side_effect=lambda *args:0
-        result=self.enable()
-        self.assertFalse(result["success"]);self.assertTrue(result["outcome_unknown"])
-        self.assertFalse(result["checkbox_state_verified"])
-        self.assertEqual([c.args[2] for c in self.message.call_args_list if c.args[2]!=0xF0],[0x201,0x202])
-
-    def test_custom_pair_up_timeout_is_partial_and_not_retried(self):
-        self.custom_checkbox()
-        def message(*args):
-            if args[2]==0x202:raise OSError("up timeout")
-            return 0
-        self.message.side_effect=message
-        result=self.enable();self.assertFalse(result["success"])
-        self.assertTrue(result["partial_dispatch"]);self.assertTrue(result["outcome_unknown"])
-        self.assertEqual(result["messages_completed"],1)
-        self.assertEqual([c.args[2] for c in self.message.call_args_list if c.args[2]!=0xF0],[0x201,0x202])
-
-    def test_custom_checkbox_changed_after_down_refuses_up(self):
-        self.custom_checkbox()
-        def message(*args):
-            if args[2]==0x201:self.rows[14]["text"]="Different checkbox"
-            return 0
-        self.message.side_effect=message
-        result=self.enable();self.assertFalse(result["success"]);self.assertTrue(result["partial_dispatch"])
-        self.assertEqual([c.args[2] for c in self.message.call_args_list if c.args[2]!=0xF0],[0x201])
 
     def test_custom_ok_pair_and_standard_cancel_message_without_completion_claim(self):
         for action, hwnd in [("ok", 11), ("cancel", 12)]:
