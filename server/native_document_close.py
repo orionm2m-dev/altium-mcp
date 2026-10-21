@@ -42,7 +42,7 @@ def build_close_request(active_pcb_path, target_document_path, operation_id):
 
 
 def _request(request):
-    if not isinstance(request, dict):
+    if not isinstance(request, dict) or not {"active_pcb_path", "target_document_path", "operation_id"} <= set(request):
         raise ValueError("A fixed close request is required")
     expected = build_close_request(request["active_pcb_path"], request["target_document_path"], request["operation_id"])
     if set(request) != set(expected) or any(type(request[k]) is not type(v) or request[k] != v for k, v in expected.items()):
@@ -82,7 +82,7 @@ def parse_close_receipt(data, request):
     for key, value in expected.items():
         if type(result[key]) is not type(value) or result[key] != value:
             raise ValueError("Native close receipt identity/contract mismatch: " + key)
-    if result["stage"] not in STAGES or not isinstance(result["error"], str):
+    if not isinstance(result["stage"], str) or result["stage"] not in STAGES or not isinstance(result["error"], str):
         raise ValueError("Invalid native close stage/error")
     if any(type(result[k]) is not bool for k in BOOL_FIELDS):
         raise ValueError("Invalid native close boolean")

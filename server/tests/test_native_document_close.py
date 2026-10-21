@@ -77,6 +77,8 @@ class NativeDocumentCloseTests(unittest.TestCase):
                         {"focus_requested": True}, {"arbitrary_command": "close all"}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 close.build_close_program(dict(self.request, **changes), r"C:\exchange\unique.json")
+        with self.assertRaises(ValueError):
+            close.build_close_program({}, r"C:\exchange\unique.json")
 
     def test_bad_receipt_path_refused(self):
         for path in ("result.json", r"C:\exchange\..\result.json", r"C:\result.pas", "C:\\bad\0.json"):
@@ -163,7 +165,7 @@ class NativeDocumentCloseTests(unittest.TestCase):
 
     def test_claimed_success_or_missing_error_in_wrong_stage_refused(self):
         for changes in ({"stage": "entered"}, {"stage": "readback_failed", "success": False},
-                        {"stage": "unknown"}):
+                        {"stage": "unknown"}, {"stage": ["completed"]}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.parse(dict(self.success_receipt(), **changes))
 
