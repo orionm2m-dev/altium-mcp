@@ -229,7 +229,18 @@ async def close(exe, exchange_dir, command_lock, read_inventory=None, *, pcb_pat
                             elif waited.get('wait_status') != 258:
                                 raise ValueError('Unexpected process wait state')
                             else:
-                                _identity(main, exe, target_pid, created)
+                                try:
+                                    _identity(main, exe, target_pid, created)
+                                except (OSError, ValueError):
+                                    # Normal exit can occur between the nonblocking
+                                    # wait and identity query. A dying process may
+                                    # no longer expose its token/image path. Only
+                                    # the SAME pinned HANDLE becoming signalled
+                                    # allows another iteration to verify PID,
+                                    # creation time and exit code; never reopen PID.
+                                    if main.wait(0).get('wait_status') == 0:
+                                        continue
+                                    raise
                                 rows = api.windows(target_pid)
                                 blockers = [r for r in rows if r.get('class') in BLOCKING_CLASSES
                                             or r.get('class') not in {'TDocumentForm', 'TApplication'}]

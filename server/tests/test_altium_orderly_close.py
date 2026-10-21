@@ -129,6 +129,37 @@ class CloseTests(unittest.IsolatedAsyncioTestCase):
         result=await self.run_close();self.assertTrue(result['outcome_unknown'])
         self.assertFalse(result['prompt_input_requested']);self.assertIn('dialogs',result)
 
+    async def test_exit_between_wait_and_identity_uses_same_pinned_handle(self):
+        self.main.wait.side_effect=[{'wait_status':258},{'wait_status':0},{'wait_status':0}]
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       ValueError('Target is not running')]
+        result=await self.run_close()
+        self.assertTrue(result['success'],result)
+        self.assertTrue(result['exact_main_exited'])
+        self.main.exit_observation.assert_called_once()
+        self.factory.assert_called_once_with(PID,synchronize_access=True)
+        self.launch.assert_called_once()
+        self.main.terminate.assert_not_called()
+
+    async def test_exited_process_token_unavailable_uses_same_handle_exit(self):
+        self.main.wait.side_effect=[{'wait_status':258},{'wait_status':0},{'wait_status':0}]
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       OSError('Process token unavailable')]
+        result=await self.run_close()
+        self.assertTrue(result['success'],result)
+        self.assertTrue(result['exact_main_exited'])
+        self.factory.assert_called_once_with(PID,synchronize_access=True)
+
+    async def test_identity_error_while_original_process_alive_stays_unknown(self):
+        self.main.wait.return_value={'wait_status':258}
+        self.main.identity.side_effect=[self.identity,self.identity,self.identity,
+                                       ValueError('Identity mismatch')]
+        result=await self.run_close()
+        self.assertTrue(result['outcome_unknown'])
+        self.assertFalse(result['exact_main_exited'])
+        self.main.exit_observation.assert_not_called()
+        self.assertIsNotNone(close.script_recovery.blocked_state(self.root))
+
     async def test_pending_launcher_after_main_exit_not_complete(self):
         self.launcher.poll.return_value=None
         result=await self.run_close();self.assertTrue(result['exact_main_exited'])
