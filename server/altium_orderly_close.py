@@ -264,3 +264,121 @@ async def close(exe, exchange_dir, command_lock, read_inventory=None, *, pcb_pat
                         return result
     except (OSError, ValueError, TypeError) as error:
         return dict(result, error=str(error))
+
+
+def fresh_start_after_pending_close(exe, exchange_dir, old):
+    """Verify evidence for one new read-only probe; never repeat Quit or Stop.
+
+    The former process' historical exit code remains unknown. Current absence
+    of that exact identity plus a newer owned normal-start receipt authorizes
+    only a new executor probe, not retrospective completion of the close.
+    Caller holds the bridge lock and cross-process recovery claim.
+    """
+    exchange = Path(exchange_dir)
+    latch_path = exchange / 'script_recovery_state.json'
+    raw = latch_path.read_bytes()
+    token = old.get('token')
+    if (json.loads(raw) != old or old.get('phase') != 'orderly_close_pending'
+            or not isinstance(token, str) or re.fullmatch('[0-9a-f]{32}', token) is None):
+        raise ValueError('Exact pending ordinary-close checkpoint required')
+    folder = exchange / 'orderly_close' / token
+    result_path = folder / 'result.json'
+    if emergency_stop._canonical(old.get('close_receipt', '')) != emergency_stop._canonical(result_path):
+        raise ValueError('Close receipt is outside the exact operation directory')
+    request_path = folder / 'request.json'
+    inventory_path = folder / 'inventory.json'
+    startup_path = exchange / 'altium_startup.json'
+    frozen = {path:path.read_bytes() for path in (request_path,result_path,inventory_path,startup_path)}
+    request = json.loads(frozen[request_path]); result = json.loads(frozen[result_path])
+    previous = old.get('process_identity')
+    if (not isinstance(previous, dict) or previous.get('exe') != emergency_stop._canonical(exe)
+            or previous.get('user_sid') != emergency_stop._current_sid()
+            or type(previous.get('pid')) is not int or previous['pid'] <= 0
+            or type(previous.get('creation_filetime')) is not int or previous['creation_filetime'] <= 0
+            or not isinstance(request, dict) or not isinstance(result, dict)
+            or request.get('operation_id') != token or request.get('target_pid') != previous['pid']
+            or request.get('creation_filetime') != str(previous['creation_filetime'])
+            or emergency_stop._canonical(request.get('exe', '')) != emergency_stop._canonical(exe)
+            or any(result.get(k) != v for k,v in request.items())
+            or result.get('dispatch_attempted') is not True
+            or result.get('outcome_unknown') is not True
+            or result.get('force_termination_requested') is not False
+            or result.get('save_requested') is not False or result.get('prompt_input_requested') is not False
+            or result.get('retry_allowed') is not False or result.get('replayed') is not False
+            or result.get('launcher_exit_code') != 0):
+        raise ValueError('Matching owned close intent/result with successful quit launcher required')
+    inventory = json.loads(frozen[inventory_path])
+    if hashlib.sha256(frozen[inventory_path]).hexdigest() != result.get('inventory_sha256'):
+        raise ValueError('Recorded clean inventory hash changed')
+    _clean_inventory(inventory, result.get('inventory_request_id'), request['pcb_path'])
+    launches = old.get('launches', [])
+    if (len(launches) != 1 or launches[0].get('phase') != 'ordinary_quit'
+            or type(launches[0].get('pid')) is not int or launches[0]['pid'] <= 0
+            or launches[0]['pid'] == previous['pid'] or launches[0].get('exit_code') not in (None,0)):
+        raise ValueError('Exactly one recorded ordinary-quit launcher required')
+    launcher_pid = launches[0]['pid']
+    owned = script_recovery._launches.get(launcher_pid)
+    if owned is not None:
+        if owned.poll() != 0: raise ValueError('The owned quit launcher is not successfully exited')
+    else:
+        try: launcher = emergency_stop.WinProcess(launcher_pid)
+        except OSError as error:
+            if getattr(error,'winerror',None) != 87: raise
+        else:
+            with launcher: observed = launcher.exit_observation()
+            if observed.get('pid') != launcher_pid or observed.get('exit_code') != 0:
+                raise ValueError('Quit launcher is still present or successful exit is unconfirmed')
+    if not emergency_stop._exact_target_has_exited(previous):
+        raise ValueError('The previous exact main process has not exited')
+    startup = json.loads(frozen[startup_path]); identity = startup.get('identity')
+    if (not isinstance(identity, dict) or startup.get('success') is not True
+            or startup.get('launched') is not True or startup.get('script_dispatched') is not False
+            or startup.get('mutation_replayed') is not False or startup.get('exit_code') is not None
+            or startup.get('status') != 'process_started_ui_unverified'
+            or emergency_stop._canonical(startup.get('configured_exe','')) != emergency_stop._canonical(exe)
+            or type(identity.get('pid')) is not int or identity['pid'] <= 0
+            or startup.get('target_pid') != identity['pid']
+            or type(identity.get('creation_filetime')) is not int
+            or identity['creation_filetime'] <= previous['creation_filetime']
+            or startup.get('creation_filetime_decimal') != str(identity['creation_filetime'])):
+        raise ValueError('Newer exact successful public normal-start receipt required')
+    with emergency_stop.WinProcess(identity['pid']) as main:
+        current = main.identity()
+        emergency_stop._valid_identity(current, exe, identity['pid'])
+        if not emergency_stop._same_identity(current,identity):
+            raise ValueError('Current main differs from recorded normal start')
+        main_window = _ready(exe, identity['pid'])
+        environment = dict(ready=True, target_pid=identity['pid'],
+            configured_process_ids=[identity['pid']],
+            process_windows={identity['pid']: [main_window]},
+            foreground_required=False, native_idle_verified=False)
+        if not emergency_stop._same_identity(main.identity(),current):
+            raise ValueError('New main changed during verification')
+        if latch_path.read_bytes() != raw or any(path.read_bytes()!=data for path,data in frozen.items()):
+            raise ValueError('Close, inventory, recovery or startup evidence changed')
+    return dict(identity=current,environment=environment,evidence={
+        'previous_main_identity':previous,'previous_close_token':token,
+        'previous_main_absence_verified':True,'previous_main_historical_exit_code':None,
+        'previous_close_retroactively_completed':False,'quit_launcher_recorded_exit_code':0,
+        'quit_launcher_historical_creation_verified':False,
+        'normal_start_identity_verified':True,'new_probe_required':True,
+        'quit_replayed':False,'stop_dispatched':False})
+
+
+def verify_restart_after_probe(exe, expected_identity):
+    """Bind a matching probe receipt to the same ready restarted process.
+
+    This read-only readiness check neither activates nor restores a window.
+    It must run before removing the recovery latch after the executor probe.
+    """
+    pid = expected_identity['pid']
+    with emergency_stop.WinProcess(pid) as main:
+        current = _identity(main, exe, pid, expected_identity['creation_filetime'])
+        if not emergency_stop._same_identity(current, expected_identity):
+            raise ValueError('Restarted process changed before probe verification')
+        _ready(exe, pid)
+        if not emergency_stop._same_identity(main.identity(), current):
+            raise ValueError('Restarted process changed during probe verification')
+    return dict(identity=current, exact_restart_identity_verified=True,
+                readiness_verified=True, foreground_required=False,
+                native_transaction_idle_verified=False)
