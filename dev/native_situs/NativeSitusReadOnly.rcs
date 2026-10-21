@@ -1,0 +1,17 @@
+PL PLNativeSitusReadOnly:Heartbeat
+    Command='NativeSitusReadOnly:Heartbeat'
+    Params=''
+    Caption='Situs read-only heartbeat'
+End
+
+PL PLNativeSitusReadOnly:ReadCommandState
+    Command='NativeSitusReadOnly:ReadCommandState'
+    Params=''
+    Caption='Read Situs command states'
+End
+
+PL PLNativeSitusReadOnly:ReadBoardCapabilities
+    Command='NativeSitusReadOnly:ReadBoardCapabilities'
+    Params=''
+    Caption='Read Situs board capabilities'
+End

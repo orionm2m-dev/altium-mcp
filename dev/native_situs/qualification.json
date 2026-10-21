@@ -1,0 +1,55 @@
+{
+  "status": "COMPILED_NOT_LOADED",
+  "purpose": "Read-only bootstrap/command-state qualification; not full Situs support",
+  "bootstrap": "CSharpPlugin.PluginFactory.InvokePluginFactory(DXP.IClient) -> DXP.ServerModule subclass",
+  "bootstrap_evidence": [
+    "LibraryMigrator.Server.dll public factory metadata",
+    "Altium.ActiveBOM.Server.dll public factory metadata"
+  ],
+  "registration_evidence": [
+    "Official managed SDK Quick Start: InitializeCommands / RegisterCommand",
+    "Installed first-party .ins EditorName/EditorExePath and .rcs PL syntax"
+  ],
+  "commands": [
+    "NativeSitusReadOnly:Heartbeat",
+    "NativeSitusReadOnly:ReadCommandState",
+    "NativeSitusReadOnly:ReadBoardCapabilities"
+  ],
+  "input": "absolute expected PcbDoc path|32 lowercase hex request id|existing absolute receipt directory|expected positive PID|expected UTC process-creation filetime",
+  "output": "unique request-id.json created with FileMode.CreateNew and JSON in ref native parameter buffer",
+  "guards": [
+    "current native PCB path",
+    "context PCB path and kind",
+    "unique request id",
+    "absolute existing receipt directory",
+    "existing receipt rejected",
+    "exact native PID and process creation time before query and receipt",
+    "active/context PCB paths and kinds rechecked before receipt"
+  ],
+  "native_query": "DXP.Utils.MessageRouterGetCommandState PCB:Autoroute Action=Start/Setup/Pause/Stop/Reset",
+  "routing_dispatch": false,
+  "document_save": false,
+  "ui_automation": false,
+  "installed": false,
+  "loaded": false,
+  "load_qualification": "First invoke Heartbeat only, then read command states. Each call uses a new receipt id. Loading requires separate reviewed installation and load qualification.",
+  "unload": "No background threads, timers or IPC listeners. Installed managed DXP.IClient.StopServer is bool(string moduleName, bool unloadFlag), not the legacy one-argument signature; second-argument semantics must be verified before any use. A normal close of the exact managed Altium session after unsaved-document review remains the fallback before exact-file removal. No blanket termination.",
+  "compile": "Uses local Roslyn csc.dll and installed AD26 .NET 8 runtime reference metadata, no package download. build.ps1 arguments specify AltiumSystem and CompilerPath; no private paths in source.",
+  "missing_runtime_evidence": [
+    "first-party bootstrap shape is observed, not yet verified for this DLL",
+    "native command-state call on this server untested",
+    "concurrent control/progress not implemented",
+    "Typed EDP interface acquisition and SitusStrategyValid are not runtime-qualified"
+  ],
+  "edp_capability_probe": {
+    "assembly": "Altium.Edp.Interfaces.dll",
+    "sha256": "66A2C1DA130DBB316F8E112B7A76B6774BBD438533D2D42AB5E8E79647FD1009",
+    "type": "PCBInterfaces.IPCB_Board_SaveLoadParameters",
+    "guid": "C2A6A58A-7C6A-415F-B935-40BD7CFFA5CA",
+    "acquisition": "Internal_GetCurrentPCBBoard object, safe as IPCB_Board with exact path, then safe as IPCB_Board_SaveLoadParameters; no pointer casts",
+    "read_only_call": "SitusStrategyValid only after interface capability check",
+    "boundary": "Installed EDP metadata is not a proven public SDK acquisition contract; null is reported without fallback"
+  },
+  "error_receipt": "Exceptions return a failure JSON in ref parameters; no modal or retry; file may be absent on a guard/query failure.",
+  "registration_boundary": "INS/RCS syntax matches observed first-party files. A supported registration package/Developer-install route has not been exercised; no hot registration is established. Client.StartServer requires a known registered server. Install/load and possible required restart remain separate runtime qualification."
+}
