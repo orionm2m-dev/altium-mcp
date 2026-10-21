@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import script_recovery as recovery
@@ -79,7 +80,10 @@ class LateProbeTests(unittest.TestCase):
         with patch.object(emergency_stop, 'WinProcess', self.factory), \
                 patch.object(emergency_stop, '_current_sid', return_value='test-user'), \
                 patch.object(recovery, 'inspect_environment', self.inspect), \
-                patch.object(recovery, '_launches', {}), patch.object(recovery, '_launch') as launch:
+                patch.object(recovery, '_launches', {}), patch.object(recovery, '_launch') as launch, \
+                patch.dict(sys.modules, {'situs_native_settings_service': SimpleNamespace(
+                    _environment=lambda exe, pid: {'main_responsive': True, 'main_hwnd': 101,
+                        'foreground_required': False, 'focus_or_input_requested': False})}):
             value = asyncio.run(recovery._recover_emergency_serialized(
                 self.exe, str(self.root), manual_stop_confirmed=False))
             launch.assert_not_called()
@@ -89,6 +93,88 @@ class LateProbeTests(unittest.TestCase):
         self.assertFalse(result['recovered'], result)
         self.assertTrue(result['blocked'], result)
         self.assertEqual(json.loads(self.latch.read_text('utf-8')), self.old)
+
+    def manual_pending(self):
+        self.old.pop('fresh_instance_identity', None)
+        self.old['manual_stop_confirmed'] = True
+        self.old['environment'] = dict(json.loads(json.dumps(self.environment)),
+            foreground_confirmed=False, foreground_required=False,
+            focus_or_input_requested=False, native_idle_verified=False,
+            manual_stop_background_identity=copy.deepcopy(self.main),
+            manual_stop_background_readiness={'main_hwnd': 101, 'main_responsive': True,
+                'foreground_required': False, 'focus_or_input_requested': False})
+        self.save()
+
+    def test_manual_background_pending_probe_reconciles_without_new_dispatch(self):
+        self.manual_pending()
+        self.environment.update(ready=False, foreground_confirmed=False)
+        result = self.call()
+        self.assertTrue(result['recovered'], result)
+        self.assertTrue(result['no_new_dispatch'])
+        self.assertFalse(result['native_transaction_idle_verified'])
+        self.assertTrue(result['state']['manual_stop_confirmed'])
+        self.assertTrue(result['state']['late_probe_completion']['background_readiness_reverified'])
+        self.assertEqual(result['state']['late_probe_completion']['new_dispatches'], 0)
+
+    def test_manual_pending_probe_also_reconciles_after_user_foregrounds_app(self):
+        self.manual_pending()
+        result = self.call()
+        self.assertTrue(result['recovered'], result)
+        self.assertFalse(result['state']['late_probe_completion']['background_readiness_reverified'])
+
+    def test_manual_pending_wrong_live_process_is_rejected(self):
+        self.manual_pending()
+        for change in ({'creation_filetime': self.main['creation_filetime'] + 1},
+                       {'pid': 12}, {'user_sid': 'other'},
+                       {'exe': emergency_stop._canonical(r'C:\Other\X2.EXE')}):
+            with self.subTest(change=change):
+                self.actual = dict(self.main, **change)
+                self.blocked(self.call())
+
+    def test_manual_pending_requires_explicit_historical_manual_confirmation(self):
+        self.manual_pending()
+        self.old['manual_stop_confirmed'] = False
+        self.save()
+        self.blocked(self.call())
+
+    def test_manual_pending_rejects_inconsistent_recorded_identity_proof(self):
+        self.manual_pending()
+        baseline = copy.deepcopy(self.old)
+        for change in ({'target_pid': 12}, {'configured_process_ids': [10, 12]},
+                       {'foreground_required': True}, {'focus_or_input_requested': True},
+                       {'native_idle_verified': True}, {'dialog_handles': [102]},
+                       {'manual_stop_background_readiness': {}},
+                       {'manual_stop_background_identity': {'pid': 10}}):
+            with self.subTest(change=change):
+                self.old = copy.deepcopy(baseline)
+                self.old['environment'].update(change)
+                self.save()
+                self.blocked(self.call())
+        self.old = copy.deepcopy(baseline)
+        self.old['fresh_instance_identity'] = dict(self.main, creation_filetime=1)
+        self.save()
+        self.blocked(self.call())
+
+    def test_manual_pending_rejects_checkpoint_or_result_changed_during_readback(self):
+        self.manual_pending()
+        raw = self.latch.read_bytes()
+        self.change = lambda: self.latch.write_bytes(raw + b' ')
+        result = self.call()
+        self.assertTrue(result['blocked'], result)
+        self.assertEqual(self.latch.read_bytes(), raw + b' ')
+        self.latch.write_bytes(raw)
+        self.change = lambda: self.result.write_text(json.dumps(
+            {'probe': 'executor ok', 'token': 'b' * 32}), encoding='utf-8')
+        self.blocked(self.call())
+
+    def test_manual_pending_background_still_rejects_modal_or_extra_process(self):
+        self.manual_pending()
+        baseline = copy.deepcopy(self.environment)
+        for change in ({'dialog_handles': [102]}, {'script_errors': [{'kind': 'native_crash'}]},
+                       {'configured_process_ids': [10, 12]}, {'unresolved_launch_ids': [11]}):
+            with self.subTest(change=change):
+                self.environment = dict(baseline, ready=False, foreground_confirmed=False, **change)
+                self.blocked(self.call())
 
     def test_success_without_new_dispatch_or_manual_claim(self):
         result = self.call()

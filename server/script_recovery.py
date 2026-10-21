@@ -244,6 +244,32 @@ def _blocked(state, reason, **extra):
         state=state, **extra)
 
 
+def _manual_stop_probe_identity(old):
+    """Read the exact process proof captured before a manually authorized probe."""
+    if old.get("manual_stop_confirmed") is not True:
+        return None
+    environment = old.get("environment")
+    if not isinstance(environment, dict) or "manual_stop_background_identity" not in environment:
+        return None
+    identity = environment["manual_stop_background_identity"]
+    readiness = environment.get("manual_stop_background_readiness")
+    if (not isinstance(identity, dict) or not isinstance(readiness, dict)
+            or environment.get("ready") is not True
+            or environment.get("target_pid") != identity.get("pid")
+            or environment.get("configured_process_ids") != [identity.get("pid")]
+            or environment.get("foreground_required") is not False
+            or environment.get("focus_or_input_requested") is not False
+            or environment.get("native_idle_verified") is not False
+            or environment.get("unresolved_launch_ids")
+            or environment.get("script_errors") or environment.get("dialog_handles")
+            or readiness.get("main_responsive") is not True
+            or type(readiness.get("main_hwnd")) is not int or readiness["main_hwnd"] <= 0
+            or readiness.get("foreground_required") is not False
+            or readiness.get("focus_or_input_requested") is not False):
+        raise ValueError("Recorded manual Stop readiness proof is inconsistent")
+    return identity
+
+
 def _pending_probe_evidence(exchange_dir, old):
     """Read one token-bound result and establish that its launcher has exited."""
     import emergency_stop
@@ -262,6 +288,11 @@ def _pending_probe_evidence(exchange_dir, old):
     if outcome != {"probe": "executor ok", "token": token}:
         raise ValueError("Existing probe result does not match this recovery token")
     expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity")
+    manual_identity = _manual_stop_probe_identity(old)
+    if manual_identity is not None:
+        if expected is not None and not emergency_stop._same_identity(expected, manual_identity):
+            raise ValueError("Recorded manual Stop and main-process identities disagree")
+        expected = manual_identity
     if (not isinstance(expected, dict) or type(expected.get("pid")) is not int
             or expected["pid"] <= 0 or type(expected.get("creation_filetime")) is not int
             or expected["creation_filetime"] <= 0):
@@ -319,12 +350,19 @@ def _reconcile_late_probe(exe, exchange_dir, old):
             if not emergency_stop._same_identity(current, expected):
                 raise ValueError("Main identity changed since the existing probe")
             environment = inspect_environment(exe)
+            background_verified = False
+            if (old.get("manual_stop_confirmed") is True
+                    and environment.get("ready") is False
+                    and environment.get("foreground_confirmed") is False):
+                environment = _manual_stop_background_environment(
+                    exe, environment, {"process_identity": expected})
+                background_verified = True
             windows = environment.get("process_windows", {})
             rows = windows.get(expected["pid"], windows.get(str(expected["pid"]), []))
             if (environment.get("ready") is not True
                     or environment.get("target_pid") != expected["pid"]
                     or environment.get("configured_process_ids") != [expected["pid"]]
-                    or environment.get("foreground_confirmed") is not True
+                    or (environment.get("foreground_confirmed") is not True and not background_verified)
                     or not any(w.get("class") == "TDocumentForm" for w in rows)
                     or any(w.get("class") in {"#32770", "TMessageForm", "TShowException", "TPCBImportWizard"} for w in rows)
                     or environment.get("dialog_handles") or environment.get("script_errors")):
@@ -337,7 +375,8 @@ def _reconcile_late_probe(exe, exchange_dir, old):
             state["phase"] = "recovered"
             state["late_probe_completion"] = {"reconciled": True, "launcher": exit_evidence,
                 "main_identity_unchanged_since_probe": True, "new_dispatches": 0,
-                "main_restarted_by_reconciliation": False}
+                "main_restarted_by_reconciliation": False,
+                "background_readiness_reverified": background_verified}
             state["launches"][-1].update(exit_confirmed=True,
                 exit_code=exit_evidence["exit_code"], completion="late_reconciled")
             _write_state(exchange_dir, state)
