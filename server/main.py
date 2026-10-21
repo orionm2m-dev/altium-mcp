@@ -1600,6 +1600,42 @@ async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str
 
 
 @mcp.tool()
+async def route_situs_selected_tp(ctx: Context, pcb_path: str,
+        component_designator: str, expected_net: str, target_pid: int,
+        expected_creation_filetime: str, operation_id: str = "",
+        timeout_seconds: int = 15) -> str:
+    """Route connections from one exact single-pad test point using native Situs Main.
+
+    Qualification tool: target PCB must be below the server-configured
+    ALTIUM_SITUS_QUALIFICATION_ROOT. No project path is embedded in this tool.
+    Requires the exact active PCB, PID, ft:<decimal FILETIME>, unique single-pad
+    component, expected net and global Lock All Pre-routes already enabled.
+    Uses native component selection and PCB:Autoroute Action=OnSelectedComponents.
+    This partial command uses Main, not the complete active strategy pass list.
+    No UI/input/focus, file save, rule edit or fallback to whole-board routing.
+    Existing copper and selection are checked; a returned process is not proof
+    of completed connectivity, clean DRC or IPC compliance. Unknown outcomes
+    retain recovery blocking, never automatically retry. Reusing an operation
+    id returns historical evidence, not a fresh execution or state check.
+    """
+    import situs_partial_service
+    import situs_native_settings_service
+    try:
+        created = situs_native_settings_service.normalize_public_filetime(expected_creation_filetime)
+    except (TypeError, ValueError) as error:
+        return json.dumps({"success": False, "dispatch_attempted": False,
+                           "error": str(error), "retry_allowed": False})
+    result = await situs_partial_service.control(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        qualification_root=os.environ.get("ALTIUM_SITUS_QUALIFICATION_ROOT", ""),
+        pcb_path=pcb_path, component_designator=component_designator,
+        expected_net=expected_net, target_pid=target_pid,
+        expected_creation_filetime=created, operation_id=operation_id,
+        timeout_seconds=timeout_seconds)
+    return json.dumps(result)
+
+
+@mcp.tool()
 async def control_situs_strategy(ctx: Context, action: str, pcb_path: str,
         target_pid: int, expected_creation_filetime: str, payload: dict | None = None,
         operation_id: str = "", timeout_seconds: int = 15) -> str:
