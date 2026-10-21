@@ -1815,6 +1815,30 @@ async def resume_completed_stop(ctx: Context, target_pid: int, recovery_token: s
 
 
 @mcp.tool()
+async def close_clean_altium_document(ctx: Context, active_pcb_path: str,
+        target_document_path: str, target_pid: int, expected_creation_filetime: str,
+        operation_id: str = "", timeout_seconds: int = 15) -> str:
+    """Close one exact clean, non-active PCB through native Client.CloseDocument.
+
+    Requires the exact active PCB, one ready configured process, PID and
+    ft:<decimal FILETIME>. Enumerates loaded documents before and after; refuses
+    dirty, duplicate, missing or active targets, incomplete state or nonzero
+    native process depths. Verifies that other documents and active PCB remain.
+    No save, focus, modal-button handling or Windows UI action is requested.
+    An open import wizard must already be resolved; this is not a modal cancel.
+    Repeated operation IDs return history; unknown results are never replayed.
+    Closing a document alone does not prove persistence of startup preferences.
+    """
+    import native_document_close_service
+    outcome = await native_document_close_service.control(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        active_pcb_path=active_pcb_path, target_document_path=target_document_path,
+        target_pid=target_pid, expected_creation_filetime=expected_creation_filetime,
+        operation_id=operation_id, timeout_seconds=timeout_seconds)
+    return json.dumps(outcome)
+
+
+@mcp.tool()
 async def close_altium_normally(ctx: Context, pcb_path: str, target_pid: int,
         expected_creation_filetime: str, operation_id: str = "",
         timeout_seconds: int = 15) -> str:

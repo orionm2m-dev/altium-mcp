@@ -1,0 +1,173 @@
+// Native only: one exact clean non-active PCB document, no save or focus.
+// Enumeration/idle guards reuse the qualified open_documents program.
+// CloseDocument is documented IClient API; this program needs native qualification.
+function CloseQuote(Value: String): String;
+var N, Code: Integer; Hex: String;
+begin
+    Result := '"'; Hex := '0123456789abcdef';
+    for N := 1 to Length(Value) do
+    begin
+        Code := Ord(Value[N]);
+        if (Value[N] = '\') or (Value[N] = '"') then Result := Result + '\' + Value[N]
+        else if Code < 32 then Result := Result + '\u00' + Hex[(Code div 16) + 1] + Hex[(Code mod 16) + 1]
+        else Result := Result + Value[N];
+    end;
+    Result := Result + '"';
+end;
+
+function CloseBool(Value: Boolean): String;
+begin if Value then Result := 'true' else Result := 'false'; end;
+
+function CloseCount(Value: Integer): String;
+begin if Value < 0 then Result := 'null' else Result := IntToStr(Value); end;
+
+function ClosePath(Value: String): String;
+var N: Integer;
+begin
+    Result := Value;
+    for N := 1 to Length(Result) do if Result[N] = '/' then Result[N] := '\';
+end;
+
+function CloseGuard(OriginalBoard: IPCB_Board): Boolean;
+var ActiveBoard: IPCB_Board; Doc: IServerDocument; PcbModule: IServerModule;
+begin
+    Result := False;
+    if Client = nil then Exit;
+    if PCBServer = nil then Exit;
+    if Client.CurrentView = nil then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(ClosePath(Doc.FileName), __ACTIVE_PCB_PATH__) or not SameText(Doc.Kind, 'PCB') then Exit;
+    if SameText(ClosePath(Doc.FileName), __TARGET_PATH__) then Exit;
+    ActiveBoard := PCBServer.GetCurrentPCBBoard;
+    if (OriginalBoard = nil) or (ActiveBoard = nil) then Exit;
+    if OriginalBoard.I_ObjectAddress <> ActiveBoard.I_ObjectAddress then Exit;
+    if not SameText(ClosePath(ActiveBoard.FileName), __ACTIVE_PCB_PATH__) then Exit;
+    PcbModule := Client.GetServerModuleByName('PCB');
+    if PcbModule = nil then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (PcbModule.ProcessControl.ProcessDepth <> 0) then Exit;
+    Result := True;
+end;
+
+// Signature excludes only exact target rows and enumeration indices. A removed
+// row may shift later indices; every other module/path/kind/Modified must match.
+function CloseCollect(var Complete: Boolean; var Target: IServerDocument;
+    var TargetCount, PCBCount, DirtyCount, TotalCount, ModuleCount: Integer): String;
+var I, J, DocumentCount, OtherIndex: Integer; Module: IServerModule; Doc: IServerDocument;
+begin
+    Complete := False; Target := nil; Result := '[';
+    TargetCount := 0; PCBCount := 0; DirtyCount := 0; TotalCount := 0;
+    ModuleCount := Client.GetCount;
+    if (ModuleCount < 1) or (ModuleCount > 4096) then Exit;
+    for I := 0 to ModuleCount - 1 do
+    begin
+        Module := Client.GetServerModule(I);
+        if Module = nil then Exit;
+        DocumentCount := Module.DocumentCount;
+        if (DocumentCount < 0) or (DocumentCount > 100000) then Exit;
+        if I > 0 then Result := Result + ',';
+        Result := Result + '{"module":' + CloseQuote(Module.ModuleName) + ',"documents":[';
+        OtherIndex := 0;
+        for J := 0 to DocumentCount - 1 do
+        begin
+            Doc := Module.Documents[J];
+            if Doc = nil then Exit;
+            TotalCount := TotalCount + 1;
+            if SameText(ClosePath(Doc.FileName), __TARGET_PATH__) then
+            begin
+                Target := Doc; TargetCount := TargetCount + 1;
+                if SameText(Doc.Kind, 'PCB') then PCBCount := PCBCount + 1;
+                if Doc.Modified then DirtyCount := DirtyCount + 1;
+            end
+            else
+            begin
+                if OtherIndex > 0 then Result := Result + ',';
+                Result := Result + '{"path":' + CloseQuote(Doc.FileName) + ',"kind":' + CloseQuote(Doc.Kind) +
+                    ',"modified":' + CloseBool(Doc.Modified) + '}';
+                OtherIndex := OtherIndex + 1;
+            end;
+        end;
+        if Module.DocumentCount <> DocumentCount then Exit;
+        Result := Result + ']}';
+    end;
+    if Client.GetCount <> ModuleCount then Exit;
+    Result := Result + ']'; Complete := True;
+end;
+
+procedure CloseReceipt(Stage, ErrorCode: String; Success, Attempted, Closed, CurrentPreserved, OthersUnchanged: Boolean;
+    BeforeTotal, AfterTotal, BeforeTargets, AfterTargets, BeforeModules, AfterModules: Integer);
+var Lines: TStringList;
+begin
+    Lines := TStringList.Create;
+    try
+        Lines.Text := __METADATA__ + ',"stage":' + CloseQuote(Stage) + ',"error":' + CloseQuote(ErrorCode) +
+            ',"success":' + CloseBool(Success) + ',"close_attempted":' + CloseBool(Attempted) +
+            ',"closed_verified":' + CloseBool(Closed) + ',"current_pcb_preserved":' + CloseBool(CurrentPreserved) +
+            ',"other_documents_unchanged":' + CloseBool(OthersUnchanged) +
+            ',"before_document_count":' + CloseCount(BeforeTotal) + ',"after_document_count":' + CloseCount(AfterTotal) +
+            ',"before_target_count":' + CloseCount(BeforeTargets) + ',"after_target_count":' + CloseCount(AfterTargets) +
+            ',"before_module_count":' + CloseCount(BeforeModules) + ',"after_module_count":' + CloseCount(AfterModules) + '}';
+        Lines.SaveToFile(__RECEIPT_PATH__);
+    finally Lines.Free; end;
+end;
+
+procedure RunCleanDocumentClose;
+var Board: IPCB_Board; Target, CheckTarget: IServerDocument;
+    BeforeOne, BeforeTwo, AfterOne, AfterTwo, Stage, ErrorCode: String;
+    CompleteOne, CompleteTwo, Attempted, Closed, CurrentPreserved, OthersUnchanged, Success: Boolean;
+    BT, AT, BC, AC, BM, AM, T2, C2, M2, PCBCount, DirtyCount, PCB2, Dirty2: Integer;
+begin
+    // The host pins exact PID/creation and serializes. Never replay a receipt.
+    if FileExists(__RECEIPT_PATH__) then Exit;
+    Attempted := False; Closed := False; CurrentPreserved := False; OthersUnchanged := False; Success := False;
+    BT := -1; AT := -1; BC := -1; AC := -1; BM := -1; AM := -1;
+    Stage := 'guard_failed'; ErrorCode := 'exact_current_pcb_or_idle_guard';
+    try
+        CloseReceipt('entered', '', False, False, False, False, False, BT, AT, BC, AC, BM, AM);
+        if PCBServer <> nil then
+        begin
+            Board := PCBServer.GetCurrentPCBBoard;
+            if CloseGuard(Board) then
+            begin
+                BeforeOne := CloseCollect(CompleteOne, Target, BC, PCBCount, DirtyCount, BT, BM);
+                BeforeTwo := CloseCollect(CompleteTwo, CheckTarget, C2, PCB2, Dirty2, T2, M2);
+                if not CompleteOne or not CompleteTwo or (BeforeOne <> BeforeTwo) or
+                    (BT <> T2) or (BC <> C2) or (BM <> M2) or (PCBCount <> PCB2) or (DirtyCount <> Dirty2) then
+                    ErrorCode := 'before_inventory_changed_or_incomplete'
+                else if (BC <> 1) or (PCBCount <> 1) or (DirtyCount <> 0) or (Target = nil) or (CheckTarget = nil) then
+                    ErrorCode := 'target_missing_ambiguous_wrong_kind_or_modified'
+                else if not CloseGuard(Board) then ErrorCode := 'identity_or_idle_changed_before_close'
+                else if not SameText(ClosePath(CheckTarget.FileName), __TARGET_PATH__) or
+                    not SameText(CheckTarget.Kind, 'PCB') or CheckTarget.Modified then ErrorCode := 'target_changed_before_close'
+                else
+                begin
+                    // Mark before the only native close. A throw is never retried.
+                    Attempted := True;
+                    CloseReceipt('before_close', '', False, True, False, False, False, BT, AT, BC, AC, BM, AM);
+                    Client.CloseDocument(CheckTarget);
+                    Target := nil; CheckTarget := nil;
+                    Stage := 'readback_failed'; ErrorCode := 'after_inventory_changed_or_incomplete';
+                    if CloseGuard(Board) then
+                    begin
+                        AfterOne := CloseCollect(CompleteOne, Target, AC, PCBCount, DirtyCount, AT, AM);
+                        AfterTwo := CloseCollect(CompleteTwo, CheckTarget, C2, PCB2, Dirty2, T2, M2);
+                        CurrentPreserved := CloseGuard(Board);
+                        if CompleteOne and CompleteTwo and (AfterOne = AfterTwo) and
+                            (AT = T2) and (AC = C2) and (AM = M2) and (PCBCount = PCB2) and (DirtyCount = Dirty2) then
+                        begin
+                            Closed := AC = 0;
+                            OthersUnchanged := (BeforeTwo = AfterTwo) and (BM = AM) and (AT = BT - 1);
+                            Success := Closed and OthersUnchanged and CurrentPreserved;
+                            if Success then begin Stage := 'completed'; ErrorCode := ''; end
+                            else ErrorCode := 'target_not_absent_or_other_documents_changed';
+                        end;
+                    end
+                    else ErrorCode := 'identity_or_idle_changed_after_close';
+                end;
+            end;
+        end;
+    except
+        Stage := 'native_exception'; ErrorCode := 'native_close_program_exception'; Success := False;
+    end;
+    CloseReceipt(Stage, ErrorCode, Success, Attempted, Closed, CurrentPreserved, OthersUnchanged, BT, AT, BC, AC, BM, AM);
+end;
