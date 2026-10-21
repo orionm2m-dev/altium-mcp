@@ -137,6 +137,22 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Inspect or address one Situs Setup button
+
+`control_situs_setup(action, target_hwnd, expected_main_title)` accepts `inspect`,
+`ok`, `cancel` or `route_all`. Inspect first. The exact `TSitusSetup` dialog and
+configured process stay pinned; the visible main window must have the exact
+supplied title containing the scratch `.PcbDoc` filename. This is title evidence,
+not full-path verification. Inspection lists same-process standard/VCL buttons
+and counts skipped foreign descendants such as embedded webviews.
+
+An action requires one visible enabled button with exactly the whitelisted
+caption, rechecked before one `PostMessage(BM_CLICK)`. No keyboard, coordinates,
+checkbox/settings changes, script, fallback gesture or retry is used. The result
+records message posting, with `completion_verified: false`; inspect the UI
+again before concluding that the dialog closed or routing began. Both bridge
+and OS recovery locks cover the operation; no recovery latch is changed.
+
 ### Capture a specific observed Altium dialog
 
 `get_screenshot(view_type="current", window_handle=HWND)` captures the exact visible

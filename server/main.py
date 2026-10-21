@@ -1385,6 +1385,30 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 
 
 @mcp.tool()
+async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
+                              expected_main_title: str) -> str:
+    """Inspect exact Situs Setup, or post one OK, Cancel or Route All button message.
+
+    Binds to the configured process, exact TSitusSetup HWND and exact main title
+    containing the scratch PcbDoc filename. The title does not verify a full path.
+    Inspect first to observe available buttons. Only a unique live same-process
+    standard/VCL button with the requested whitelisted caption is eligible.
+    No keyboard, coordinates, checkbox changes, script dispatch, fallback or
+    retry. Posting is reported separately from unverified action completion.
+    """
+    import situs_setup_control
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = situs_setup_control.control(altium_bridge.config.altium_exe_path,
+                    action, target_hwnd, expected_main_title)
+        except OSError as error:
+            outcome = {"success": False, "blocked": True, "error": str(error),
+                       "button_message_attempted": False, "completion_verified": False}
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
 async def get_altium_environment(ctx: Context) -> str:
     """Read configured Altium process/window/dialog inventory without dispatch.
 

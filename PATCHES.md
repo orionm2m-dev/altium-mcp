@@ -1,5 +1,14 @@
 # Changes
 
+## 2026-10-21 — Narrow inspection and button control for Situs Setup
+
+Added `control_situs_setup` with inspect/OK/Cancel/Route All only. Process identity,
+exact dialog and main title, same-process ancestry and unique live button caption
+are revalidated before one BM_CLICK post. Foreign embedded descendants are
+skipped. Main title proves only the filename, not document path. Posting is not
+reported as completed routing or a closed dialog. Mocked tests cover identity,
+button refusal, single dispatch and both serialization locks.
+
 ## 2026-10-21 — Use physical DPI coordinates for exact-window capture
 
 Exact screenshot workers now establish per-monitor-v2 thread DPI awareness
