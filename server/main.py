@@ -1224,6 +1224,20 @@ def _dismiss_altium_dialogs():
 
 
 @mcp.tool()
+async def lint_altium_script(ctx: Context, script: str, declarations: str = "",
+                             declarations_file: str = "") -> str:
+    """Read-only DelphiScript preflight with the same input precedence as Run.
+
+    Reports lexical errors, simple declaration collisions and known incompatible
+    typed API members. Unknown APIs/calls remain warnings. No Altium access,
+    sandbox writes, native compilation or runtime compatibility certification.
+    """
+    import script_lint
+    _, report = script_lint.prepare(script, declarations, declarations_file)
+    return json.dumps(report, indent=2)
+
+
+@mcp.tool()
 async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 120,
                             declarations: str = "", declarations_file: str = "") -> str:
     """
@@ -1236,6 +1250,11 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
     after which every later script run silently does nothing until the
     debugger is stopped (Ctrl+F3) or Altium is restarted. This tool detects
     that state and reports exactly which statement died.
+
+    Mandatory static preflight rejects known incompatible typed API members and
+    simple lexical/declaration errors before sandbox writes or dispatch. A clean
+    report means only no known blockers; it is not native compilation. Unknown
+    APIs remain warnings. Use lint_altium_script to inspect without dispatch.
 
     The script runs in a SEPARATE script project to isolate source helpers.
     A paused global script executor can still block other MCP tools. Only
@@ -1293,20 +1312,20 @@ async def run_altium_script(ctx: Context, script: str, timeout_seconds: int = 12
 async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, declarations_file):
     logger.info(f"run_altium_script: {len(script.splitlines())} lines")
 
+    import script_lint
+    declarations, preflight = script_lint.prepare(script, declarations, declarations_file)
+    if not preflight["success"]:
+        return json.dumps({"success": False, "error": "DelphiScript preflight rejected input",
+                           "preflight": preflight, "no_new_dispatch": True,
+                           "mutation_state": "not_dispatched"}, indent=2)
+
     crash = script_guard.blocking_crash_report(altium_bridge.config.altium_exe_path)
     if crash:
-        return json.dumps(crash, indent=2)
+        return json.dumps(dict(crash, preflight=preflight), indent=2)
 
     if not SANDBOX_PAS.exists() or not SANDBOX_PRJ.exists():
-        return json.dumps({"success": False,
+        return json.dumps({"preflight": preflight, "success": False,
                            "error": f"sandbox project missing at {SANDBOX_DIR}"})
-
-    if not declarations and declarations_file:
-        try:
-            declarations = Path(declarations_file).read_text(encoding="utf-8")
-        except OSError as e:
-            return json.dumps({"success": False,
-                               "error": f"could not read declarations_file: {e}"})
 
     try:
         src = SANDBOX_PAS.read_text(encoding="utf-8")
@@ -1314,7 +1333,7 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
         src = _inject_between(src, SANDBOX_BEGIN, SANDBOX_END, script, "        ")
         SANDBOX_PAS.write_text(src, encoding="utf-8")
     except Exception as e:
-        return json.dumps({"success": False, "error": f"could not inject script: {e}"})
+        return json.dumps({"preflight": preflight, "success": False, "error": f"could not inject script: {e}"})
 
     for f in (SANDBOX_LOG, SANDBOX_RESULT):
         if f.exists():
@@ -1339,7 +1358,7 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
                     altium_bridge.config.altium_exe_path, failures)
                 steps = (SANDBOX_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
                          if SANDBOX_LOG.exists() else [])
-                return json.dumps({
+                return json.dumps({"preflight": preflight,
                     "success": False,
                     "error": "Altium script error: " + " | ".join(item["text"] for item in failures),
                     "script_errors": failures, "steps": steps,
@@ -1358,11 +1377,11 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 
     if SANDBOX_RESULT.exists():
         result_text = SANDBOX_RESULT.read_text(encoding="utf-8", errors="replace").strip()
-        return json.dumps({"success": True, "result": result_text, "steps": steps,
+        return json.dumps({"preflight": preflight, "success": True, "result": result_text, "steps": steps,
                            "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
     if steps:
-        return json.dumps({
+        return json.dumps({"preflight": preflight,
             "success": False,
             "error": "script started but did not finish",
             "last_step_reached": steps[-1],
@@ -1373,7 +1392,7 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
             "steps": steps,
             "dialogs_dismissed": len(dialogs), "dialogs": dialogs}, indent=2)
 
-    return json.dumps({
+    return json.dumps({"preflight": preflight,
         "success": False,
         "error": "script never started",
         "diagnosis": "Usually a COMPILE error in the script, or a previously paused "

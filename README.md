@@ -623,3 +623,42 @@ Stop. It requires the unchanged startup/checkpoint/result records, exited old
 main and launcher, and a ready native main window without a blocking modal. The
 new state records `verified_normal_restart`; the earlier probe is retained only
 as history and cannot certify the new process. No extra public argument is needed.
+
+### DelphiScript preflight before sandbox execution
+
+`lint_altium_script(script, declarations="", declarations_file="")` performs a
+read-only static check with no Altium access or sandbox writes. As with
+`run_altium_script`, nonempty inline declarations take precedence over the file.
+The file is read once; Run dispatches the same text that was checked.
+
+Run now requires this preflight before writing `Sandbox.pas` or launching the
+script. Blocking findings return `mutation_state: "not_dispatched"` and the
+complete `preflight` report. Every post-preflight Run result also carries that
+report, including warnings. `no_new_dispatch` inside a preflight report refers to
+the checker only, not to the later Run operation.
+
+The lexer ignores `//`, `{...}` and `(*...*)` comments and treats Pascal quoted
+strings, including doubled quotes, as opaque. Locations are relative to the
+script body or declarations source. Direct variable/parameter types use lexical
+routine scope and case-insensitive names. Simple duplicate declarations and
+sandbox name collisions are errors. The versioned
+`server/delphiscript_compatibility.json` is an extensible **negative** catalog:
+currently it rejects the observed unavailable
+`IPCB_Board.GetState_DesignRuleCheckerOptions` accessor. Its evidence separates
+native DelphiScript failure from .NET Board2+ metadata and public API references.
+Do not add an error solely because a member is absent from an incomplete manual.
+
+Uncatalogued members and undeclared parenthesized standalone calls produce
+warnings, not claims of compatibility. `no_known_blockers_found` is not a clean
+compile or runtime certification. Aliases, casts, chained return types, dynamic
+receivers, external units, conditional compilation and complete Pascal grammar
+are not resolved. A source containing `with` disables typed-member rejection for
+that source because unqualified name resolution is ambiguous. Bare helper calls
+are not checked. Native API availability can vary by installed version; this
+small catalog does not qualify other APIs, overloads, arguments or execution
+state. Successful offline tests do not establish native Altium execution.
+
+```powershell
+python -m unittest discover -s server/tests -p test_script_lint.py -v
+python -m unittest discover -s server/tests -p test_sandbox_script_guard.py -v
+```

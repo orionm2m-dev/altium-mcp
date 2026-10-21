@@ -201,3 +201,21 @@ the unchanged startup receipt and be newer. A single ready native main window is
 required. Startup screens, import wizards, unknown identities and changed receipts
 remain blocked. The old probe result never certifies the new session. No Stop,
 manual-stop claim, automatic restart or mutation replay is added.
+
+## 2026-10-21 — Mandatory bounded DelphiScript preflight
+
+Added dispatch-free `lint_altium_script` and mandatory preflight in the sandbox
+Run path, before native inspection, sandbox writes or launch. File declarations
+are resolved once and the checked text is the text injected. Reports include
+source locations, warnings, input hashes and explicit native-unverified limits.
+The lexer ignores comments/quoted strings; direct typed receivers respect
+routine scope and case. A versioned, source-qualified negative API catalog
+rejects the observed unavailable `IPCB_Board.GetState_DesignRuleCheckerOptions`
+accessor without treating .NET Board2+ metadata as DelphiScript support. Simple
+declaration collisions are rejected; unknown members/helpers remain warnings.
+
+Offline tests cover actual failure, lexical shielding, scoped shadowing,
+case-insensitivity, duplicate names, file precedence/encoding, rejection before
+any native/write/dispatch access, accepted single dispatch with a checked file
+snapshot, and unchanged sandbox error handling. No Altium execution was used to
+qualify these changes; this remains a bounded linter, not a compiler.

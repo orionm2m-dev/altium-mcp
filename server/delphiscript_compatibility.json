@@ -1,0 +1,41 @@
+{
+  "version": "2026-10-21.1",
+  "scope": "Small negative compatibility catalog for DelphiScript. It is not a complete API inventory or proof of native compatibility.",
+  "incompatible_members": [
+    {
+      "id": "unsupported_delphiscript_board_drc_options",
+      "receiver_type": "IPCB_Board",
+      "member": "GetState_DesignRuleCheckerOptions",
+      "reason": "GetState_DesignRuleCheckerOptions is not exposed on the DelphiScript IPCB_Board receiver. A .NET Board2+ SDK member does not establish DelphiScript availability. Use a separately verified scripting API or native UI procedure.",
+      "evidence": [
+        {
+          "kind": "native_observation",
+          "date": "2026-10-21",
+          "product": "Altium Designer 26.9.1",
+          "observation": "A declared IPCB_Board receiver failed at GetState_DesignRuleCheckerOptions in an isolated DelphiScript execution.",
+          "diagnostic": "Undeclared identifier: GetState_DesignRuleCheckerOptions",
+          "qualification": "Observed during an isolated execution; this does not establish whether all resolution occurs before script start."
+        },
+        {
+          "kind": "official_reference",
+          "url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference",
+          "scope": "Historical PCB API reference, not a complete inventory of members exposed by the installed DelphiScript engine. Documentation or absence alone does not establish runtime compatibility."
+        },
+        {
+          "kind": "installed_sdk_metadata",
+          "assembly": "Altium.Edp.Interfaces.dll",
+          "interfaces": [
+            "PCBInterfaces.IPCB_Board2",
+            "PCBInterfaces.IPCB_Board2Ex",
+            "PCBInterfaces.IPCB_Board3",
+            "PCBInterfaces.IPCB_Board4"
+          ],
+          "member": "GetState_DesignRuleCheckerOptions",
+          "returns": "RT_PCB.IPCB_DesignRuleCheckerOptions",
+          "scope": "Metadata describes the .NET SDK; it does not certify exposure to the DelphiScript runtime.",
+          "assembly_sha256": "66a2c1da130dbb316f8e112b7a76b6774bbd438533d2d42ab5e8e79647fd1009"
+        }
+      ]
+    }
+  ]
+}
