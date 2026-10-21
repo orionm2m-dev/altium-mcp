@@ -1,0 +1,19 @@
+# Native Situs settings bridge contract
+
+The isolated builder in `server/situs_native_settings.py` currently covers the global PCB `LockPreRoutes` option only. The fixed getter and setter were qualified on Altium Designer 26.9.1 through an isolated public scripting probe, including a false-to-true-to-false roundtrip with correlated readback. The dedicated transport must be qualified independently. Neither SDK metadata nor offline tests imply runtime qualification.
+
+`build_lock_preroutes_program(pcb_path, operation_id, receipt_path, action="inspect", expected_checked=None, checked=None)` returns a standalone `Run` procedure. It imports no helper units and is never added to the production script project. `inspect` programs contain no setter access. For `set`, expected and requested states must be real booleans. If the requested state already exists the operation is a no-input success; otherwise the current state must equal the expectation. One assignment is followed by reacquisition and readback. The global option changes no copper and the program never requests a document or preferences save. Persistence across sessions is not established by this operation.
+
+The public caller must pin PID, creation time and configured executable, serialize native input, assign a unique operation id and new receipt path, run the isolated program through its qualified executor, and validate `read_settings_receipt(path, build_settings_request(...))`. The native program independently checks exact active PCB path/object and both idle depths before and after access. A window title alone is insufficient. The template `server/native_templates/situs_lock_preroutes.pas.in` must be included in deployment/package data.
+
+An existing receipt prevents replay. An incomplete receipt after the setter-attempt marker is an unknown outcome. Missing, malformed, mismatched or oversized receipts must not trigger automatic retry; parse/read exceptions are also unresolved outcomes at the public orchestration layer. A completed correlated receipt proves the requested current value only. It does not prove preferences persistence, routing completion or DRC coverage.
+
+`dev/probes/situs_native/read_autoroute_command_state.pas.in` is a separate read-only qualification candidate. It acquires the documented `Client.GetCommandLauncher` and calls `ICommandLauncher.GetCommandState` once for a whitelisted autorouter action. Legacy string/output marshaling remains unqualified until native readback. Returned command flags/caption are retained as observations and never converted into an invented router state. No launch, stop, pause, save or raw pointer/interface cast occurs in this probe.
+
+Official references: [PCB System API](https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference) and [System API](https://www.altium.com/documentation/altium-dxp-developer/system-api). These are historical SDK references; scripting exposes a subset.
+
+## Public command
+
+`control_situs_native_settings` provides `inspect` and `set` through a fixed, dedicated script project. It holds the existing bridge lock and cross-process emergency claim, pins the configured process identity, and refuses ambiguous or unrecovered sessions. `expected_creation_filetime` is a decimal string to preserve all 64 bits. Native execution checks the active board path/object and process depths independently. No caller-supplied Pascal is accepted.
+
+An operation ID binds the exact request and process. Repeating it returns historical evidence with `replayed: true` and `current_state_rechecked: false`; it does not dispatch again. Uncertain launch, cancellation or missing completion leaves the shared recovery latch pending. The command does not recover, stop or restart Altium automatically.

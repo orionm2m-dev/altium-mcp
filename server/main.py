@@ -1516,6 +1516,35 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 
 @mcp.tool()
+async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str,
+        target_pid: int, expected_creation_filetime: str, operation_id: str = "",
+        expected_checked: bool | None = None, checked: bool | None = None,
+        timeout_seconds: int = 15) -> str:
+    """Inspect or set the global Situs Lock All Pre-routes option without UIA.
+
+    action is inspect or set. Requires one ready configured Altium process and
+    the exact active PCB path. FILETIME is a decimal string, never a JSON number.
+    set requires expected_checked and checked, compares fresh state, assigns at
+    most once, then reads back. An already-satisfied value needs no assignment.
+    This global PCB option is not a per-document setting; no board/preferences
+    save or routing is requested, and cross-session persistence is not verified.
+
+    Reusing operation_id (32 lowercase hex characters) returns historical
+    evidence only. Empty allocates a fresh id. Unknown dispatch outcomes keep
+    script recovery blocked and are never automatically retried. Results are
+    compact; detailed native receipts and fixed source remain in receipt_directory.
+    """
+    import situs_native_settings_service
+    outcome = await situs_native_settings_service.control(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR,
+        altium_bridge._command_lock, action=action, pcb_path=pcb_path,
+        target_pid=target_pid, expected_creation_filetime=expected_creation_filetime,
+        operation_id=operation_id, expected_checked=expected_checked,
+        checked=checked, timeout_seconds=timeout_seconds)
+    return json.dumps(outcome)
+
+
+@mcp.tool()
 async def control_situs_settings(ctx: Context, action: str, target_hwnd: int,
                                  expected_main_title: str, dialog_kind: str = "setup",
                                  expected_snapshot: dict | None = None,
