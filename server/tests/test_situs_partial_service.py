@@ -354,6 +354,131 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.launch.assert_called_once()
 
 
+
+    async def failed_copper_return(self):
+        def launch(exe,argument):
+            launcher=self.launch_native(exe,argument)
+            self.publish_native(stage='readback_failed',success=False,return_verified=False,
+                old_copper_preserved=False,error='old_free_copper_changed_or_snapshot_incomplete',
+                after_copper_records=['modified-track'],after_copper_count=1)
+            return launcher
+        self.launch.side_effect=launch
+        result=await self.call()
+        self.assertTrue(result['outcome_unknown'])
+        self.assertFalse(result['success'])
+        return self.root/'situs_partial'/OP
+
+    async def reconcile(self,**changes):
+        args=dict(qualification_root=self.qualification,operation_id=OP,target_pid=PID,
+                  expected_creation_filetime=CREATED)
+        args.update(changes)
+        return await service.reconcile_known_return(EXE,self.root,self.lock,**args)
+
+    async def test_reconcile_known_return_preserves_failed_route_and_original_evidence(self):
+        folder=await self.failed_copper_return()
+        saved={p.name:p.read_bytes() for p in folder.iterdir()}
+        result=await self.reconcile()
+        self.assertTrue(result['reconciled'] and result['executor_return_known'] and result['recovery_latch_cleared'],result)
+        self.assertFalse(result['success'] or result['routing_success'] or result['routing_return_verified']
+            or result['dispatch_attempted'] or result['copper_validation_passed']
+            or result['native_idle_currently_verified'] or result['drc_completed'])
+        self.assertTrue(result['diagnostics_required'])
+        self.assertIsNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+        for name,data in saved.items():self.assertEqual((folder/name).read_bytes(),data)
+        proof=json.loads((folder/'known_return_reconciliation.json').read_text('utf-8'))
+        self.assertTrue(proof['native_idle_verified_at_original_return'])
+        self.assertFalse(proof['routing_success'] or proof['native_dispatch_performed'])
+        repeat=await self.reconcile()
+        self.assertFalse(repeat['reconciled'] or repeat['success'])
+        self.launch.assert_called_once()
+
+    async def test_reconcile_requires_exact_pending_token_phase_and_launcher(self):
+        await self.failed_copper_return()
+        state=service.script_recovery.blocked_state(self.root)
+        variants=[dict(state,token='b'*32),dict(state,phase='native_situs_pending'),
+                  dict(state,situs_partial_receipt='other'),dict(state,launches=[]),
+                  dict(state,launches=[dict(state['launches'][0],exit_code=None)])]
+        for changed in variants:
+            with self.subTest(changed=changed):
+                service.script_recovery._write_state(self.root,changed)
+                result=await self.reconcile()
+                self.assertFalse(result['reconciled'] or result['success'])
+                self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_reconcile_rejects_identity_scope_and_source_changes(self):
+        folder=await self.failed_copper_return()
+        for args in ({'target_pid':PID+1},{'expected_creation_filetime':str(int(CREATED)+1)},
+                     {'qualification_root':self.root},{'operation_id':'b'*32}):
+            with self.subTest(args=args):
+                result=await self.reconcile(**args)
+                self.assertFalse(result['reconciled'])
+        source=folder/'SelectedTPRoute.pas'
+        source.write_text(source.read_text('utf-8')+'\n// source changed','utf-8')
+        self.assertFalse((await self.reconcile())['reconciled'])
+        self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_reconcile_requires_original_outer_exit_and_identity_proof(self):
+        folder=await self.failed_copper_return();path=folder/'result.json'
+        original=json.loads(path.read_text('utf-8'))
+        for change in ({'launcher_exit_code':None},{'launcher_exit_code':False},
+                       {'process_identity_verified':False},{'success':True},{'source_sha256':'0'*64},
+                       {'service_receipt_persisted':False},{'native_receipt':{}}):
+            with self.subTest(change=change):
+                path.write_text(json.dumps(dict(original,**change)),'utf-8')
+                result=await self.reconcile()
+                self.assertFalse(result['reconciled'])
+                self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_reconcile_rejects_incomplete_native_return_or_other_failure(self):
+        folder=await self.failed_copper_return();terminal=folder/'native.json.readback_failed.json'
+        original=json.loads(terminal.read_text('utf-8'))
+        for change in ({'after_snapshot_complete':False},{'selection_restored':False},
+                       {'error':'exact_return_or_idle_failed'},{'route_attempted':False}):
+            with self.subTest(change=change):
+                terminal.write_text(json.dumps(dict(original,**change)),'utf-8')
+                result=await self.reconcile()
+                self.assertFalse(result['reconciled'])
+                self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_reconcile_refuses_new_modal_or_process_identity_change(self):
+        await self.failed_copper_return()
+        self.environment.side_effect=ValueError('New modal')
+        result=await self.reconcile();self.assertFalse(result['reconciled'])
+        self.environment.side_effect=None
+        self.identify.side_effect=[dict(self.identity),dict(self.identity,creation_filetime=int(CREATED)+1)]
+        result=await self.reconcile();self.assertFalse(result['reconciled'])
+        self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_reconcile_never_clears_latch_without_durable_proof(self):
+        await self.failed_copper_return()
+        with patch.object(service,'_write',side_effect=OSError('Proof write failed')):
+            result=await self.reconcile()
+        self.assertFalse(result['reconciled'] or result['recovery_latch_cleared'])
+        self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        with patch.object(service.script_recovery,'_write_state',side_effect=OSError('State write failed')):
+            result=await self.reconcile()
+        self.assertFalse(result['reconciled'] or result['recovery_latch_cleared'])
+        self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
+    async def test_actual_reconcile_wrapper_preserves_failure_and_unlocks_only_diagnostics(self):
+        await self.failed_copper_return()
+        mcp,_=registered_wrapper(self.root,self.lock,'reconcile_situs_selected_tp')
+        with patch.dict(os.environ,{'ALTIUM_SITUS_QUALIFICATION_ROOT':str(self.qualification)}):
+            response=await mcp.call_tool('reconcile_situs_selected_tp',dict(
+                operation_id=OP,target_pid=PID,expected_creation_filetime='ft:'+CREATED))
+        result=json.loads(response[0].text)
+        self.assertTrue(result['reconciled'],result)
+        self.assertFalse(result['success'] or result['routing_success'] or result['dispatch_attempted'])
+        self.assertIsNone(service.script_recovery.blocked_state(self.root))
+        self.launch.assert_called_once()
+
     async def test_actual_public_wrapper_reaches_service_with_exact_filetime(self):
         mcp, unused_lock = registered_wrapper(self.root, self.lock)
         with patch.dict(os.environ, {'ALTIUM_SITUS_QUALIFICATION_ROOT': str(self.qualification)}):
@@ -369,12 +494,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.launch.assert_called_once()
 
 
-def registered_wrapper(exchange='exchange', lock=None):
+def registered_wrapper(exchange='exchange', lock=None, name='route_situs_selected_tp'):
     """Compile only the real decorated wrapper into a real FastMCP registry."""
     from mcp.server.fastmcp import FastMCP, Context
     tree=ast.parse((SERVER/'main.py').read_text('utf-8'))
     nodes=[n for n in tree.body if isinstance(n,ast.AsyncFunctionDef)
-           and n.name=='route_situs_selected_tp']
+           and n.name==name]
     if len(nodes)!=1:raise AssertionError('Exact public wrapper required')
     mcp=FastMCP('selected-tp-offline')
     if lock is None:lock=asyncio.Lock()
@@ -385,6 +510,31 @@ def registered_wrapper(exchange='exchange', lock=None):
 
 
 class PublicWrapperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_actual_reconcile_schema_and_exact_filetime_conversion(self):
+        main_before=sys.modules.get('main')
+        mcp,lock=registered_wrapper(name='reconcile_situs_selected_tp')
+        tools={tool.name:tool for tool in await mcp.list_tools()}
+        self.assertEqual(set(tools),{'reconcile_situs_selected_tp'})
+        schema=tools['reconcile_situs_selected_tp'].inputSchema
+        self.assertEqual(set(schema['properties']),{'operation_id','target_pid','expected_creation_filetime'})
+        self.assertEqual(schema['properties']['expected_creation_filetime']['type'],'string')
+        with patch.dict(os.environ,{'ALTIUM_SITUS_QUALIFICATION_ROOT':r'C:\qualified'}), \
+                patch.object(service,'reconcile_known_return',return_value={'success':False,'reconciled':True}) as reconcile:
+            response=await mcp.call_tool('reconcile_situs_selected_tp',dict(
+                operation_id=OP,target_pid=PID,expected_creation_filetime='ft:'+CREATED))
+        result=json.loads(response[0].text)
+        self.assertFalse(result['success']);self.assertTrue(result['reconciled'])
+        self.assertEqual(reconcile.call_args.args,(EXE,'exchange',lock))
+        self.assertEqual(reconcile.call_args.kwargs,dict(qualification_root=r'C:\qualified',
+            operation_id=OP,target_pid=PID,expected_creation_filetime=CREATED))
+        with patch.object(service,'reconcile_known_return') as reconcile:
+            response=await mcp.call_tool('reconcile_situs_selected_tp',dict(
+                operation_id=OP,target_pid=PID,expected_creation_filetime='ft:01'))
+        result=json.loads(response[0].text)
+        self.assertFalse(result['success'] or result['reconciled'])
+        reconcile.assert_not_called()
+        self.assertIs(sys.modules.get('main'),main_before)
+
     async def test_actual_fastmcp_schema_and_private_configuration(self):
         main_before=sys.modules.get('main')
         mcp,lock=registered_wrapper()

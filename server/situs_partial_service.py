@@ -259,3 +259,140 @@ async def _execute(exe, exchange, folder, project, receipt_path, process,
         except (OSError, ValueError, TypeError):
             pass
     return result
+
+
+def _read_saved_json(path):
+    """Bounded, duplicate-key rejecting journal input."""
+    with path.open('rb') as stream:
+        content = stream.read(native.MAX_RECEIPT + 16385)
+    if len(content) > native.MAX_RECEIPT + 16384:
+        raise ValueError('Saved operation evidence exceeds its size limit')
+    value = json.loads(content.decode('utf-8'), object_pairs_hook=native._pairs)
+    if not isinstance(value, dict):
+        raise ValueError('Saved operation evidence must be an object')
+    return value
+
+
+async def reconcile_known_return(exe, exchange_dir, command_lock, *, qualification_root,
+                                 operation_id, target_pid, expected_creation_filetime):
+    """Clear only a known returned invocation whose old-copper validation failed.
+
+    This is journal reconciliation, with read-only process/window diagnostics.
+    No native dispatch, PCB read/write, rollback or retry is performed. The
+    original route result stays failed and its copper change remains unresolved.
+    The immutable native terminal receipt plus the exact fixed source establish
+    that routing returned, selection was restored and native process depth was
+    idle at that time. Current responsiveness is not a new native idle proof.
+    """
+    result = dict(success=False, reconciled=False, executor_return_known=False, recovery_latch_cleared=False,
+                  dispatch_attempted=False, routing_success=False, routing_return_verified=False,
+                  copper_validation_passed=False, drc_completed=False, connectivity_verified=False,
+                  board_saved=False, retry_allowed=False, native_idle_currently_verified=False)
+    try:
+        if not isinstance(operation_id, str) or re.fullmatch('[0-9a-f]{32}', operation_id) is None:
+            raise ValueError('Exact existing 32 lowercase hexadecimal operation_id required')
+        if type(target_pid) is not int or target_pid <= 0:
+            raise ValueError('target_pid must be a positive integer')
+        if (not isinstance(expected_creation_filetime, str)
+                or re.fullmatch('[1-9][0-9]{0,19}', expected_creation_filetime) is None
+                or int(expected_creation_filetime) >= 2 ** 64):
+            raise ValueError('Exact decimal FILETIME string required')
+        exe = str(exe)
+        if not PureWindowsPath(exe).is_absolute():
+            raise ValueError('Absolute configured executable required')
+        exchange = Path(exchange_dir).resolve()
+        folder = exchange / 'situs_partial' / operation_id
+        receipt_path = folder / 'native.json'
+        result.update(operation_id=operation_id, target_pid=target_pid,
+                      creation_filetime_decimal=expected_creation_filetime)
+        async with command_lock:
+            with emergency_stop.emergency_claim(exchange):
+                pending = script_recovery.blocked_state(exchange)
+                if (not pending or pending.get('phase') != 'situs_partial_pending'
+                        or pending.get('token') != operation_id
+                        or pending.get('situs_partial_receipt') != str(receipt_path)):
+                    raise ValueError('No matching selected-TP pending operation to reconcile')
+                _reject_reparse(folder)
+                binding = _read_saved_json(folder / 'request.json')
+                request = native._request(binding.get('request'))
+                if request['operation_id'] != operation_id:
+                    raise ValueError('Saved request operation identity mismatch')
+                approved_root = _candidate_scope(request['pcb_path'], qualification_root)
+                expected_binding = dict(request=request, target_pid=target_pid,
+                    creation_filetime_decimal=expected_creation_filetime,
+                    executable=emergency_stop._canonical(exe), qualification_root=approved_root)
+                if binding != expected_binding:
+                    raise ValueError('Saved request is bound to another process or qualification scope')
+                source = _preflight(request, receipt_path).encode('utf-8')
+                if (folder / 'SelectedTPRoute.pas').read_bytes() != source:
+                    raise ValueError('Saved source differs from the fixed reviewed native builder')
+                source_hash = hashlib.sha256(source).hexdigest()
+                original = _read_saved_json(folder / 'result.json')
+                if (original.get('source_sha256') != source_hash
+                        or original.get('operation_id') != operation_id
+                        or original.get('target_pid') != target_pid
+                        or original.get('creation_filetime_decimal') != expected_creation_filetime
+                        or original.get('pcb_path') != request['pcb_path']
+                        or original.get('qualification_root') != approved_root
+                        or original.get('receipt_directory') != str(folder)
+                        or original.get('component_designator') != request['component_designator']
+                        or original.get('expected_net') != request['expected_net']):
+                    raise ValueError('Saved service evidence identity or source mismatch')
+                if (original.get('success') is not False
+                        or original.get('dispatch_attempted') is not True
+                        or original.get('process_identity_verified') is not True
+                        or type(original.get('launcher_exit_code')) is not int
+                        or original['launcher_exit_code'] != 0
+                        or original.get('service_receipt_persisted') is not True):
+                    raise ValueError('Saved service evidence does not establish a returned failed request')
+                receipt = native.read_partial_receipt(receipt_path, request)
+                if (receipt.get('stage') != 'readback_failed'
+                        or receipt.get('error') != 'old_free_copper_changed_or_snapshot_incomplete'
+                        or receipt.get('success') is not False
+                        or receipt.get('return_verified') is not False
+                        or receipt.get('old_copper_preserved') is not False
+                        or any(receipt.get(key) is not True for key in (
+                            'route_attempted', 'selection_attempted', 'selection_restored',
+                            'lock_preroutes_verified', 'before_snapshot_complete', 'after_snapshot_complete'))
+                        or receipt != original.get('native_receipt')):
+                    raise ValueError('Exact known copper-validation failure and complete native return evidence required')
+                launches = pending.get('launches')
+                if (not isinstance(launches, list) or len(launches) != 1
+                        or launches[0].get('phase') != 'situs_partial'
+                        or type(launches[0].get('pid')) is not int or launches[0]['pid'] <= 0
+                        or type(launches[0].get('exit_code')) is not int or launches[0]['exit_code'] != 0):
+                    raise ValueError('Pending journal lacks the exact finished launcher')
+                with emergency_stop.WinProcess(target_pid) as process:
+                    before = _identity(process, exe, target_pid, int(expected_creation_filetime))
+                    if not emergency_stop._same_identity(before, pending.get('process_identity', {})):
+                        raise ValueError('Current process differs from the original pending invocation')
+                    readiness = _environment(exe, target_pid)
+                    after = _identity(process, exe, target_pid, int(expected_creation_filetime))
+                    if not emergency_stop._same_identity(before, after):
+                        raise ValueError('Process changed during read-only reconciliation')
+                    if script_recovery.blocked_state(exchange) != pending:
+                        raise ValueError('Pending recovery state changed during reconciliation')
+                    proof_path = folder / 'known_return_reconciliation.json'
+                    proof = dict(schema_version=1, operation_id=operation_id,
+                        kind='returned_native_request_with_copper_validation_failure',
+                        source_sha256=source_hash, process_identity=after, readiness=readiness,
+                        native_stage=receipt['stage'], native_error=receipt['error'],
+                        before_copper_sha256=receipt['before_copper_sha256'],
+                        after_copper_sha256=receipt['after_copper_sha256'],
+                        executor_return_known=True, native_idle_verified_at_original_return=True,
+                        native_idle_currently_verified=False, routing_success=False,
+                        copper_validation_passed=False, diagnostics_required=True,
+                        original_result_preserved=True, native_dispatch_performed=False)
+                    _write(proof_path, proof)
+                    recovered = dict(pending, phase='recovered',
+                        recovery_basis='selected_tp_known_return_with_copper_validation_failure',
+                        reconciliation_receipt=str(proof_path),
+                        executor_recovery_performed=False, routing_validation_passed=False)
+                    script_recovery._write_state(exchange, recovered)
+                    result.update(reconciled=True, executor_return_known=True,
+                        recovery_latch_cleared=True, original_result_preserved=True,
+                        diagnostics_required=True, reconciliation_receipt=str(proof_path),
+                        original_route_error=receipt['error'])
+        return result
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return dict(result, success=False, error=str(error))

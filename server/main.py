@@ -1636,6 +1636,32 @@ async def route_situs_selected_tp(ctx: Context, pcb_path: str,
 
 
 @mcp.tool()
+async def reconcile_situs_selected_tp(ctx: Context, operation_id: str, target_pid: int,
+        expected_creation_filetime: str) -> str:
+    """Release only a proven returned partial-routing attempt for diagnostics.
+
+    Reads its immutable evidence and verifies the exact unchanged live process.
+    Only the known copper-readback failure with complete before/after snapshots,
+    restored selection and successful launcher exit qualifies. Original routing
+    failure/evidence remain unchanged. No native dispatch, retry, geometry edit,
+    save, UI or focus control. This does not qualify routing or DRC success.
+    The private ALTIUM_SITUS_QUALIFICATION_ROOT configuration is required.
+    """
+    import situs_partial_service
+    import situs_native_settings_service
+    try:
+        created = situs_native_settings_service.normalize_public_filetime(expected_creation_filetime)
+    except (TypeError, ValueError) as error:
+        return json.dumps({"success": False, "reconciled": False,
+                           "error": str(error), "no_new_dispatch": True})
+    outcome = await situs_partial_service.reconcile_known_return(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        qualification_root=os.environ.get("ALTIUM_SITUS_QUALIFICATION_ROOT", ""),
+        operation_id=operation_id, target_pid=target_pid, expected_creation_filetime=created)
+    return json.dumps(outcome)
+
+
+@mcp.tool()
 async def control_situs_strategy(ctx: Context, action: str, pcb_path: str,
         target_pid: int, expected_creation_filetime: str, payload: dict | None = None,
         operation_id: str = "", timeout_seconds: int = 15) -> str:
