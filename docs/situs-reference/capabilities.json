@@ -1,0 +1,1143 @@
+{
+  "schema_version": 1,
+  "status": "CAPABILITY_MATRIX_PROPOSAL_READ_ONLY_AUDIT",
+  "checked_utc": "2026-10-21T12:20:40.839984+00:00",
+  "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+  "checked_runtime_version": "Altium Designer 26.9.1",
+  "scope": "Current registered MCP source and bounded captured native evidence; no native calls, repository edits or tests executed for this audit.",
+  "status_definitions": {
+    "available": "A dedicated registered tool supports the named narrow capability; qualification boundary still applies.",
+    "partial": "Registered support covers only part of the named capability or completion/branch qualification is incomplete.",
+    "blocked": "Public action exists but current observed native control is explicitly refused safely.",
+    "missing": "No dedicated public implementation found in current source; installed commands or generic scripting are not equivalent.",
+    "probe_only": "Task-specific generic script/probe exists; not a supported typed public capability."
+  },
+  "runtime_verified_definition": "True only means at least one explicitly listed native_qualified_actions observation on checked_runtime_version; it does not qualify every supported action, input, board or future version. Read-only/static utilities intentionally remain false.",
+  "registered_tool_names_referenced": [
+    "control_drc_setup",
+    "control_situs_setup",
+    "create_net_class",
+    "get_all_nets",
+    "get_altium_environment",
+    "get_net_connections",
+    "get_pcb_rules",
+    "get_screenshot",
+    "get_selected_components_coordinates",
+    "lint_altium_script",
+    "reconcile_script_probe",
+    "recover_script_executor",
+    "resume_completed_stop",
+    "run_altium_script",
+    "run_pcb_drc",
+    "save_documents",
+    "search_altium_api",
+    "set_pcb_keepouts",
+    "set_pcb_routing",
+    "set_pcb_rules"
+  ],
+  "source_manifest": {
+    "server/AltiumScript/pcb_document.pas": {
+      "sha256": "594063b11f4e84059f0c73915d361b7c43a9ee95bbd8754c7b2beba146f4f419",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/AltiumScript/pcb_primitives.pas": {
+      "sha256": "4f526da6f9d462d0bcc4f96bc68028310735208d4e4edfa1c8a128b5c52d1b90",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/AltiumScript/pcb_utils.pas": {
+      "sha256": "c54884019328c28ce7e7d69a53848651c12d9ec63704669bb866118a16f14118",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/main.py": {
+      "sha256": "f7f660098543eb413b17d9bb14dbbd42991e3efcd33e530675b595192372fb31",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/script_guard.py": {
+      "sha256": "7b95b5b5bc58d10af6c4f040112e676ff6c7de9c4e3071360b8376b5742bc897",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    },
+    "server/situs_setup_control.py": {
+      "sha256": "263649062a2a6be66855a35e9d522c01cbb7a2777ad41b1ca62ce2befaf1a60e",
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "situs.setup.open",
+      "name": "Open routing setup",
+      "setting_or_function": "Open routing setup",
+      "status": "probe_only",
+      "registered_tools": [
+        "run_altium_script"
+      ],
+      "supported_actions": [
+        "execute user-provided guarded DelphiScript"
+      ],
+      "implementation_refs": [
+        "server/main.py:1254"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed Setup process is discoverable, but no dedicated parameter-validated setup opener is registered. Generic script availability is not a promise that arbitrary processes are safe or qualified.",
+      "evidence_ids": [
+        "EV_SETUP_PROCESS_RESEARCH"
+      ],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Setup",
+          "installed_ref": "System/AdvPcb.rcs:585"
+        }
+      ]
+    },
+    {
+      "id": "situs.setup.inspect",
+      "name": "Inspect Situs setup dialog",
+      "setting_or_function": "Inspect Situs setup dialog",
+      "status": "available",
+      "registered_tools": [
+        "control_situs_setup"
+      ],
+      "supported_actions": [
+        "inspect"
+      ],
+      "implementation_refs": [
+        "server/main.py:1460",
+        "server/situs_setup_control.py:90",
+        "server/situs_setup_control.py:69"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "inspect exact owned setup on observed runtime"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Exact owned TSitusSetup and expected main title are checked. Inventory covers whitelisted buttons and the Rip-up checkbox, not all strategy/settings/report values; title binds filename, not full PCB path.",
+      "evidence_ids": [
+        "EV_SETUP_INSPECT"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.setup.accept_cancel",
+      "name": "Accept or cancel setup",
+      "setting_or_function": "Accept or cancel setup",
+      "status": "partial",
+      "registered_tools": [
+        "control_situs_setup"
+      ],
+      "supported_actions": [
+        "ok",
+        "cancel"
+      ],
+      "implementation_refs": [
+        "server/main.py:1460",
+        "server/situs_setup_control.py:7",
+        "server/situs_setup_control.py:90"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "post exact OK button gesture"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Observed OK/control-client button dispatch; returned success means messages posted, completion_verified remains false. Cancel is implemented/unit-tested but no matching completed native cancel receipt was identified in this audit.",
+      "evidence_ids": [
+        "EV_SETUP_OK_VCL"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.run.whole_board",
+      "name": "Start whole-board routing",
+      "setting_or_function": "Start whole-board routing",
+      "status": "partial",
+      "registered_tools": [
+        "control_situs_setup",
+        "run_altium_script"
+      ],
+      "supported_actions": [
+        "route_all on existing setup",
+        "execute guarded Action=Start probe"
+      ],
+      "implementation_refs": [
+        "server/main.py:1460",
+        "server/situs_setup_control.py:90",
+        "server/main.py:1254"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "post exact Route All gesture",
+        "guarded probe Action=Start returned after routing"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Route All gesture and eventual native completion were observed separately. There is no dedicated start/status/await job API or automatic strategy selection; script timeout is not proof routing stopped.",
+      "evidence_ids": [
+        "EV_ROUTE_ALL_GESTURE",
+        "EV_ROUTE_ALL_COMPLETED"
+      ],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Start|UpdateCaption=False",
+          "installed_ref": "System/AdvPcb.rcs:573"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.selected_components",
+      "name": "Route selected components",
+      "setting_or_function": "Route selected components",
+      "status": "probe_only",
+      "registered_tools": [
+        "run_altium_script"
+      ],
+      "supported_actions": [
+        "execute user-provided selection/route probe"
+      ],
+      "implementation_refs": [
+        "server/main.py:1254"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "guarded OnSelectedComponents dispatch and return; no route improvement demonstrated"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "A guarded project probe dispatched OnSelectedComponents and returned with zero new copper in that trial. This qualifies dispatch/return only, not a productive router result or a reusable selector tool.",
+      "evidence_ids": [
+        "EV_SELECTED_COMPONENT_PROBE"
+      ],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=OnSelectedComponents",
+          "installed_ref": "System/AdvPcb.rcs:579"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.between_selected",
+      "name": "Route between selected components",
+      "setting_or_function": "Route between selected components",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed process exists; no dedicated public wrapper or captured native qualification for this scope.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=BetweenSelectedComponents",
+          "installed_ref": "System/AdvPcb.rcs:580"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.other_scopes",
+      "name": "Route net/class/component/area/room/connection",
+      "setting_or_function": "Route net/class/component/area/room/connection",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed interactive processes are not registered typed autorouter tools; target selection, cancellation, path binding and completion remain unqualified.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=NetClass",
+          "installed_ref": "System/AdvPcb.rcs:574"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=ComponentClass",
+          "installed_ref": "System/AdvPcb.rcs:575"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Net",
+          "installed_ref": "System/AdvPcb.rcs:576"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Component",
+          "installed_ref": "System/AdvPcb.rcs:578"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Area",
+          "installed_ref": "System/AdvPcb.rcs:582"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Room",
+          "installed_ref": "System/AdvPcb.rcs:583"
+        },
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Connection",
+          "installed_ref": "System/AdvPcb.rcs:592"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.stop",
+      "name": "Stop autorouter",
+      "setting_or_function": "Stop autorouter",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed PCB autorouter process is present; no dedicated public dispatcher or native qualification. EditScript:Stop/recovery and process termination are different operations.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Stop",
+          "installed_ref": "System/AdvPcb.rcs:586"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.pause",
+      "name": "Pause/resume autorouter",
+      "setting_or_function": "Pause/resume autorouter",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed Action=Pause exists; no dedicated public dispatcher or captured native qualification, including resume behavior. No separate Action=Resume is asserted. EditScript:Stop/recovery and process termination are different operations.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Pause",
+          "installed_ref": "System/AdvPcb.rcs:588"
+        }
+      ]
+    },
+    {
+      "id": "situs.run.reset",
+      "name": "Reset autorouter",
+      "setting_or_function": "Reset autorouter",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed PCB autorouter process is present; no dedicated public dispatcher or native qualification. EditScript:Stop/recovery and process termination are different operations.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Autoroute",
+          "parameters": "Action=Reset",
+          "installed_ref": "System/AdvPcb.rcs:587"
+        }
+      ]
+    },
+    {
+      "id": "situs.strategy.read",
+      "name": "Read selected strategy",
+      "setting_or_function": "Read selected strategy",
+      "status": "partial",
+      "registered_tools": [
+        "get_screenshot"
+      ],
+      "supported_actions": [
+        "current image capture"
+      ],
+      "implementation_refs": [
+        "server/main.py:4941",
+        "server/situs_setup_control.py:69"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "capture current native dialog image"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Image observation can show the selection; control_situs_setup does not read the strategy list or expose a structured selected-strategy value.",
+      "evidence_ids": [
+        "EV_PROGRESS_SCREENSHOT"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.strategy.select",
+      "name": "Select routing strategy",
+      "setting_or_function": "Select routing strategy",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7",
+        "server/situs_setup_control.py:69"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No typed strategy selection, expected-current selection guard or native selected-strategy readback.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.strategy.edit_passes",
+      "name": "Create/duplicate/edit/remove strategy and passes",
+      "setting_or_function": "Create/duplicate/edit/remove strategy and passes",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7",
+        "server/situs_setup_control.py:90"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Buttons may appear in inspect inventory, but only ok/cancel/route_all are actionable. Pass types, order, cost/options and persistence have no public schema.",
+      "evidence_ids": [],
+      "installed_commands": [],
+      "missing_settings": [
+        "strategy_name",
+        "description",
+        "routing_pass_type",
+        "pass_order",
+        "repeat_passes",
+        "via_cost_slider",
+        "orthogonal"
+      ]
+    },
+    {
+      "id": "situs.layer_directions",
+      "name": "Read/change preferred and actual layer directions",
+      "setting_or_function": "Read/change preferred and actual layer directions",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/main.py:2685",
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No Layer Directions reader/setter. set_pcb_layer_stack edits physical stack, not router direction. Generic scripts and stored file fields are not a qualified runtime directions API.",
+      "evidence_ids": [],
+      "installed_commands": [],
+      "missing_settings": [
+        "preferred_direction",
+        "actual_direction",
+        "not_used_layer_mode"
+      ]
+    },
+    {
+      "id": "situs.lock_pre_routes",
+      "name": "Lock All Pre-routes setting",
+      "setting_or_function": "Lock All Pre-routes setting",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:69",
+        "server/main.py:3149"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No dedicated setting getter/setter or exact checkbox support; control_situs_setup only singles out Rip-up. Per-object locked on added geometry is a separate feature.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.rip_up.custom_checkbox",
+      "name": "Rip-up violations after routing, observed custom checkbox",
+      "setting_or_function": "Rip-up Violations After Routing",
+      "status": "blocked",
+      "registered_tools": [
+        "control_situs_setup"
+      ],
+      "supported_actions": [
+        "inspect raw BM_GETCHECK reply",
+        "refuse unsafe enable request"
+      ],
+      "implementation_refs": [
+        "server/main.py:1460",
+        "server/situs_setup_control.py:49",
+        "server/situs_setup_control.py:90"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Observed TXPCheckBox style0 returns BM_GETCHECK=0 in both visual states. Current code reports unknown state and blocks enable before input. Historical failed toggle/readback is not native qualification; do not retry blindly.",
+      "evidence_ids": [
+        "EV_RIP_UP_FAILED_READBACK",
+        "EV_RIP_UP_NEGATIVE_COMMIT"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.rip_up.standard_checkbox",
+      "name": "Rip-up on supported standard checkbox classes",
+      "setting_or_function": "Rip-up Violations After Routing",
+      "status": "partial",
+      "registered_tools": [
+        "control_situs_setup"
+      ],
+      "supported_actions": [
+        "inspect",
+        "enable_rip_up with exact checkbox HWND and expected state"
+      ],
+      "implementation_refs": [
+        "server/main.py:1460",
+        "server/situs_setup_control.py:49",
+        "server/situs_setup_control.py:90"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Standard/VCL class/style branch is implemented and unit-tested, but it is not the observed AD26.9.1 custom control and has no captured native success in this audit.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.setup_report.read",
+      "name": "Read structured Routing Setup Report",
+      "setting_or_function": "Read structured Routing Setup Report",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:69",
+        "server/situs_setup_control.py:7"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No structured report extraction, effective-rule matching counts, unroutable-pad link resolver or full report text tool. Screenshots are not a machine-readable report.",
+      "evidence_ids": [],
+      "installed_commands": [],
+      "missing_settings": [
+        "effective_rule_object_counts",
+        "layer_directions",
+        "drill_pairs",
+        "unroutable_pad_links",
+        "warnings"
+      ]
+    },
+    {
+      "id": "situs.setup_report.export",
+      "name": "Save Routing Setup Report as HTML",
+      "setting_or_function": "Save Routing Setup Report as HTML",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/situs_setup_control.py:7",
+        "server/situs_setup_control.py:69"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Save Report As can be seen in button inventory but is outside the action whitelist; no filename/save-dialog handler or exported report qualification.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.progress.visual",
+      "name": "Observe routing progress visually",
+      "setting_or_function": "Observe routing progress visually",
+      "status": "available",
+      "registered_tools": [
+        "get_screenshot",
+        "get_altium_environment"
+      ],
+      "supported_actions": [
+        "current screenshot",
+        "read process/window/dialog inventory"
+      ],
+      "implementation_refs": [
+        "server/main.py:4941",
+        "server/main.py:1530"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "current screenshot during native routing"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Current-mode capture avoids script dispatch. A responsive window or progress image is not proof of idle, completion, exact active path or routed connectivity.",
+      "evidence_ids": [
+        "EV_PROGRESS_SCREENSHOT"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.progress.structured",
+      "name": "Structured progress and completion polling",
+      "setting_or_function": "Structured progress and completion polling",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/main.py:1254"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No dedicated routed/total, pass, elapsed, native job identity, cancellation state or completion API. Probe logs/results were task-specific and runtime-generated Sandbox.pas is not a product endpoint.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.fanout.run",
+      "name": "Run native fanout",
+      "setting_or_function": "Run native fanout",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/AltiumScript/pcb_document.pas:1464"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Installed PCB:Fanout actions exist, but no public typed fanout wrapper, target guard, via-generation validation or captured native qualification.",
+      "evidence_ids": [],
+      "installed_commands": [
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=All",
+          "installed_ref": "System/AdvPcb.rcs:602"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=PowerPlaneNets",
+          "installed_ref": "System/AdvPcb.rcs:603"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=SignalNets",
+          "installed_ref": "System/AdvPcb.rcs:604"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Room",
+          "installed_ref": "System/AdvPcb.rcs:605"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Component",
+          "installed_ref": "System/AdvPcb.rcs:606"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Selected",
+          "installed_ref": "System/AdvPcb.rcs:607"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Net",
+          "installed_ref": "System/AdvPcb.rcs:608"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Connection",
+          "installed_ref": "System/AdvPcb.rcs:609"
+        },
+        {
+          "process": "PCB:Fanout",
+          "parameters": "Action=Pad",
+          "installed_ref": "System/AdvPcb.rcs:610"
+        }
+      ]
+    },
+    {
+      "id": "situs.constraints.width",
+      "name": "Width min/preferred/max and scoped priority",
+      "setting_or_function": "Width min/preferred/max and scoped priority",
+      "status": "available",
+      "registered_tools": [
+        "set_pcb_rules"
+      ],
+      "supported_actions": [
+        "create/update/delete Width rule",
+        "set scopes,priority,enabled,comment",
+        "set min,max,preferred in mm"
+      ],
+      "implementation_refs": [
+        "server/main.py:2919",
+        "server/AltiumScript/pcb_document.pas:1506",
+        "server/AltiumScript/pcb_document.pas:1464"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "create scoped Width and update priority; saved values checked"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Native creation/update and saved numeric values were observed. No per-layer width-table or impedance-profile editor. Setter saves the board, priorities are not auto-renumbered, and successful return does not certify unchanged copper or scope applicability.",
+      "evidence_ids": [
+        "EV_WIDTH_RULE_APPLY",
+        "EV_WIDTH_RULE_READBACK"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.constraints.clearance",
+      "name": "Clearance rules and priority",
+      "setting_or_function": "Clearance rules and priority",
+      "status": "available",
+      "registered_tools": [
+        "set_pcb_rules"
+      ],
+      "supported_actions": [
+        "create/update/delete supported clearance rules",
+        "set gap and scope/priority"
+      ],
+      "implementation_refs": [
+        "server/main.py:2919",
+        "server/AltiumScript/pcb_document.pas:1506"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "set positive clearance and scopes/priorities; saved readback"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Positive keepout clearance and narrow scope exceptions have native observations. Numeric gap alone is not full object-pair matrix readback; zero-gap behavior must not be assumed equivalent to geometric prohibition.",
+      "evidence_ids": [
+        "EV_CLEARANCE_RULE_READBACK"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.constraints.vias",
+      "name": "Routing Via Style",
+      "setting_or_function": "Routing Via Style",
+      "status": "partial",
+      "registered_tools": [
+        "set_pcb_rules"
+      ],
+      "supported_actions": [
+        "create/update/delete RoutingViaStyle",
+        "hole_min/hole_max/hole_preferred",
+        "pad_min/pad_max/pad_preferred"
+      ],
+      "implementation_refs": [
+        "server/main.py:2919",
+        "server/AltiumScript/pcb_document.pas:1506",
+        "server/AltiumScript/pcb_document.pas:1464"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "All six fields are implemented. Existing fixed through-via rule was read back, but no dedicated changing-via-style qualification is established here; blind/buried/custom-stack semantics are not supplied.",
+      "evidence_ids": [
+        "EV_EXISTING_RULE_SNAPSHOT"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.constraints.routing_layers",
+      "name": "Allowed routing layers rule",
+      "setting_or_function": "Allowed routing layers rule",
+      "status": "partial",
+      "registered_tools": [
+        "get_pcb_rules",
+        "set_pcb_rules"
+      ],
+      "supported_actions": [
+        "read generic metadata",
+        "change existing scope/priority/enabled metadata only"
+      ],
+      "implementation_refs": [
+        "server/main.py:2919",
+        "server/AltiumScript/pcb_document.pas:1464",
+        "server/AltiumScript/pcb_document.pas:1506",
+        "server/AltiumScript/pcb_utils.pas:1527"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "RoutingLayers is not a supported new rule kind and no per-layer allow/deny fields are exposed by the setter. Generic rule names do not prove value support.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.constraints.fanout",
+      "name": "Fanout Control rule options",
+      "setting_or_function": "Fanout Control rule options",
+      "status": "partial",
+      "registered_tools": [
+        "get_pcb_rules",
+        "set_pcb_rules"
+      ],
+      "supported_actions": [
+        "read generic metadata",
+        "change existing scope/priority/enabled metadata only"
+      ],
+      "implementation_refs": [
+        "server/main.py:2919",
+        "server/AltiumScript/pcb_document.pas:1464",
+        "server/AltiumScript/pcb_document.pas:1506"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No Fanout rule factory kind or fanout style/direction/escape options in ApplyRuleValues.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.constraints.readback",
+      "name": "Read complete effective routing constraints",
+      "setting_or_function": "Read complete effective routing constraints",
+      "status": "partial",
+      "registered_tools": [
+        "get_pcb_rules"
+      ],
+      "supported_actions": [
+        "name,descriptor,priority,enabled,kind,scope1,scope2",
+        "three sampled board-outline matrix cells"
+      ],
+      "implementation_refs": [
+        "server/main.py:5366",
+        "server/AltiumScript/pcb_utils.pas:1527"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "The implementation does not return numeric Width min/preferred/max, all ViaStyle fields, all clearance matrix entries or per-object resolved rule. Descriptor strings cannot substitute for exact native values or full setup report.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.drc.run",
+      "name": "Fresh guarded native DRC",
+      "setting_or_function": "Fresh guarded native DRC",
+      "status": "available",
+      "registered_tools": [
+        "run_pcb_drc"
+      ],
+      "supported_actions": [
+        "run=true fresh report",
+        "run=false cached violations only"
+      ],
+      "implementation_refs": [
+        "server/main.py:2878",
+        "server/AltiumScript/pcb_document.pas:1302"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "run=true returned fresh report and all collected violations"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Exact loaded/current PCB path and process depths are checked; fresh unique report required. Collector has no500-item cap, but native Stop-after-N and enabled-check coverage are separate; full_drc_verified remains false.",
+      "evidence_ids": [
+        "EV_NATIVE_DRC_FRESH"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.drc.limit",
+      "name": "Inspect/increase native DRC report limit",
+      "setting_or_function": "Inspect/increase native DRC report limit",
+      "status": "available",
+      "registered_tools": [
+        "control_drc_setup"
+      ],
+      "supported_actions": [
+        "inspect",
+        "set_limit increase only",
+        "ok",
+        "cancel"
+      ],
+      "implementation_refs": [
+        "server/main.py:1497"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "increase report limit and reopen/readback observed"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Exact native dialog/control and expected limit are checked. Limit persistence requires reopen/readback; this does not enable individual rule checks or prove full DRC coverage.",
+      "evidence_ids": [
+        "EV_DRC_LIMIT_READBACK"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.drc.coverage",
+      "name": "Read/configure all enabled native DRC checks",
+      "setting_or_function": "Read/configure all enabled native DRC checks",
+      "status": "missing",
+      "registered_tools": [],
+      "supported_actions": [],
+      "implementation_refs": [
+        "server/main.py:1497",
+        "server/main.py:2878"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No supported complete native rule-check enable matrix reader/setter. Tool deliberately keeps full_drc_verified=false rather than inferring full coverage from a returned report.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.geometry.explicit_routing",
+      "name": "Explicit tracks and through-via edits",
+      "setting_or_function": "Explicit tracks and through-via edits",
+      "status": "available",
+      "registered_tools": [
+        "set_pcb_routing"
+      ],
+      "supported_actions": [
+        "add tracks",
+        "exact delete tracks",
+        "add through vias",
+        "exact delete through vias"
+      ],
+      "implementation_refs": [
+        "server/main.py:3149",
+        "server/AltiumScript/pcb_primitives.pas:775"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "add tracks and exact-delete through vias"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "This is explicit geometry, not an autorouter. Exact existing net/geometry and ownership guards apply; add locked flag is per primitive, not Lock All Pre-routes. Native add/delete and readback observed.",
+      "evidence_ids": [
+        "EV_EXPLICIT_ROUTING_APPLY"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.geometry.keepouts",
+      "name": "Named region keepouts",
+      "setting_or_function": "Named region keepouts",
+      "status": "available",
+      "registered_tools": [
+        "set_pcb_keepouts"
+      ],
+      "supported_actions": [
+        "upsert named region",
+        "top/bottom/all/mid layer",
+        "all five restrictions together"
+      ],
+      "implementation_refs": [
+        "server/main.py:3108",
+        "server/AltiumScript/pcb_primitives.pas:379"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "named region upsert and saved geometry readback"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Only region geometry and full restriction mask are supported; no dedicated outer-boundary arc constructor in this tool. Existing task perimeter arcs were generic-script probes, not a registered Situs boundary tool.",
+      "evidence_ids": [
+        "EV_KEEPOUT_READBACK"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.geometry.outer_boundary",
+      "name": "Create closed Situs outer keepout boundary",
+      "setting_or_function": "Create closed Situs outer keepout boundary",
+      "status": "probe_only",
+      "registered_tools": [
+        "run_altium_script"
+      ],
+      "supported_actions": [
+        "execute guarded task-specific primitive creation"
+      ],
+      "implementation_refs": [
+        "server/main.py:1254"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "task-specific perimeter arc creation/readback"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "A task probe created and verified four outer arcs. No reusable typed boundary-from-board-shape tool; arbitrary new script is unqualified.",
+      "evidence_ids": [
+        "EV_PERIMETER_READBACK"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.result.save",
+      "name": "Save routed board checkpoint",
+      "setting_or_function": "Save routed board checkpoint",
+      "status": "available",
+      "registered_tools": [
+        "save_documents"
+      ],
+      "supported_actions": [
+        "save listed already-open documents"
+      ],
+      "implementation_refs": [
+        "server/main.py:4263"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [
+        "save listed scratch after completed native routing"
+      ],
+      "runtime_verified": true,
+      "qualification_boundary": "Saves exact listed open documents; routing completion and source-vs-scratch ownership require separate guards. Saving is not DRC acceptance.",
+      "evidence_ids": [
+        "EV_CHECKPOINT_SAVE"
+      ],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.selection.targets",
+      "name": "Select exact routing targets",
+      "setting_or_function": "Select exact routing targets",
+      "status": "partial",
+      "registered_tools": [
+        "get_selected_components_coordinates",
+        "get_all_nets",
+        "get_net_connections",
+        "create_net_class"
+      ],
+      "supported_actions": [
+        "read selected component positions",
+        "read net names/connectivity",
+        "create net class"
+      ],
+      "implementation_refs": [
+        "server/main.py:1010",
+        "server/main.py:4374",
+        "server/main.py:4616",
+        "server/main.py:4396"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "No typed arbitrary PCB primitive/net/component selection setter for Situs. Existing selected-component probes manually managed selection with document guards.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.recovery.script_executor",
+      "name": "Recover script executor after script failure",
+      "setting_or_function": "Recover script executor after script failure",
+      "status": "partial",
+      "registered_tools": [
+        "recover_script_executor",
+        "reconcile_script_probe",
+        "resume_completed_stop"
+      ],
+      "supported_actions": [
+        "guarded EditScript:Stop and read-only probe",
+        "reconcile recorded probe",
+        "resume completed Stop checkpoint"
+      ],
+      "implementation_refs": [
+        "server/main.py:1541",
+        "server/main.py:1598",
+        "server/script_guard.py:147"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Script debugger recovery is not PCB:Autoroute Stop/Pause. Do not use timeout as authorization for repeated Stop or substitute emergency process termination for normal router cancellation.",
+      "evidence_ids": [],
+      "installed_commands": []
+    },
+    {
+      "id": "situs.reference.api_search",
+      "name": "Search local API documentation",
+      "setting_or_function": "Search local API documentation",
+      "status": "available",
+      "registered_tools": [
+        "search_altium_api",
+        "lint_altium_script"
+      ],
+      "supported_actions": [
+        "search documented interfaces/members",
+        "static lint with known incompatible members"
+      ],
+      "implementation_refs": [
+        "server/main.py:1227",
+        "server/main.py:1240"
+      ],
+      "checked_commit": "9e5ed77d25ae8285d78408ef7115982c32d89540",
+      "checked_runtime_version": "Altium Designer 26.9.1",
+      "native_qualified_actions": [],
+      "runtime_verified": false,
+      "qualification_boundary": "Read-only software utilities; documentation presence and lint success never qualify a method on the installed native runtime. At audit time no dedicated Situs-settings reference tool was registered yet.",
+      "evidence_ids": [],
+      "installed_commands": []
+    }
+  ],
+  "uncommitted_state": {
+    "runtime_generated_file": "server/SandboxScript/Sandbox.pas",
+    "qualification": "Modified runtime-generated sandbox script is not a registered product feature; task probes remain separately identified."
+  },
+  "integration_notes": [
+    "Keep opaque evidence_ids generic; private receipt paths/hashes stay outside public docs.",
+    "Do not promote missing/probe_only to available merely by adding documentation or the generic reference search tool.",
+    "New settings/lifecycle wrappers require exact-document binding, known current state, bounded action, readback and native qualification before runtime_verified actions expand.",
+    "No audit here addresses cause of any unrelated copper movement."
+  ]
+}

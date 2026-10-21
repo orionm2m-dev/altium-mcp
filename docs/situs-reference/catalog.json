@@ -1,0 +1,839 @@
+{
+  "schema_version": 1,
+  "retrieved": "2026-10-21",
+  "status": "DOCUMENTATION_ENUM_PROPOSAL",
+  "entries": [
+    {
+      "id": "pass.adjacent_memory",
+      "name": "Adjacent Memory",
+      "kind": "pass",
+      "summary": "U-shaped fanout",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.clean_pad_entries",
+      "name": "Clean Pad Entries",
+      "kind": "pass",
+      "summary": "Align pad entry",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.completion",
+      "name": "Completion",
+      "kind": "pass",
+      "summary": "Finish difficult connections",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.fan_out_signal",
+      "name": "Fan out Signal",
+      "kind": "pass",
+      "summary": "Signal fanout",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.fan_out_plane",
+      "name": "Fan out to Plane",
+      "kind": "pass",
+      "summary": "Plane fanout",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.globally_optimised_main",
+      "name": "Globally Optimised Main",
+      "kind": "pass",
+      "summary": "Global optimization",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.hug",
+      "name": "Hug",
+      "kind": "pass",
+      "summary": "Compact routing; slower",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.layer_patterns",
+      "name": "Layer Patterns",
+      "kind": "pass",
+      "summary": "Follow layer directions",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.main",
+      "name": "Main",
+      "kind": "pass",
+      "summary": "Main routing",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.memory",
+      "name": "Memory",
+      "kind": "pass",
+      "summary": "Match pad coordinates",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.multilayer_main",
+      "name": "Multilayer Main",
+      "kind": "pass",
+      "summary": "Multilayer routing",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.recorner",
+      "name": "Recorner",
+      "kind": "pass",
+      "summary": "Miter corners",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.spread",
+      "name": "Spread",
+      "kind": "pass",
+      "summary": "Spread routes; slower",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "pass.straighten",
+      "name": "Straighten",
+      "kind": "pass",
+      "summary": "Straighten routes",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.0",
+      "name": "Not Used",
+      "kind": "direction",
+      "summary": "Disable layer",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.1",
+      "name": "Horizontal",
+      "kind": "direction",
+      "summary": "Horizontal preference",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.2",
+      "name": "Vertical",
+      "kind": "direction",
+      "summary": "Vertical preference",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.3",
+      "name": "Any",
+      "kind": "direction",
+      "summary": "Unrestricted; fallback layer",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.4",
+      "name": "1 O'Clock",
+      "kind": "direction",
+      "summary": "One-clock direction",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.5",
+      "name": "2 O'Clock",
+      "kind": "direction",
+      "summary": "Two-clock direction",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.6",
+      "name": "4 O'Clock",
+      "kind": "direction",
+      "summary": "Four-clock direction",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.7",
+      "name": "5 O'Clock",
+      "kind": "direction",
+      "summary": "Five-clock direction",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.8",
+      "name": "45 Up",
+      "kind": "direction",
+      "summary": "Upward diagonal",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.9",
+      "name": "45 Down",
+      "kind": "direction",
+      "summary": "Downward diagonal",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.10",
+      "name": "Fan Out",
+      "kind": "direction",
+      "summary": "Fanout direction",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "direction.11",
+      "name": "Automatic",
+      "kind": "direction",
+      "summary": "Automatic selection",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "layer_directions",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.0",
+      "name": "Cleanup",
+      "kind": "strategy",
+      "summary": "Builtin cleanup strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.1",
+      "name": "Default 2 Layer Board",
+      "kind": "strategy",
+      "summary": "Builtin two-layer strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.2",
+      "name": "Default 2 Layer With Edge Connectors",
+      "kind": "strategy",
+      "summary": "Builtin edge-connector strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.3",
+      "name": "Default Multi Layer Board",
+      "kind": "strategy",
+      "summary": "Builtin multilayer strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.4",
+      "name": "General Orthogonal",
+      "kind": "strategy",
+      "summary": "Builtin orthogonal strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "strategy.5",
+      "name": "Via Miser",
+      "kind": "strategy",
+      "summary": "Builtin via-saving strategy",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.setup",
+      "name": "Setup",
+      "kind": "action",
+      "summary": "Configure autorouter",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "setup_autorouter",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.all",
+      "name": "All",
+      "kind": "action",
+      "summary": "Route board",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_all",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.net",
+      "name": "Net",
+      "kind": "action",
+      "summary": "Route net",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_net",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.net_class",
+      "name": "Net Class",
+      "kind": "action",
+      "summary": "Route net class",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_net_class",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.connection",
+      "name": "Connection",
+      "kind": "action",
+      "summary": "Route connection",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_connection",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.area",
+      "name": "Area",
+      "kind": "action",
+      "summary": "Route area",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_area",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.room",
+      "name": "Room",
+      "kind": "action",
+      "summary": "Route room",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_room",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.component",
+      "name": "Component",
+      "kind": "action",
+      "summary": "Route component connections",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_component",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.component_class",
+      "name": "Component Class",
+      "kind": "action",
+      "summary": "Route component class",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_component_class",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.selected",
+      "name": "Connections On Selected Components",
+      "kind": "action",
+      "summary": "Route selected-component connections",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_selected_component",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.between_selected",
+      "name": "Connections Between Selected Components",
+      "kind": "action",
+      "summary": "Route between selected components",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "autoroute_between_selected_components",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.stop",
+      "name": "Stop",
+      "kind": "action",
+      "summary": "Stop after current pass",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "stop_autorouter",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.reset",
+      "name": "Reset",
+      "kind": "action",
+      "summary": "Reconfigure; Route All restarts",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "reset_autorouter",
+      "runtime_verified": false
+    },
+    {
+      "id": "action.pause_resume",
+      "name": "Pause / Resume",
+      "kind": "action",
+      "summary": "Pause or resume",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "pause_autorouter",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.strategy_crud",
+      "name": "Add / Remove / Edit / Duplicate",
+      "kind": "setting",
+      "summary": "Manage user strategies",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.identity",
+      "name": "Strategy Name / Description",
+      "kind": "setting",
+      "summary": "Name and description",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.via_cost",
+      "name": "More/Less Vias",
+      "kind": "setting",
+      "summary": "Fewer vias costs time",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.orthogonal",
+      "name": "Orthogonal",
+      "kind": "setting",
+      "summary": "Restrict to ninety-degree routing",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.pass_order",
+      "name": "Add / Remove / Move Up / Move Down",
+      "kind": "setting",
+      "summary": "Order and repeat passes",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.lock",
+      "name": "Lock All Pre-routes",
+      "kind": "setting",
+      "summary": "Preserve preroutes",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.ripup",
+      "name": "Rip-up Violations After Routing",
+      "kind": "setting",
+      "summary": "Remove violations",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.report",
+      "name": "Routing Setup Report",
+      "kind": "setting",
+      "summary": "Rules, coverage, directions, drill pairs",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.report_save",
+      "name": "Save Report As",
+      "kind": "setting",
+      "summary": "HTML report",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.edit_rules",
+      "name": "Edit Rules",
+      "kind": "setting",
+      "summary": "Rule editor",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_routing_strategies_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "setting.edit_directions",
+      "name": "Edit Layer Directions",
+      "kind": "setting",
+      "summary": "Current editable; Actual read-only",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_layer_directions_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "limit.strategies",
+      "name": "Strategy applicability",
+      "kind": "limitation",
+      "summary": "Strategies apply only to All; partial scopes use Main. Builtins immutable.",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "summary_of_routing_passes_and_routing_strategies",
+      "runtime_verified": false
+    },
+    {
+      "id": "limit.main",
+      "name": "Main-family selection",
+      "kind": "limitation",
+      "summary": "One main-family pass. Clean Pad Entries after Memory; Recorner for miters.",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "options_and_controls_of_the_situs_strategy_editor_dialog",
+      "runtime_verified": false
+    },
+    {
+      "id": "limit.boundary",
+      "name": "Boundary / preparation",
+      "kind": "limitation",
+      "summary": "Closed keepout required; preflight DRC; preroute differential pairs.",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "limit.stop",
+      "name": "Situs Stop",
+      "kind": "limitation",
+      "summary": "Completed copper remains.",
+      "source_ids": [
+        "situs"
+      ],
+      "section_anchor": "stop_autorouter",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.preferred",
+      "name": "Preferred / Min / Max",
+      "kind": "rule_setting",
+      "summary": "Situs uses Preferred track width and via sizes. Min/Max are DRC bounds, not automatic width fallback.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.width",
+      "name": "Width",
+      "kind": "rule_setting",
+      "summary": "Min/Preferred/Max per layer or stack; impedance profile; individual primitives or connected-copper validation.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.layers",
+      "name": "Routing Layers",
+      "kind": "rule_setting",
+      "summary": "Allow individual signal layers; rule scope and precedence.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.vias",
+      "name": "Routing Via Style",
+      "kind": "rule_setting",
+      "summary": "Diameter/hole Min/Preferred/Max or templates. Stack Via Type determines layer span, not XY dimensions.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.priority",
+      "name": "Routing Priority",
+      "kind": "rule_setting",
+      "summary": "0-100, higher routes earlier. Net routing priority differs from rule precedence.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.topology",
+      "name": "Routing Topology",
+      "kind": "rule_setting",
+      "summary": "Shortest; Horizontal; Vertical; Daisy-Simple; Daisy-MidDriven; Daisy-Balanced; Starburst; custom From-Tos. Non-shortest can be slower.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.corners",
+      "name": "Routing Corners",
+      "kind": "limitation",
+      "summary": "Ignored by Situs.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.fanout_style",
+      "name": "Fanout Control / Style",
+      "kind": "rule_setting",
+      "summary": "Auto; Inline Rows; Staggered Rows; BGA; Under Pads.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.fanout_direction",
+      "name": "Fanout Control / Direction",
+      "kind": "rule_setting",
+      "summary": "Disable; In Only; Out Only; In Then Out; Out Then In; Alternating In and Out.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.bga",
+      "name": "BGA fanout",
+      "kind": "rule_setting",
+      "summary": "Outward/inward or NE/SE/SW/NW; rule-constrained near-pad vias or centered between pads. Remove underlying polygons before fanout.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "rule.neckdown",
+      "name": "Routing Neck-Down",
+      "kind": "rule_setting",
+      "summary": "Optional narrowed-length constraint, global/per-layer; DRC verification. Automatic Situs support is not established.",
+      "source_ids": [
+        "routing-rules"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "keepout.scope",
+      "name": "Keepout layer / restrictions",
+      "kind": "rule_setting",
+      "summary": "Keep-Out Layer covers all signal layers; a signal-layer keepout is local. Restrictions separately select Via, Track, Copper, SMD Pad and TH Pad. No net; Clearance governs spacing.",
+      "source_ids": [
+        "keepouts"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "debug.stop",
+      "name": "Script debugger Stop",
+      "kind": "limitation",
+      "summary": "Run > Stop / Ctrl+F3 stops script execution. This differs from Route > Auto Route > Stop. Dismissing an error does not establish that the script stopped.",
+      "source_ids": [
+        "script-debug"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    },
+    {
+      "id": "drc.coverage",
+      "name": "DRC coverage / evidence",
+      "kind": "verification",
+      "summary": "Online and batch checks have separate enablement. OutJob uses PCB DRC configuration. Fresh batch DRC is required as release evidence; autorouter status is insufficient.",
+      "source_ids": [
+        "drc"
+      ],
+      "section_anchor": "",
+      "runtime_verified": false
+    }
+  ],
+  "limitations": [
+    "Enums and summaries describe UI documentation only.",
+    "No native calls, no API identifiers inferred, no runtime qualification.",
+    "Detailed behavior is at the canonical sources; articles are not reproduced."
+  ],
+  "native_calls": false,
+  "fork_modified": false
+}

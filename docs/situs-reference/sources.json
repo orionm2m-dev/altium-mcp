@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "id": "situs",
+      "url": "https://www.altium.com/documentation/altium-designer/pcb/routing/situs-topological-autorouter",
+      "title": "Automated Board Layout using the Situs Topological Autorouter",
+      "retrieved": "2026-10-21",
+      "page_updated": "2026-10-07"
+    },
+    {
+      "id": "routing-rules",
+      "url": "https://www.altium.com/documentation/altium-designer/pcb/design-rule-types/routing",
+      "title": "Routing Rule Types",
+      "retrieved": "2026-10-21",
+      "page_updated": "2026-10-13"
+    },
+    {
+      "id": "keepouts",
+      "url": "https://www.altium.com/documentation/altium-designer/pcb/object-specific-keepouts",
+      "title": "Working with Object Specific Keepouts on a Board",
+      "retrieved": "2026-10-21",
+      "page_updated": "2026-10-05"
+    },
+    {
+      "id": "script-debug",
+      "url": "https://www.altium.com/documentation/altium-designer/scripting/debugging-scripts",
+      "title": "Debugging Scripts",
+      "retrieved": "2026-10-21",
+      "page_updated": "2023-03-28"
+    },
+    {
+      "id": "drc",
+      "url": "https://www.altium.com/documentation/altium-designer/pcb/drc",
+      "title": "Design Rule Check (DRC)",
+      "retrieved": "2026-10-21",
+      "page_updated": "2026-10-08"
+    }
+  ],
+  "full_articles_stored": false,
+  "note": "Strategies, Strategy Editor and Layer Directions are sections of one canonical Situs source, not independent sources. Documentation does not establish API or runtime support."
+}
