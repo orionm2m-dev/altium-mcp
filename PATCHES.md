@@ -1,5 +1,16 @@
 # Changes
 
+## 2026-10-21 — Accept the observed unowned AD26 framework shell
+
+AD26 also presents an unowned `TDocumentForm` alongside one unowned, empty-title
+`TApplication`. Focus now accepts that exact framework arrangement on the same
+PID/thread, in addition to the direct-owner case. Modal/other forms, named or
+foreign-thread framework windows and multiple framework candidates remain
+blocking. Results include the framework identity; refusals include observed
+owner/PID/thread values. Regression tests cover the observed arrangement and
+preserved refusal cases. No generic window-class or ownership relaxation.
+
+
 ## 2026-10-21 — Recognize the verified Delphi framework owner during focus
 
 A visible empty-title `TApplication` no longer blocks focus when it is the exact

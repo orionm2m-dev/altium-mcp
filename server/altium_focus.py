@@ -130,13 +130,13 @@ def _select_main(api, pid):
     if len(mains) != 1:
         raise ValueError("Expected exactly one visible TDocumentForm main window")
     main = mains[0]
-    # Delphi can expose its otherwise empty framework owner alongside the
-    # document frame. Accept only the verified direct owner, never a class-name
-    # exception for arbitrary visible windows or dialogs.
+    # Delphi can expose its empty framework shell alongside the document
+    # frame. AD26 also uses two unowned windows; an owner relationship is not
+    # required in that observed case. Other classes/forms remain blocking.
     owners = [row for row in rows if row["class"] == "TApplication"
         and row.get("title") == "" and row["pid"] == pid
         and row["thread_id"] == main["thread_id"] and row["enabled"]
-        and row["hwnd"] == main.get("owner_hwnd")
+        and (row["hwnd"] == main.get("owner_hwnd") or main.get("owner_hwnd") == 0)
         and row.get("owner_hwnd") == 0]
     allowed_owner = owners[0] if len(owners) == 1 else None
     blockers = [row for row in rows if row["hwnd"] != main["hwnd"]
@@ -144,11 +144,14 @@ def _select_main(api, pid):
     if blockers or not main["enabled"]:
         raise ValueError("A modal, disabled main window or unrecognized visible form blocks focus; "
             + "main owner=" + str(main.get("owner_hwnd")) + "; additional windows="
-            + str([(row["hwnd"], row["class"], row.get("owner_hwnd")) for row in blockers]))
+            + str([(row["hwnd"], row["class"], row.get("owner_hwnd"),
+                    row["pid"], row["thread_id"]) for row in blockers]))
     if not api.responsive(main["hwnd"]):
         raise ValueError("Altium main window is not responding; no activation")
     if not api.matches(main) or (allowed_owner is not None and not api.matches(allowed_owner)):
-        raise ValueError("Target window or framework owner changed after responsiveness check")
+        raise ValueError("Target window or framework shell changed after responsiveness check")
+    if allowed_owner is not None:
+        main["framework_window"] = dict(allowed_owner)
     return main
 
 

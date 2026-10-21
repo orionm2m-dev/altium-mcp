@@ -135,6 +135,26 @@ class FocusTests(unittest.TestCase):
         self.api.restore.assert_called_once_with(42)
         self.api.activate.assert_called_once_with(42)
 
+    def test_observed_ad26_unowned_framework_and_main_are_allowed(self):
+        self.main["owner_hwnd"] = 0
+        framework = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
+        self.rows.append(framework)
+        result = self.call()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["window_after"]["owner_hwnd"], 0)
+        self.assertEqual(result["window_after"]["framework_window"]["hwnd"], 88)
+        self.assertEqual(result["window_after"]["framework_window"]["thread_id"], 7)
+        self.api.activate.assert_called_once_with(42)
+
+    def test_unowned_framework_still_refuses_other_thread_owner_or_ambiguity(self):
+        framework = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
+        for changes in ({"thread_id": 8}, {"owner_hwnd": 999}, {"pid": 456}, {"title": "Dialog"}):
+            self.rows = [self.main, dict(framework, **changes)]
+            self.assertFalse(self.call()["success"])
+        self.rows = [self.main, framework, dict(framework, hwnd=89)]
+        self.assertFalse(self.call()["success"])
+        self.assert_no_action()
+
     def test_unrelated_named_foreign_thread_or_cyclic_framework_is_refused(self):
         self.main["owner_hwnd"] = 88
         owner = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
