@@ -1490,6 +1490,24 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 
 @mcp.tool()
+async def control_drc_setup(ctx: Context, action: str, target_hwnd: int,
+                            expected_main_title: str) -> str:
+    """Read the observed native Design Rule Checker dialog and all same-process children.
+
+    Currently inspect only. Pins the configured process, exact TDesignRuleCheckForm
+    HWND and exact main title containing the scratch PcbDoc filename. Full document
+    path is not verified. Returns raw control classes, captions, HWNDs, parent,
+    geometry, styles and supported checkbox states. No focus, input, script, rule
+    change, DRC execution, document save or recovery-latch change. Read-only
+    inspection does not take the bridge command lock and can observe a modal
+    dialog while its opening native command is waiting.
+    """
+    import drc_setup_control
+    return json.dumps(drc_setup_control.control(altium_bridge.config.altium_exe_path,
+        action, target_hwnd, expected_main_title), indent=2)
+
+
+@mcp.tool()
 async def get_altium_environment(ctx: Context) -> str:
     """Read configured Altium process/window/dialog inventory without dispatch.
 
