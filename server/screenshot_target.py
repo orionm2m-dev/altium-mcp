@@ -2,6 +2,27 @@
 import altium_focus
 import emergency_stop
 import win32process
+import win32gui
+
+
+class ThreadDpiScope:
+    """Use physical coordinates on this worker thread, restoring its old context."""
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.WinDLL("user32", use_last_error=True)
+        self.set_context = api.SetThreadDpiAwarenessContext
+        self.set_context.argtypes = [wintypes.HANDLE]
+        self.set_context.restype = wintypes.HANDLE
+        self.previous = self.set_context(-4)  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        if not self.previous:
+            raise OSError("Cannot establish per-monitor DPI context for exact capture")
+
+    def close(self):
+        if self.previous is not None:
+            previous, self.previous = self.previous, None
+            if not self.set_context(previous):
+                raise OSError("Cannot restore capture thread DPI context")
 
 
 class CaptureTarget:
@@ -35,6 +56,26 @@ class CaptureTarget:
                 or not self.api.matches(self.row)
                 or self.api.title(self.hwnd) != self.row["title"]):
             raise ValueError("Requested window or pinned process identity changed during capture")
+
+    def children(self):
+        """Read descendant window labels and physical screen bounds; no messages."""
+        self.verify()
+        rows = []
+        def collect(hwnd, unused):
+            thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid != self.identity["pid"] or not win32gui.IsChild(self.hwnd, hwnd):
+                raise ValueError("Child window no longer belongs to the pinned Altium dialog")
+            row = {"hwnd": hwnd, "class": win32gui.GetClassName(hwnd),
+                "text": win32gui.GetWindowText(hwnd), "enabled": bool(win32gui.IsWindowEnabled(hwnd)),
+                "visible": bool(win32gui.IsWindowVisible(hwnd)), "rect": list(win32gui.GetWindowRect(hwnd))}
+            if ((thread_id, pid) != win32process.GetWindowThreadProcessId(hwnd)
+                    or not win32gui.IsChild(self.hwnd, hwnd)):
+                raise ValueError("Child window changed during inspection")
+            rows.append(row)
+            return True
+        win32gui.EnumChildWindows(self.hwnd, collect, None)
+        self.verify()
+        return rows
 
     def close(self):
         self.process.close()

@@ -146,6 +146,10 @@ through capture; executable, user, process creation and window identity are
 checked before and after PrintWindow. A hidden, minimized, foreign or changed
 target is refused. This exact-window path does not activate windows, send input,
 dispatch scripts or fall back to another window.
+The exact-capture worker uses per-monitor DPI awareness for physical bounds,
+restores its previous thread context afterward, and never resizes or moves the
+window. Metadata also lists descendant HWNDs, classes, text, enabled/visible
+state and physical screen rectangles; this inventory sends no control input.
 
 ### Read the current Altium environment
 

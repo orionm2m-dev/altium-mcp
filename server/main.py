@@ -4856,6 +4856,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
         
         def capture_screenshot_thread():
             target = None
+            dpi_scope = None
             try:
                 # Find Altium windows
                 altium_windows = []
@@ -4884,7 +4885,8 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     return True
                 
                 if window_handle is not None:
-                    from screenshot_target import CaptureTarget
+                    from screenshot_target import CaptureTarget, ThreadDpiScope
+                    dpi_scope = ThreadDpiScope()
                     target = CaptureTarget(altium_bridge.config.altium_exe_path, window_handle)
                     altium_windows = [target.window]
                 else:
@@ -5013,6 +5015,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
 
                     if target is not None:
                         target.verify()
+                    child_windows = target.children() if target is not None else None
 
                     # Save a local copy of the screenshot for debugging (non-fatal if it fails)
                     try:
@@ -5043,6 +5046,8 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                         "window_pid": altium_pid,
                         "window_handle": hwnd,
                         "exact_window_requested": target is not None,
+                        "capture_dpi_awareness": "per_monitor_v2" if dpi_scope is not None else None,
+                        "child_windows": child_windows,
                         "pinned_process_identity": target.identity if target is not None else None,
                         "image_format": "PNG",
                         "encoding": "base64",
@@ -5068,8 +5073,12 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     "traceback": traceback.format_exc()
                 })
             finally:
-                if target is not None:
-                    target.close()
+                try:
+                    if target is not None:
+                        target.close()
+                finally:
+                    if dpi_scope is not None:
+                        dpi_scope.close()
         
         # Start the thread
         thread = threading.Thread(target=capture_screenshot_thread)

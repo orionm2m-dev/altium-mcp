@@ -1,6 +1,7 @@
 """Exact-window capture tests; process, window and GDI calls are mocked."""
 import ast
 import base64
+import ctypes
 import io
 import json
 from pathlib import Path
@@ -13,6 +14,25 @@ from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import screenshot_target as target
+
+
+class DpiScopeTests(unittest.TestCase):
+    def test_restores_prior_thread_context_once(self):
+        api = Mock()
+        api.SetThreadDpiAwarenessContext.side_effect = [1234, 5678]
+        with patch.object(ctypes, "WinDLL", return_value=api):
+            scope = target.ThreadDpiScope()
+            scope.close()
+            scope.close()
+        self.assertEqual([c.args for c in api.SetThreadDpiAwarenessContext.call_args_list], [(-4,), (1234,)])
+
+    def test_unsupported_context_fails_before_capture(self):
+        api = Mock()
+        api.SetThreadDpiAwarenessContext.return_value = 0
+        with patch.object(ctypes, "WinDLL", return_value=api):
+            with self.assertRaises(OSError):
+                target.ThreadDpiScope()
+        api.SetThreadDpiAwarenessContext.assert_called_once_with(-4)
 
 
 class TargetTests(unittest.TestCase):
@@ -56,6 +76,27 @@ class TargetTests(unittest.TestCase):
                     target.CaptureTarget("configured.exe", 42)
         self.assertEqual(self.process.close.call_count, 4)
 
+    def test_child_metadata_is_read_only_and_rejects_foreign_children(self):
+        guard = target.CaptureTarget("configured.exe", 42)
+        gui = Mock()
+        gui.EnumChildWindows.side_effect = lambda hwnd, callback, data: callback(55, data)
+        gui.IsChild.return_value = True
+        gui.GetClassName.return_value = "TButton"
+        gui.GetWindowText.return_value = "Cancel"
+        gui.IsWindowEnabled.return_value = True
+        gui.IsWindowVisible.return_value = True
+        gui.GetWindowRect.return_value = (10, 20, 110, 60)
+        with patch.object(target, "win32gui", gui):
+            self.assertEqual(guard.children(), [{"hwnd": 55, "class": "TButton", "text": "Cancel",
+                "enabled": True, "visible": True, "rect": [10, 20, 110, 60]}])
+            gui.IsChild.return_value = False
+            with self.assertRaises(ValueError):
+                guard.children()
+        gui.SendMessage.assert_not_called()
+        gui.PostMessage.assert_not_called()
+        gui.SetWindowPos.assert_not_called()
+        guard.close()
+
     def test_changed_process_window_or_title_is_refused(self):
         guard = target.CaptureTarget("configured.exe", 42)
         self.identity["creation_filetime"] += 1
@@ -90,6 +131,8 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         bitmap.GetInfo.return_value = {"bmWidth": 2, "bmHeight": 2}
         bitmap.GetBitmapBits.return_value = bytes(16)
         self.guard = Mock(window={"handle": 42, "title": "Situs Routing Strategies", "class_name": "TSitusSetup", "rect": [0, 0, 2, 2]}, identity={"pid": 123, "creation_filetime": 456})
+        self.guard.children.return_value = []
+        self.dpi_scope = Mock()
         self.env = dict(Context=object, Optional=Optional, json=json, logger=Mock(),
             altium_bridge=self.bridge, win32gui=self.gui, win32ui=self.ui,
             win32process=SimpleNamespace(GetWindowThreadProcessId=lambda _: (7, 123)),
@@ -100,13 +143,20 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         p = patch.object(target, "CaptureTarget", return_value=self.guard)
         self.factory = p.start()
         self.addCleanup(p.stop)
+        p = patch.object(target, "ThreadDpiScope", return_value=self.dpi_scope)
+        self.dpi_factory = p.start()
+        self.addCleanup(p.stop)
 
     async def test_exact_capture_uses_printwindow_without_input_or_dispatch(self):
+        self.factory.side_effect = lambda *args: (self.dpi_factory.assert_called_once(), self.guard)[1]
         result = await self.env["get_screenshot"](None, "current", window_handle=42)
         metadata = json.loads(result[0])
         self.assertTrue(metadata["success"])
         self.assertEqual(metadata["window_handle"], 42)
         self.assertEqual(metadata["capture_method"], "PrintWindow")
+        self.assertEqual(metadata["capture_dpi_awareness"], "per_monitor_v2")
+        self.assertEqual(metadata["child_windows"], [])
+        self.dpi_scope.close.assert_called_once()
         self.assertFalse(metadata["script_focus_requested"])
         self.guard.verify.assert_called()
         self.guard.close.assert_called_once()
@@ -129,6 +179,7 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
         result = json.loads(await self.env["get_screenshot"](None, "current", window_handle=42))
         self.assertFalse(result["success"])
         self.assertEqual(list(Path(self.temp.name).iterdir()), [])
+        self.dpi_scope.close.assert_called_once()
         self.guard.close.assert_called_once()
         self.gui.ReleaseDC.assert_called_once()
         self.gui.SetForegroundWindow.assert_not_called()

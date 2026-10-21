@@ -1,5 +1,17 @@
 # Changes
 
+## 2026-10-21 — Use physical DPI coordinates for exact-window capture
+
+Exact screenshot workers now establish per-monitor-v2 thread DPI awareness
+before window bounds are read and restore the prior context in finally. This
+avoids mixing DPI-virtualized bounds with physical PrintWindow pixels, without
+moving or resizing Altium. Read-only descendant metadata uses the same context
+and pinned parent identity. Tests cover context restoration/refusal, ordering,
+capture failure cleanup and child-window ownership.
+
+References: [GetWindowRect](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowrect),
+[SetThreadDpiAwarenessContext](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext).
+
 ## 2026-10-21 — Capture an exact visible Altium window without activation
 
 Added optional `window_handle` to current-mode screenshots, with zoom forbidden.
