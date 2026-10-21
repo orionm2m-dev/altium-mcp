@@ -118,8 +118,10 @@ When launching claude for the first time, the server will automatically try to l
 `focus_altium(target_pid)` restores a minimized main window and requests foreground
 focus for one explicitly identified configured Altium process. It verifies the
 executable, Windows user, process creation identity and exact `TDocumentForm`
-window. Multiple/uncertain instances, additional visible forms, disabled windows,
-modal dialogs and unresponsive UI are refused. If Windows denies foreground
+window. An empty-title `TApplication` is allowed only when it is the verified
+direct owner of that main frame in the same process/thread. All other additional
+visible forms, multiple/uncertain instances, disabled windows, modal dialogs and
+unresponsive UI are refused. If Windows denies foreground
 activation, the result reports that separately from any completed restoration;
 no synthetic keyboard or mouse input is used.
 

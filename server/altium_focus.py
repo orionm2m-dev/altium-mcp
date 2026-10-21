@@ -20,6 +20,9 @@ class WindowAPI:
             "EnumWindows": ([self.callback, w.LPARAM], w.BOOL),
             "GetWindowThreadProcessId": ([w.HWND, ctypes.POINTER(w.DWORD)], w.DWORD),
             "GetClassNameW": ([w.HWND, w.LPWSTR, ctypes.c_int], ctypes.c_int),
+            "GetWindowTextLengthW": ([w.HWND], ctypes.c_int),
+            "GetWindowTextW": ([w.HWND, w.LPWSTR, ctypes.c_int], ctypes.c_int),
+            "GetWindow": ([w.HWND, w.UINT], w.HWND),
             "IsWindowVisible": ([w.HWND], w.BOOL),
             "IsWindowEnabled": ([w.HWND], w.BOOL),
             "IsIconic": ([w.HWND], w.BOOL),
@@ -53,6 +56,8 @@ class WindowAPI:
                 if not self.api.GetClassNameW(hwnd, cls, len(cls)) or not self.api.GetWindowRect(hwnd, self.c.byref(rect)):
                     raise OSError("Cannot read target window identity or bounds")
                 row = {"hwnd": int(hwnd), "pid": int(actual.value), "thread_id": int(thread_id), "class": cls.value,
+                    "title": self.title(hwnd),
+                    "owner_hwnd": self.owner(hwnd),
                     "enabled": bool(self.api.IsWindowEnabled(hwnd)),
                     "minimized": bool(self.api.IsIconic(hwnd)),
                     "tool_window": bool(self.api.GetWindowLongW(hwnd, -20) & 0x80),
@@ -70,6 +75,29 @@ class WindowAPI:
             raise OSError(errors[0] if errors else "Cannot enumerate target windows")
         return rows
 
+    def title(self, hwnd):
+        self.c.set_last_error(0)
+        length = self.api.GetWindowTextLengthW(hwnd)
+        if (not length and self.c.get_last_error()) or length < 0 or length > 32767:
+            raise OSError("Cannot read target window title length")
+        buffer = self.c.create_unicode_buffer(length + 1)
+        self.c.set_last_error(0)
+        copied = self.api.GetWindowTextW(hwnd, buffer, len(buffer))
+        if not copied and self.c.get_last_error():
+            raise OSError("Cannot read target window title")
+        self.c.set_last_error(0)
+        final_length = self.api.GetWindowTextLengthW(hwnd)
+        if (not final_length and self.c.get_last_error()) or copied != length or final_length != copied:
+            raise OSError("Target window title changed or was truncated during read")
+        return buffer.value
+
+    def owner(self, hwnd):
+        self.c.set_last_error(0)
+        owner = self.api.GetWindow(hwnd, 4)  # GW_OWNER
+        if not owner and self.c.get_last_error():
+            raise OSError("Cannot read target window owner")
+        return int(owner or 0)
+
     def matches(self, row):
         pid = self.w.DWORD()
         thread_id = self.api.GetWindowThreadProcessId(row["hwnd"], self.c.byref(pid))
@@ -77,7 +105,9 @@ class WindowAPI:
         return (int(thread_id) == row["thread_id"] and pid.value == row["pid"]
             and bool(self.api.GetClassNameW(row["hwnd"], cls, len(cls)))
             and cls.value == row["class"] and bool(self.api.IsWindowVisible(row["hwnd"]))
-            and bool(self.api.IsWindowEnabled(row["hwnd"])) == row["enabled"])
+            and bool(self.api.IsWindowEnabled(row["hwnd"])) == row["enabled"]
+            and self.owner(row["hwnd"]) == row["owner_hwnd"]
+            and (row["class"] != "TApplication" or self.title(row["hwnd"]) == row["title"]))
 
     def responsive(self, hwnd):
         reply = self.c.c_size_t()
@@ -100,13 +130,25 @@ def _select_main(api, pid):
     if len(mains) != 1:
         raise ValueError("Expected exactly one visible TDocumentForm main window")
     main = mains[0]
-    blockers = [row for row in rows if row["hwnd"] != main["hwnd"]]
+    # Delphi can expose its otherwise empty framework owner alongside the
+    # document frame. Accept only the verified direct owner, never a class-name
+    # exception for arbitrary visible windows or dialogs.
+    owners = [row for row in rows if row["class"] == "TApplication"
+        and row.get("title") == "" and row["pid"] == pid
+        and row["thread_id"] == main["thread_id"] and row["enabled"]
+        and row["hwnd"] == main.get("owner_hwnd")
+        and row.get("owner_hwnd") == 0]
+    allowed_owner = owners[0] if len(owners) == 1 else None
+    blockers = [row for row in rows if row["hwnd"] != main["hwnd"]
+                and (allowed_owner is None or row["hwnd"] != allowed_owner["hwnd"])]
     if blockers or not main["enabled"]:
-        raise ValueError("A modal, disabled main window or unrecognized visible form blocks focus")
+        raise ValueError("A modal, disabled main window or unrecognized visible form blocks focus; "
+            + "main owner=" + str(main.get("owner_hwnd")) + "; additional windows="
+            + str([(row["hwnd"], row["class"], row.get("owner_hwnd")) for row in blockers]))
     if not api.responsive(main["hwnd"]):
         raise ValueError("Altium main window is not responding; no activation")
-    if not api.matches(main):
-        raise ValueError("Target window identity changed after responsiveness check")
+    if not api.matches(main) or (allowed_owner is not None and not api.matches(allowed_owner)):
+        raise ValueError("Target window or framework owner changed after responsiveness check")
     return main
 
 

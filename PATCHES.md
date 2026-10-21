@@ -1,5 +1,15 @@
 # Changes
 
+## 2026-10-21 — Recognize the verified Delphi framework owner during focus
+
+A visible empty-title `TApplication` no longer blocks focus when it is the exact
+direct owner of the unique `TDocumentForm`, on the same process/thread. Window
+ownership and the framework title are revalidated with the existing identity
+checks. Named, unrelated, disabled, foreign-thread and cyclic owner forms remain
+blocking; the framework window itself is never restored or activated. Mocked
+regression tests cover the allowed owner and refusal/race cases.
+
+
 ## 2026-10-21 — Explicit process-scoped main window focus
 
 Added public `focus_altium(target_pid)` for restoring and foregrounding the exact

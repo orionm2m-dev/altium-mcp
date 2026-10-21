@@ -40,7 +40,8 @@ class FocusTests(unittest.TestCase):
         self.factory = self.stack.enter_context(patch.object(emergency_stop, "WinProcess", return_value=self.process))
         self.stack.enter_context(patch.object(emergency_stop, "_current_sid", return_value="test-user"))
         self.main = {"hwnd": 42, "pid": 123, "thread_id": 7, "class": "TDocumentForm", "enabled": True,
-            "minimized": True, "tool_window": False, "rect": [0, 0, 160, 28]}
+            "minimized": True, "tool_window": False, "title": "Home Page",
+            "owner_hwnd": 0, "rect": [0, 0, 160, 28]}
         self.rows = [self.main]
         self.foreground = 99
         self.api = Mock()
@@ -121,6 +122,40 @@ class FocusTests(unittest.TestCase):
             self.rows = [self.main, dict(self.main, hwnd=88, **{"class": cls, "tool_window": True})]
             self.assertFalse(self.call()["success"])
         self.rows = []
+        self.assertFalse(self.call()["success"])
+        self.assert_no_action()
+
+    def test_empty_framework_owner_is_allowed_but_never_activated(self):
+        owner = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
+        self.main["owner_hwnd"] = 88
+        self.rows.append(owner)
+        result = self.call()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["window_after"]["owner_hwnd"], 88)
+        self.api.restore.assert_called_once_with(42)
+        self.api.activate.assert_called_once_with(42)
+
+    def test_unrelated_named_foreign_thread_or_cyclic_framework_is_refused(self):
+        self.main["owner_hwnd"] = 88
+        owner = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
+        for changes in ({"title": "Dialog"}, {"hwnd": 89}, {"thread_id": 8},
+                {"pid": 456}, {"enabled": False}, {"owner_hwnd": 42}, {"owner_hwnd": 999},
+                {"class": "OtherFramework"}):
+            with self.subTest(changes=changes):
+                self.rows = [self.main, dict(owner, **changes)]
+                self.assertFalse(self.call()["success"])
+        self.assert_no_action()
+
+    def test_framework_owner_title_or_identity_change_before_action_is_refused(self):
+        self.main["owner_hwnd"] = 88
+        owner = dict(self.main, hwnd=88, owner_hwnd=0, title="", **{"class": "TApplication"})
+        self.rows.append(owner)
+        self.api.matches.side_effect = lambda row: row["hwnd"] != 88
+        self.assertFalse(self.call()["success"])
+        self.api.matches.side_effect = None
+        self.api.matches.return_value = True
+        self.api.windows.side_effect = [[dict(self.main), dict(owner)],
+            [dict(self.main), dict(owner, title="New dialog")]]
         self.assertFalse(self.call()["success"])
         self.assert_no_action()
 
