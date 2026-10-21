@@ -113,6 +113,14 @@ This approach bundles all dependencies in `server/lib/` and sets `PYTHONPATH` to
 
 When launching claude for the first time, the server will automatically try to locate your Altium Designer installation. It will search for all directories that start with `C:\Program Files\Altium\AD*` and use the one with the largest revision number. If it cannot find any, you will be prompted to select the Altium executable (X2.EXE) manually when you first run the server. Altium's DelphiScript scripting is used to create an API between the mcp server and Altium. 
 
+### Stage the reviewed native Situs prototype
+
+`stage_situs_native_extension` inspects a hash-bound plan or stages the three
+fixed reviewed extension files in the configured Altium System directory.
+It never replaces files or launches/restarts Altium. Installation receipts
+verify staged bytes; extension loading and native operation remain separate
+qualification steps. See the [staging contract](docs/situs-reference/native-extension-staging.md).
+
 ### Explicit window focus
 
 `focus_altium(target_pid)` restores a minimized main window and requests foreground

@@ -1516,6 +1516,50 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 
 @mcp.tool()
+async def stage_situs_native_extension(ctx: Context, action: str,
+        expected_plan_sha256: str = "", operation_id: str = "") -> str:
+    """Inspect or stage the fixed reviewed read-only Situs extension files.
+
+    inspect returns a hash-bound plan for the configured X2.exe/System directory.
+    install requires that exact expected_plan_sha256 and absent DLL/INS/RCS targets.
+    An optional operation_id is 32 lowercase hex characters; repeated IDs refuse
+    replay. Sources, names and hashes are fixed in the bundled installer.
+    No arbitrary path, DLL, registry/dependency update, native call, process launch
+    or restart is accepted. Successful staging does not qualify extension loading.
+    Detailed intent, progress and hashes are retained in receipt_directory.
+    The bridge lock and cross-process claim remain held until file work finishes,
+    even when the caller cancels. Restart and unsaved-document handling are separate.
+    """
+    if action not in ("inspect", "install"):
+        return json.dumps({"success": False, "action": action, "installed": False,
+                           "native_action": False, "error": "action must be inspect or install"})
+    import native_situs_install
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                backend = native_situs_install.inspect if action == "inspect" else native_situs_install.install
+                args = (altium_bridge.config.altium_exe_path, EXCHANGE_DIR)
+                if action == "install":
+                    args += (expected_plan_sha256, operation_id)
+                worker = asyncio.create_task(asyncio.to_thread(backend, *args))
+                cancelled = False
+                while True:
+                    try:
+                        outcome = await asyncio.shield(worker)
+                        break
+                    except asyncio.CancelledError:
+                        if worker.cancelled():
+                            raise
+                        cancelled = True
+                if cancelled:
+                    raise asyncio.CancelledError
+        except OSError as error:
+            outcome = {"success": False, "action": action, "installed": False,
+                       "native_action": False, "blocked": True, "error": str(error)}
+    return json.dumps(outcome)
+
+
+@mcp.tool()
 async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str,
         target_pid: int, expected_creation_filetime: str, operation_id: str = "",
         expected_checked: bool | None = None, checked: bool | None = None,

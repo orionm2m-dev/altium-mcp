@@ -70,3 +70,11 @@ in documentation. Unknown search terms mean unknown, not unsupported.
 `control_situs_native_settings` reads or sets the global PCB `LockPreRoutes` option without UI Automation or foreground activation. The dedicated public transport was verified on AD26.9.1: inspect, set false to true, and restore true to false, each with exact process/board guards and correlated readback. Forty-five offline tests cover validation, precision, state comparison, background readiness, cancellation and no replay. No board save, routing completion or persistence across restarts is implied. See [native-settings-contract.md](native-settings-contract.md).
 
 The capability matrix now includes this narrow incremental review at commit `a8b4955`. Other entries retain their earlier reviewed commits and boundaries; they have not been promoted because a new prototype compiles. The C# extension in `dev/native_situs` remains compile-only and is not installed or runtime-qualified.
+
+## Native extension staging tool
+
+`stage_situs_native_extension` provides filesystem-only `inspect` and `install`
+for the fixed reviewed DLL/INS/RCS prototype. It requires a fresh matching plan,
+refuses existing targets, and records verified hashes with partial-failure rollback.
+Staging does not load or qualify the extension. See
+[native-extension-staging.md](native-extension-staging.md).
