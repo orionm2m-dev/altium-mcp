@@ -137,6 +137,14 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Read the current Altium environment
+
+`get_altium_environment()` returns the configured executable's visible windows,
+processes, recognized dialog handles and existing readiness observations, plus
+`no_new_dispatch: true`. It only runs the existing read-only environment check;
+it does not change focus, dismiss dialogs or modify the recovery checkpoint.
+Window responsiveness does not establish native transaction idle.
+
 ### Reconcile an already completed probe without dispatch
 
 `reconcile_script_probe(recovery_token)` only checks the existing `probe_pending`

@@ -1385,6 +1385,17 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 
 
 @mcp.tool()
+async def get_altium_environment(ctx: Context) -> str:
+    """Read configured Altium process/window/dialog inventory without dispatch.
+
+    Does not change focus, close dialogs, launch processes or alter recovery.
+    UI responsiveness is not proof of native transaction idle.
+    """
+    outcome = script_recovery.inspect_environment(altium_bridge.config.altium_exe_path)
+    return json.dumps(dict(outcome, no_new_dispatch=True), indent=2)
+
+
+@mcp.tool()
 async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
                                   dispatch_timeout_seconds: int = 8,
                                   manual_stop_confirmed: bool = False) -> str:

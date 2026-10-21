@@ -1,5 +1,12 @@
 # Changes
 
+## 2026-10-21 — Public read-only Altium environment inspection
+
+Added `get_altium_environment()` as a direct wrapper around the existing process,
+window and dialog inventory check. Results retain its readiness limitations and
+include `no_new_dispatch: true`; no recovery, focus or checkpoint action occurs.
+An isolated wrapper test verifies both ready and blocked inventory responses.
+
 ## 2026-10-21 — Reconcile an existing probe through a dispatch-free public tool
 
 Added `reconcile_script_probe(recovery_token)` as a narrow, locked wrapper around
