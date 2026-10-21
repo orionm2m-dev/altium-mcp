@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-21 — Capture an exact visible Altium window without activation
+
+Added optional `window_handle` to current-mode screenshots, with zoom forbidden.
+The exact window uses the existing PrintWindow path with a pinned query-only
+process handle and identity checks before and after capture. Rejected targets
+never fall back to another window or editor dispatch. Mocked tests cover exact
+dialog capture, invalid modes, foreign/hidden/changed targets and resource release.
+
 ## 2026-10-21 — Public read-only Altium environment inspection
 
 Added `get_altium_environment()` as a direct wrapper around the existing process,

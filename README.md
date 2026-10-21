@@ -137,6 +137,16 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Capture a specific observed Altium dialog
+
+`get_screenshot(view_type="current", window_handle=HWND)` captures the exact visible
+Altium window reported by `get_altium_environment()`, including dialogs outside
+the main window. Omit `zoom_to`. The query-only process handle remains pinned
+through capture; executable, user, process creation and window identity are
+checked before and after PrintWindow. A hidden, minimized, foreign or changed
+target is refused. This exact-window path does not activate windows, send input,
+dispatch scripts or fall back to another window.
+
 ### Read the current Altium environment
 
 `get_altium_environment()` returns the configured executable's visible windows,

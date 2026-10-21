@@ -4732,9 +4732,12 @@ async def check_placement(ctx: Context, cmp_designators: list = None, clearance_
     logger.info(f"Placement check complete: {result.get('violation_count', '?')} violations")
     return json.dumps(result, indent=2)
 
-async def _prepare_screenshot_view(view_type, zoom_to):
+async def _prepare_screenshot_view(view_type, zoom_to, window_handle=None):
     """Skip script dispatch only for an explicitly requested diagnostic view."""
     mode = view_type.lower()
+    if window_handle is not None and (type(window_handle) is not int or window_handle <= 0
+            or mode != "current" or zoom_to is not None):
+        return {"success": False, "error": "window_handle requires current mode, a positive integer and omitted zoom_to"}
     if mode not in ("pcb", "sch", "current"):
         return {"success": False, "error": "view_type must be pcb, sch or current"}
     if mode == "current":
@@ -4785,7 +4788,8 @@ def _print_diagnostic_window(hwnd, destination_hdc):
 
 
 @mcp.tool()
-async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = None):
+async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = None,
+                         window_handle: Optional[int] = None):
     """
     Take a screenshot of the Altium window, returned as viewable image content.
 
@@ -4800,6 +4804,10 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
             PCB view only: Altium zooms to the bounding box of these components
             (plus a margin) before the capture, so the components fill the frame.
             Omit to capture at the current zoom level.
+        window_handle (int, optional): Exact visible Altium window HWND from
+            get_altium_environment. Only current mode with zoom_to omitted.
+            Pins and verifies configured process/window identity, uses PrintWindow
+            without activation or input, and refuses a changed target.
 
     Returns:
         Image content of the captured window plus a JSON metadata text block
@@ -4810,7 +4818,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
     try:
         # First, execute the Altium command to ensure the right document type
         # is focused, optionally zooming to the requested components
-        response = await _prepare_screenshot_view(view_type, zoom_to)
+        response = await _prepare_screenshot_view(view_type, zoom_to, window_handle)
         
         # Check for success
         if not response.get("success", False):
@@ -4847,6 +4855,7 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
         result_queue = queue.Queue()
         
         def capture_screenshot_thread():
+            target = None
             try:
                 # Find Altium windows
                 altium_windows = []
@@ -4874,13 +4883,18 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                             })
                     return True
                 
-                win32gui.EnumWindows(collect_altium_windows, 0)
+                if window_handle is not None:
+                    from screenshot_target import CaptureTarget
+                    target = CaptureTarget(altium_bridge.config.altium_exe_path, window_handle)
+                    altium_windows = [target.window]
+                else:
+                    win32gui.EnumWindows(collect_altium_windows, 0)
                 
                 # If no specific Altium .PrjPcb windows found, use the fallback
                 if not altium_windows and altium_fallback_windows:
                     altium_windows = altium_fallback_windows
                 
-                diagnostic_fallback = False
+                diagnostic_fallback = target is not None
                 if not altium_windows and view_type.lower() == "current":
                     diagnostic = _current_diagnostic_window(altium_bridge.config.altium_exe_path)
                     if diagnostic is not None:
@@ -4957,6 +4971,9 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     result_queue.put({"success": False, "error": f"Altium window is too small to capture ({width}x{height}); is it minimized?"})
                     return
                 
+                if target is not None:
+                    target.verify()
+
                 # Take screenshot using GDI functions instead of ImageGrab
                 try:
                     # Get device context
@@ -4988,6 +5005,15 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                         (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
                         bmpstr, 'raw', 'BGRX', 0, 1)
                     
+                    # Clean up GDI resources
+                    win32gui.DeleteObject(saveBitMap.GetHandle())
+                    saveDC.DeleteDC()
+                    mfcDC.DeleteDC()
+                    win32gui.ReleaseDC(hwnd, hwndDC)
+
+                    if target is not None:
+                        target.verify()
+
                     # Save a local copy of the screenshot for debugging (non-fatal if it fails)
                     try:
                         debug_filename = str(MCP_DIR / f"screenshot_{view_type}.png")
@@ -4996,12 +5022,6 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     except Exception as save_error:
                         logger.warning(f"Could not save debug screenshot to {debug_filename}: {save_error}")
                         debug_filename = None  # Clear it since save failed
-                    
-                    # Clean up GDI resources
-                    win32gui.DeleteObject(saveBitMap.GetHandle())
-                    saveDC.DeleteDC()
-                    mfcDC.DeleteDC()
-                    win32gui.ReleaseDC(hwnd, hwndDC)
                     
                     # Convert to base64
                     buffer = io.BytesIO()
@@ -5021,6 +5041,9 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                         "diagnostic_fallback": diagnostic_fallback,
                         "capture_method": "PrintWindow" if diagnostic_fallback else "BitBlt",
                         "window_pid": altium_pid,
+                        "window_handle": hwnd,
+                        "exact_window_requested": target is not None,
+                        "pinned_process_identity": target.identity if target is not None else None,
                         "image_format": "PNG",
                         "encoding": "base64",
                         "debug_file": debug_filename,
@@ -5044,6 +5067,9 @@ async def get_screenshot(ctx: Context, view_type: str = "pcb", zoom_to: list = N
                     "error": f"Screenshot thread error: {str(e)}",
                     "traceback": traceback.format_exc()
                 })
+            finally:
+                if target is not None:
+                    target.close()
         
         # Start the thread
         thread = threading.Thread(target=capture_screenshot_thread)
