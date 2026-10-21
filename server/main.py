@@ -2876,35 +2876,43 @@ async def get_board_outline(ctx: Context, pcb_path: str) -> str:
 
 @mcp.tool()
 async def run_pcb_drc(ctx: Context, pcb_path: str, run: bool = True, timeout_s: int = 600) -> str:
-    """
-    Run the batch design rule check of a board (Tools » Design Rule Check »
-    Run, without the dialog) and list the violations it leaves on the board:
-    rule, Altium's description, the two primitives (kind, component, layer,
-    position in mm) and whether each is waived. With run false the
-    violations already on the board are listed as they are. The board is
-    not saved. Should Altium open its Design Rule Checker dialog instead of
-    running at once, the server presses Run Design Rule Check in it.
+    """Run DRC on the exact already-loaded CURRENT PCB, without opening or saving.
 
-    Args:
-        pcb_path (str): Full path of the .PcbDoc (opened if needed).
-        run (bool): run the check first (default) or only list.
-        timeout_s (int): how long to wait for the check.
+    Caller must first activate pcb_path with open_document. Both client and PCB
+    process depths must be zero. Exact path, board identity and depths are
+    checked before/after the native call. No dialog driver or automatic click
+    is used; an unexpected dialog requires separate guarded UI handling.
 
-    Returns:
-        str: JSON with ran, violations, waived, listed (at most 500 are
-             listed), by_rule[] (rule, count), violation_list[] and the
-             dialog log.
+    Each call receives a new report identifier; existing output is refused,
+    never deleted or reused. run=true requires the native call to return with
+    that fresh report before any violations are reported. run=false only lists
+    cached violations and is never evidence of a new check.
+
+    Every collected violation is serialized, including waived state and by-rule
+    counts: no 500-item collector cap. The legacy API does not verify Altium's
+    own Stop-after-N limit or enabled-check coverage, so native_check_complete
+    remains null and full_drc_verified=false. Use separately observed native
+    settings and report completion evidence before claiming complete DRC.
     """
-    logger.info(f"run_pcb_drc {pcb_path} run={run}")
-    driver = dialogs.DialogDriver("Design Rule Checker", [("Run Design Rule Check...", None)], timeout=timeout_s)
-    driver.start()
+    from pathlib import PureWindowsPath
+    from uuid import uuid4
+    from pcb_primitives import _pcb_path
     try:
-        response = await altium_bridge.execute_command(
-            "run_pcb_drc", {"pcb_path": pcb_path, "run": "true" if run else "false"}, timeout=timeout_s + 30)
-    finally:
-        driver.stop()
-        driver.join(5)
-    return _script_result(response, {"dialog_seen": driver.seen, "dialog_log": driver.log})
+        path = _pcb_path(pcb_path)
+        if not PureWindowsPath(path).is_absolute():
+            raise ValueError("pcb_path must be an absolute Windows path")
+        if type(run) is not bool:
+            raise ValueError("run must be a Boolean")
+        if type(timeout_s) is not int or not 1 <= timeout_s <= 3600:
+            raise ValueError("timeout_s must be an integer in 1..3600")
+    except (ValueError, TypeError) as error:
+        return json.dumps({"success": False, "error": str(error), "native_dispatched": False})
+    report_id = uuid4().hex
+    logger.info(f"run_pcb_drc {path} run={run} report_id={report_id}")
+    response = await altium_bridge.execute_command(
+        "run_pcb_drc", {"pcb_path": path, "run": "true" if run else "false",
+                        "report_id": report_id}, timeout=timeout_s + 30)
+    return _script_result(response, {"dialog_driver_used": False, "request_report_id": report_id})
 
 
 @mcp.tool()

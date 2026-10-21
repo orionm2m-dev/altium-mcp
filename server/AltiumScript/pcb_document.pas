@@ -1290,82 +1290,149 @@ begin
               PcbDocNum('0.###', CoordToMMs((Rect.Top + Rect.Bottom) / 2 - Board.YOrigin)) + ']}';
 end;
 
-// Tools > Design Rule Check > Run Design Rule Check as a batch, without the
-// dialog (the text report goes to ReportPath), then every violation left on
-// the board: the rule, the description Altium gives it, the two primitives
-// and whether it is waived. With Run = 'false' the violations already on the
-// board are listed as they are.
-function RunPcbDrcReport(PcbPath, Run, ReportPath: String): String;
-var
-    Board  : IPCB_Board;
-    Iter   : IPCB_BoardIterator;
-    V      : IPCB_Violation;
-    Items, Rules, Counts : TStringList;
-    RuleName : String;
-    i, N, Waived, Kept : Integer;
-    Ran    : Boolean;
+// Guarded native DRC: loaded/current board only, no opening, saving or UI input.
+function DrcReportFailure(Msg, Stage, ReportId: String; Ran: Boolean): String;
 begin
-    Board := OpenBoardAtPath(PcbPath);
-    if Board = nil then
-    begin
-        Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
-        Exit;
-    end;
+    Result := '{"success":false,"error":' + JSONStr(Msg) + ',"stage":' + JSONStr(Stage) +
+              ',"report_id":' + JSONStr(ReportId) + ',"ran":' + JSONBool(Ran) +
+              ',"no_open":true,"no_save":true,"completion_verified":false,' +
+              '"native_check_complete":null,"full_drc_verified":false}';
+end;
+
+function RunPcbDrcReport(PcbPath, Run, ReportPath, ReportId: String): String;
+var
+    Board, CurrentBoard : IPCB_Board;
+    Doc : IServerDocument;
+    Module : IDispatch;
+    Iter : IPCB_BoardIterator;
+    V : IPCB_Violation;
+    Items, Rules, Counts : TStringList;
+    RuleName, BeforePath, AfterPath : String;
+    i, N, Waived, ClientBefore, PcbBefore, ClientAfter, PcbAfter : Integer;
+    Ran, Requested : Boolean;
+begin
     Ran := False;
-    if LowerCase(Trim(Run)) <> 'false' then
+    if (Run <> 'true') and (Run <> 'false') then
+    begin Result := DrcReportFailure('run must be true or false', 'preflight', ReportId, Ran); Exit; end;
+    Requested := Run = 'true';
+    if Length(ReportId) <> 32 then
+    begin Result := DrcReportFailure('report_id must be 32 lowercase hex characters', 'preflight', ReportId, Ran); Exit; end;
+    for i := 1 to Length(ReportId) do
+        if Pos(Copy(ReportId, i, 1), '0123456789abcdef') = 0 then
+        begin Result := DrcReportFailure('invalid report_id', 'preflight', ReportId, Ran); Exit; end;
+    if not FileExists(PcbPath) then
+    begin Result := DrcReportFailure('requested PCB file missing', 'preflight', ReportId, Ran); Exit; end;
+    if FileExists(ReportPath) then
+    begin Result := DrcReportFailure('unique report already exists; no replay', 'preflight', ReportId, Ran); Exit; end;
+    if Client.CurrentView = nil then
+    begin Result := DrcReportFailure('no current view; activate requested PCB first', 'preflight', ReportId, Ran); Exit; end;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then
+    begin Result := DrcReportFailure('no current document', 'preflight', ReportId, Ran); Exit; end;
+    if not SameText(Doc.FileName, PcbPath) then
+    begin Result := DrcReportFailure('current document differs from exact requested path', 'preflight', ReportId, Ran); Exit; end;
+    if not SameText(Doc.Kind, 'PCB') then
+    begin Result := DrcReportFailure('current document is not PCB', 'preflight', ReportId, Ran); Exit; end;
+    BeforePath := Doc.FileName;
+    if PCBServer = nil then
+    begin Result := DrcReportFailure('PCB server missing', 'preflight', ReportId, Ran); Exit; end;
+    Board := PCBServer.GetPCBBoardByPath(PcbPath);
+    CurrentBoard := PCBServer.GetCurrentPCBBoard;
+    if (Board = nil) or (CurrentBoard = nil) then
+    begin Result := DrcReportFailure('requested/current PCB is not loaded', 'preflight', ReportId, Ran); Exit; end;
+    if Board.I_ObjectAddress <> CurrentBoard.I_ObjectAddress then
+    begin Result := DrcReportFailure('active board identity differs from requested board', 'preflight', ReportId, Ran); Exit; end;
+    if not SameText(Board.FileName, PcbPath) then
+    begin Result := DrcReportFailure('loaded board path differs from requested path', 'preflight', ReportId, Ran); Exit; end;
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then
+    begin Result := DrcReportFailure('PCB module missing', 'preflight', ReportId, Ran); Exit; end;
+    ClientBefore := Client.ProcessControl.ProcessDepth;
+    PcbBefore := Module.ProcessControl.ProcessDepth;
+    if (ClientBefore <> 0) or (PcbBefore <> 0) then
+    begin Result := DrcReportFailure('client/PCB process is not idle', 'preflight', ReportId, Ran); Exit; end;
+
+    if Requested then
     begin
-        if FileExists(ReportPath) then DeleteFile(ReportPath);
-        // The function returns False when the check finds violations; the report file shows that it ran.
+        // False is also returned when violations exist; fresh output proves return.
         Board.RunBatchDesignRuleCheck(ReportPath, 1, False, False);
-        Ran := FileExists(ReportPath);
+        if not FileExists(ReportPath) then
+        begin Result := DrcReportFailure('DRC returned without fresh report; completion unqualified', 'after_run', ReportId, Ran); Exit; end;
+        Ran := True;
     end;
+    if Client.CurrentView = nil then
+    begin Result := DrcReportFailure('no current view after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then
+    begin Result := DrcReportFailure('no current document after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+    if not SameText(Doc.FileName, PcbPath) then
+    begin Result := DrcReportFailure('active path changed after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+    if not SameText(Doc.Kind, 'PCB') then
+    begin Result := DrcReportFailure('active document kind changed', 'after_run', ReportId, Ran); Exit; end;
+    AfterPath := Doc.FileName;
+    CurrentBoard := PCBServer.GetPCBBoardByPath(PcbPath);
+    if CurrentBoard = nil then
+    begin Result := DrcReportFailure('requested board missing after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+    if Board.I_ObjectAddress <> CurrentBoard.I_ObjectAddress then
+    begin Result := DrcReportFailure('requested board address changed', 'after_run', ReportId, Ran); Exit; end;
+    CurrentBoard := PCBServer.GetCurrentPCBBoard;
+    if CurrentBoard = nil then
+    begin Result := DrcReportFailure('current board missing after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+    if Board.I_ObjectAddress <> CurrentBoard.I_ObjectAddress then
+    begin Result := DrcReportFailure('current board address changed', 'after_run', ReportId, Ran); Exit; end;
+    ClientAfter := Client.ProcessControl.ProcessDepth;
+    PcbAfter := Module.ProcessControl.ProcessDepth;
+    if (ClientAfter <> 0) or (PcbAfter <> 0) then
+    begin Result := DrcReportFailure('nonzero client/PCB depth after DRC/list request', 'after_run', ReportId, Ran); Exit; end;
+
     Items := TStringList.Create;
     Rules := TStringList.Create;
     Counts := TStringList.Create;
-    N := 0;
-    Waived := 0;
-    Kept := 0;
-    Iter := Board.BoardIterator_Create;
-    Iter.AddFilter_ObjectSet(MkSet(eViolationObject));
-    Iter.AddFilter_LayerSet(AllLayers);
-    Iter.AddFilter_Method(eProcessAll);
-    V := Iter.FirstPCBObject;
-    while V <> nil do
-    begin
-        RuleName := '';
-        if V.Rule <> nil then RuleName := V.Rule.Name;
-        if V.IsWaived then Waived := Waived + 1;
-        i := Rules.IndexOf(RuleName);
-        if i < 0 then
-        begin
-            Rules.Add(RuleName);
-            Counts.Add('1');
-        end
-        else
-            Counts[i] := IntToStr(StrToInt(Counts[i]) + 1);
-        if Kept < 500 then
-        begin
-            Items.Add('{"rule": ' + JSONStr(RuleName) + ', "description": ' + JSONStr(V.Description) +
-                      ', "waived": ' + JSONBool(V.IsWaived) +
-                      ', "primitive1": ' + ViolationPrimitiveJSON(Board, V.Primitive1) +
-                      ', "primitive2": ' + ViolationPrimitiveJSON(Board, V.Primitive2) + '}');
-            Kept := Kept + 1;
+    try
+        N := 0; Waived := 0;
+        Iter := Board.BoardIterator_Create;
+        try
+            Iter.AddFilter_ObjectSet(MkSet(eViolationObject));
+            Iter.AddFilter_LayerSet(AllLayers);
+            Iter.AddFilter_Method(eProcessAll);
+            V := Iter.FirstPCBObject;
+            while V <> nil do
+            begin
+                RuleName := '';
+                if V.Rule <> nil then RuleName := V.Rule.Name;
+                if V.IsWaived then Waived := Waived + 1;
+                i := Rules.IndexOf(RuleName);
+                if i < 0 then begin Rules.Add(RuleName); Counts.Add('1'); end
+                else Counts[i] := IntToStr(StrToInt(Counts[i]) + 1);
+                Items.Add('{"rule": ' + JSONStr(RuleName) + ', "description": ' + JSONStr(V.Description) +
+                          ', "waived": ' + JSONBool(V.IsWaived) +
+                          ', "primitive1": ' + ViolationPrimitiveJSON(Board, V.Primitive1) +
+                          ', "primitive2": ' + ViolationPrimitiveJSON(Board, V.Primitive2) + '}');
+                N := N + 1;
+                V := Iter.NextPCBObject;
+            end;
+        finally
+            Board.BoardIterator_Destroy(Iter);
         end;
-        N := N + 1;
-        V := Iter.NextPCBObject;
+        for i := 0 to Rules.Count - 1 do
+            Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + Counts[i] + '}';
+        Result := '{"success":true,"path":' + JSONStr(PcbPath) + ',"ran":' + JSONBool(Ran) +
+                  ',"report_id":' + JSONStr(ReportId) + ',"report_file":' + JSONStr(ReportPath) +
+                  ',"report_written":' + JSONBool(Ran) + ',"report_fresh":' + JSONBool(Ran) +
+                  ',"completion_verified":' + JSONBool(Ran) + ',"cached_violation_snapshot":' + JSONBool(not Requested) +
+                  ',"no_open":true,"no_save":true,"path_before":' + JSONStr(BeforePath) + ',"path_after":' + JSONStr(AfterPath) +
+                  ',"client_depth_before":' + IntToStr(ClientBefore) + ',"pcb_depth_before":' + IntToStr(PcbBefore) +
+                  ',"client_depth_after":' + IntToStr(ClientAfter) + ',"pcb_depth_after":' + IntToStr(PcbAfter) +
+                  ',"violations":' + IntToStr(N) + ',"waived":' + IntToStr(Waived) + ',"listed":' + IntToStr(N) +
+                  ',"collector_truncated":false,"collector_limit":null,"native_violation_limit":null,' +
+                  '"native_limit_verified":false,"native_check_complete":null,"full_drc_verified":false,' +
+                  '"completeness_note":"Native Stop-after-N and enabled-check coverage require separate evidence; successful return is not full DRC proof",' +
+                  BuildJSONArray(Rules, 'by_rule') + ', ' + BuildJSONArray(Items, 'violation_list') + '}';
+    finally
+        Items.Free;
+        Rules.Free;
+        Counts.Free;
     end;
-    Board.BoardIterator_Destroy(Iter);
-    for i := 0 to Rules.Count - 1 do
-        Rules[i] := '{"rule": ' + JSONStr(Rules[i]) + ', "count": ' + Counts[i] + '}';
-    Result := '{"success": true, "path": ' + JSONStr(PcbPath) + ', "ran": ' + JSONBool(Ran) +
-              ', "report_file": ' + JSONStr(ReportPath) + ', "report_written": ' + JSONBool(FileExists(ReportPath)) +
-              ', "violations": ' + IntToStr(N) + ', "waived": ' + IntToStr(Waived) +
-              ', "listed": ' + IntToStr(Kept) +
-              ', ' + BuildJSONArray(Rules, 'by_rule') +
-              ', ' + BuildJSONArray(Items, 'violation_list') + '}';
-    Items.Free;
-    Rules.Free;
-    Counts.Free;
 end;
 
 // The design rule of the board with this name, or nil.
