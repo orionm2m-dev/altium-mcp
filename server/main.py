@@ -1516,6 +1516,40 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
 
 
 @mcp.tool()
+async def control_situs_settings(ctx: Context, action: str, target_hwnd: int,
+                                 expected_main_title: str, dialog_kind: str = "setup",
+                                 expected_snapshot: dict | None = None,
+                                 runtime_id: list | None = None, value: Any = None,
+                                 setting: str | None = None) -> str:
+    """Inspect or address documented Situs settings using observable UIA patterns.
+
+    inspect supports setup, strategy, directions, or read-only main-window trees.
+    read_report captures a complete accessible Routing Setup Report when exposed.
+    Mutations require an entire exact inspect snapshot and observed runtime_id.
+    Semantic actions include checkbox states (lock_preroutes, ripup, orthogonal),
+    strategy name/description, via effort, strategy/pass/direction selection and
+    documented dialog buttons. Unsupported or unobservable controls are refused;
+    no blind toggle, global input or fallback. One gesture is followed by readback
+    where possible. Button invocation is not proof of persistence or completion.
+    Full PCB path is not certified by a window title. Caller must verify the
+    intended document before opening setup. No script, save, retry or recovery.
+    """
+    import situs_setup_extended
+    args = (altium_bridge.config.altium_exe_path, action, target_hwnd,
+            expected_main_title, dialog_kind, expected_snapshot, runtime_id, value, setting)
+    if action in {"inspect", "read_report"}:
+        return json.dumps(await asyncio.to_thread(situs_setup_extended.control, *args), indent=2)
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                outcome = await asyncio.to_thread(situs_setup_extended.control, *args)
+        except OSError as error:
+            outcome = {"success": False, "blocked": True, "error": str(error),
+                       "input_attempted": False, "completion_verified": False}
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
 async def control_drc_setup(ctx: Context, action: str, target_hwnd: int,
                             expected_main_title: str, edit_hwnd: int | None = None,
                             expected_limit: int | None = None, new_limit: int | None = None,
