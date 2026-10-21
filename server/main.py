@@ -1636,6 +1636,41 @@ async def route_situs_selected_tp(ctx: Context, pcb_path: str,
 
 
 @mcp.tool()
+async def route_situs_tp_to_component(ctx: Context, pcb_path: str,
+        component_designator: str, partner_designator: str, expected_net: str,
+        target_pid: int, expected_creation_filetime: str, operation_id: str = "",
+        timeout_seconds: int = 15) -> str:
+    """Route one exact test point to a selected component using native Situs Main.
+
+    Qualification only: the saved PCB must be below the private configured
+    ALTIUM_SITUS_QUALIFICATION_ROOT. Requires exact active PCB/PID/ft:FILETIME,
+    unique single-pad TP, distinct partner, one common expected net and exactly
+    one partner pad on that net. Global Lock All Pre-routes must already be on.
+    Selects exactly the pair and invokes PCB:Autoroute BetweenSelectedComponents;
+    original component selection is restored and existing copper is checked.
+    No arbitrary action, whole-board fallback, UI/input/focus, rule edit or save.
+    A returned process does not prove connectivity, DRC or IPC compliance.
+    Unknown outcomes block further dispatch; no automatic retry or rollback.
+    Reusing operation_id returns historical evidence only, never a new run.
+    """
+    import situs_partial_service
+    import situs_native_settings_service
+    try:
+        created = situs_native_settings_service.normalize_public_filetime(expected_creation_filetime)
+    except (TypeError, ValueError) as error:
+        return json.dumps({"success": False, "dispatch_attempted": False,
+                           "error": str(error), "retry_allowed": False})
+    result = await situs_partial_service.control(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        qualification_root=os.environ.get("ALTIUM_SITUS_QUALIFICATION_ROOT", ""),
+        pcb_path=pcb_path, component_designator=component_designator,
+        partner_designator=partner_designator, expected_net=expected_net, target_pid=target_pid,
+        expected_creation_filetime=created, operation_id=operation_id,
+        timeout_seconds=timeout_seconds)
+    return json.dumps(result)
+
+
+@mcp.tool()
 async def reconcile_situs_selected_tp(ctx: Context, operation_id: str, target_pid: int,
         expected_creation_filetime: str) -> str:
     """Release only a proven returned partial-routing attempt for diagnostics.

@@ -31,11 +31,26 @@ def build_partial_request(pcb_path, operation_id, component_designator, expected
         drc_verified=False,connectivity_verified=False,routing_complete=False)
 
 
+
+def build_pair_request(pcb_path, operation_id, component_designator, partner_designator, expected_net):
+    request=build_partial_request(pcb_path,operation_id,component_designator,expected_net)
+    if (not isinstance(partner_designator,str)
+            or not re.fullmatch('[A-Za-z][A-Za-z0-9_]{1,30}',partner_designator)
+            or partner_designator.casefold()==component_designator.casefold()):
+        raise ValueError('Explicit distinct partner component designator required')
+    return dict(request,partner_designator=partner_designator,action='BetweenSelectedComponents')
+
+
 def _request(request):
     if not isinstance(request,dict):raise ValueError('Fixed request required')
-    keys=('pcb_path','operation_id','component_designator','expected_net')
+    if request.get('action') == 'BetweenSelectedComponents':
+        keys=('pcb_path','operation_id','component_designator','partner_designator','expected_net')
+        builder=build_pair_request
+    else:
+        keys=('pcb_path','operation_id','component_designator','expected_net')
+        builder=build_partial_request
     if any(k not in request for k in keys):raise ValueError('Incomplete request')
-    expected=build_partial_request(*(request[k] for k in keys))
+    expected=builder(*(request[k] for k in keys))
     if set(request)!=set(expected) or any(type(request[k]) is not type(v) or request[k]!=v for k,v in expected.items()):
         raise ValueError('Fixed request changed')
     return expected
@@ -46,8 +61,12 @@ def build_partial_program(request, receipt_path):
     substitutions={'__PCB__':_literal(request['pcb_path']),'__TP__':_literal(request['component_designator']),
         '__NET__':_literal(request['expected_net']),'__RECEIPT__':_literal(_path(str(receipt_path),'.json','receipt_path')),
         '__METADATA__':_literal(json.dumps(request,ensure_ascii=True,separators=(',',':'))[:-1])}
-    if not SOURCE:raise ValueError('Native candidate source is not ready')
-    return re.sub('|'.join(substitutions),lambda m:substitutions[m.group()],SOURCE)
+    source=SOURCE
+    if request['action']=='BetweenSelectedComponents':
+        substitutions['__PARTNER__']=_literal(request['partner_designator'])
+        source=PAIR_SOURCE
+    if not source:raise ValueError('Native candidate source is not ready')
+    return re.sub('|'.join(substitutions),lambda m:substitutions[m.group()],source)
 
 
 def parse_partial_receipt(data,request):
@@ -393,3 +412,218 @@ begin
     end;
 end;
 """
+
+
+# The pair variant replaces two entire, explicitly delimited routines of the
+# frozen single-TP source. No textual substitutions inside unrelated safeguards.
+# Changing the old template requires reviewing this derivative and its hash.
+_SINGLE_SOURCE_SHA256 = '6616e557e1f79433a9a05612ece5394a7841cad27ab5ed433c585ee5762c962a'
+
+PAIR_COMPONENT_ROUTINES = r"""function PComponents(Board: IPCB_Board; Names, Selected: TStringList;
+    var Target, Partner: IPCB_Component): Boolean;
+var Iter: IPCB_BoardIterator; Comp: IPCB_Component; Name: String; Found, FoundPartner: Integer;
+begin
+    Result := False; Names.Clear; Selected.Clear;
+    Target := nil; Partner := nil; Found := 0; FoundPartner := 0;
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(eComponentObject));
+        Iter.AddFilter_LayerSet(AllLayers); Iter.AddFilter_Method(eProcessAll);
+        Comp := Iter.FirstPCBObject;
+        while Comp <> nil do
+        begin
+            if (Names.Count >= 10000) or (Comp.Name = nil) then Exit;
+            Name := Comp.Name.Text;
+            if (Name = '') or (Names.IndexOf(Name) >= 0) then Exit;
+            Names.Add(Name);
+            if Comp.Selected then Selected.Add(Name);
+            if Name = __TP__ then begin Target := Comp; Found := Found+1; end;
+            if Name = __PARTNER__ then begin Partner := Comp; FoundPartner := FoundPartner+1; end;
+            Comp := Iter.NextPCBObject;
+        end;
+        Names.Sort; Selected.Sort;
+        if (Found <> 1) or (FoundPartner <> 1) then Exit;
+        Result := Target.I_ObjectAddress <> Partner.I_ObjectAddress;
+    finally Board.BoardIterator_Destroy(Iter); end;
+end;
+
+// A one-pad TP and exactly one partner pad on its net define one shared net.
+// The partner may have other pads; they must not duplicate the target net.
+function PPairPads(Target, Partner: IPCB_Component;
+    var TargetPad, PartnerPad: IPCB_Pad): Boolean;
+var Iter: IPCB_GroupIterator; Pad: IPCB_Pad; Count, Matched: Integer;
+begin
+    Result := False; TargetPad := nil; PartnerPad := nil;
+    if (Target = nil) or (Partner = nil) then Exit;
+    Count := 0; Iter := Target.GroupIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+        Pad := Iter.FirstPCBObject;
+        while Pad <> nil do
+        begin
+            Count := Count+1; if Count > 1 then Exit;
+            if Pad.Net = nil then Exit;
+            if Pad.Net.Name <> __NET__ then Exit;
+            TargetPad := Pad; Pad := Iter.NextPCBObject;
+        end;
+        if (Count <> 1) or (TargetPad = nil) then Exit;
+    finally Target.GroupIterator_Destroy(Iter); end;
+    Count := 0; Matched := 0; Iter := Partner.GroupIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+        Pad := Iter.FirstPCBObject;
+        while Pad <> nil do
+        begin
+            Count := Count+1; if Count > 10000 then Exit;
+            if Pad.Net <> nil then
+                if Pad.Net.Name = __NET__ then
+                begin
+                    Matched := Matched+1; if Matched > 1 then Exit;
+                    PartnerPad := Pad;
+                end;
+            Pad := Iter.NextPCBObject;
+        end;
+        if (Matched <> 1) or (PartnerPad = nil) then Exit;
+        Result := TargetPad.I_ObjectAddress <> PartnerPad.I_ObjectAddress;
+    finally Partner.GroupIterator_Destroy(Iter); end;
+end;
+
+"""
+
+PAIR_ROUTE_ROUTINE = r"""procedure RunSelectedTPRoute;
+var Board: IPCB_Board; Target, CheckTarget, Partner, CheckPartner: IPCB_Component;
+    TargetPad, PartnerPad, CheckTargetPad, CheckPartnerPad: IPCB_Pad;
+    Names, CheckNames, BeforeSelected, CheckSelected, AfterSelected, Wanted, BeforeCopper, AfterCopper: TStringList;
+    Stage, ErrorCode: String;
+    SelectionAttempted, RouteAttempted, SelectionRestored, LockVerified, CopperPreserved,
+    ReturnVerified, BeforeComplete, AfterComplete, SelectionCaptured: Boolean;
+begin
+    if FileExists(__RECEIPT__) or FileExists(__RECEIPT__ + '.entered.json') then Exit;
+    Names := TStringList.Create; CheckNames := TStringList.Create;
+    BeforeSelected := TStringList.Create; CheckSelected := TStringList.Create;
+    AfterSelected := TStringList.Create; Wanted := TStringList.Create;
+    BeforeCopper := TStringList.Create; AfterCopper := TStringList.Create;
+    Board := nil; Target := nil; Partner := nil; TargetPad := nil; PartnerPad := nil;
+    SelectionAttempted := False; RouteAttempted := False;
+    SelectionRestored := False; LockVerified := False; CopperPreserved := False; ReturnVerified := False;
+    BeforeComplete := False; AfterComplete := False; SelectionCaptured := False;
+    Stage := 'guard_failed'; ErrorCode := 'exact_pcb_or_idle_guard';
+    try
+        try
+            if not PReceipt('entered','',False,False,False,False,False,False,False,False,False,BeforeCopper,AfterCopper,BeforeSelected,AfterSelected) then Exit;
+            if PCBServer = nil then Exit;
+            Board := PCBServer.GetCurrentPCBBoard;
+            if not PGuard(Board) then Exit;
+            ErrorCode := 'lock_preroutes_must_already_be_true';
+            LockVerified := PLock; if not LockVerified then Exit;
+            ErrorCode := 'exact_unique_tp_partner_and_single_shared_net_required';
+            if not PComponents(Board,Names,BeforeSelected,Target,Partner) then Exit;
+            if not PPairPads(Target,Partner,TargetPad,PartnerPad) then Exit;
+            SelectionCaptured := True;
+            ErrorCode := 'bounded_simple_free_copper_snapshot_required';
+            BeforeComplete := PCopper(Board,BeforeCopper); if not BeforeComplete then Exit;
+            if not PGuard(Board) or not PLock then Exit;
+            // Persist the possible selection mutation before changing selection.
+            SelectionAttempted := True;
+            if not PReceipt('selection_attempted','',False,False,True,False,True,False,False,True,False,BeforeCopper,AfterCopper,BeforeSelected,AfterSelected) then Exit;
+            Wanted.Add(__TP__); Wanted.Add(__PARTNER__); Wanted.Sort;
+            PSelect(Board,Wanted);
+            ErrorCode := 'pair_selection_readback_or_identity_failed';
+            if not PGuard(Board) then Exit;
+            if not PComponents(Board,CheckNames,CheckSelected,CheckTarget,CheckPartner) then Exit;
+            if (Names.Text <> CheckNames.Text) or (Wanted.Text <> CheckSelected.Text) then Exit;
+            if (Target.I_ObjectAddress <> CheckTarget.I_ObjectAddress) or
+                (Partner.I_ObjectAddress <> CheckPartner.I_ObjectAddress) then Exit;
+            if not PPairPads(CheckTarget,CheckPartner,CheckTargetPad,CheckPartnerPad) then Exit;
+            if (TargetPad.I_ObjectAddress <> CheckTargetPad.I_ObjectAddress) or
+                (PartnerPad.I_ObjectAddress <> CheckPartnerPad.I_ObjectAddress) then Exit;
+            if not PLock then Exit;
+            RouteAttempted := True;
+            if not PReceipt('dispatch_attempted','',False,True,True,False,True,False,False,True,False,BeforeCopper,AfterCopper,BeforeSelected,AfterSelected) then Exit;
+            // Installed native pair action; no dialog, guessed parameters or rule edits.
+            ResetParameters;
+            AddStringParameter('Action','BetweenSelectedComponents');
+            RunProcess('PCB:Autoroute');
+            Stage := 'readback_failed'; ErrorCode := 'exact_return_or_idle_failed';
+            if not PGuard(Board) then Exit;
+            ErrorCode := 'lock_preroutes_changed_after_return';
+            if not PLock then Exit;
+            ErrorCode := 'pair_roster_or_pad_identity_changed_after_return';
+            if not PComponents(Board,CheckNames,CheckSelected,CheckTarget,CheckPartner) then Exit;
+            if (Names.Text <> CheckNames.Text) or (Wanted.Text <> CheckSelected.Text) then Exit;
+            if (Target.I_ObjectAddress <> CheckTarget.I_ObjectAddress) or
+                (Partner.I_ObjectAddress <> CheckPartner.I_ObjectAddress) then Exit;
+            if not PPairPads(CheckTarget,CheckPartner,CheckTargetPad,CheckPartnerPad) then Exit;
+            if (TargetPad.I_ObjectAddress <> CheckTargetPad.I_ObjectAddress) or
+                (PartnerPad.I_ObjectAddress <> CheckPartnerPad.I_ObjectAddress) then Exit;
+            ErrorCode := 'old_free_copper_changed_or_snapshot_incomplete';
+            AfterComplete := PCopper(Board,AfterCopper); if not AfterComplete then Exit;
+            CopperPreserved := PContainsOld(BeforeCopper,AfterCopper); if not CopperPreserved then Exit;
+            Stage := 'returned'; ErrorCode := '';
+        except
+            Stage := 'native_exception'; ErrorCode := 'native_exception_no_retry';
+        end;
+    finally
+        // Restore only while the exact original board, components and pads still exist.
+        try
+            if SelectionCaptured and PGuard(Board) then
+            begin
+                if PComponents(Board,CheckNames,CheckSelected,CheckTarget,CheckPartner) then
+                begin
+                    if (Names.Text = CheckNames.Text) and
+                        (Target.I_ObjectAddress = CheckTarget.I_ObjectAddress) and
+                        (Partner.I_ObjectAddress = CheckPartner.I_ObjectAddress) then
+                    begin
+                        if PPairPads(CheckTarget,CheckPartner,CheckTargetPad,CheckPartnerPad) then
+                            if (TargetPad.I_ObjectAddress = CheckTargetPad.I_ObjectAddress) and
+                                (PartnerPad.I_ObjectAddress = CheckPartnerPad.I_ObjectAddress) then
+                            begin
+                                if SelectionAttempted then PSelect(Board,BeforeSelected);
+                                if PGuard(Board) then
+                                    if PComponents(Board,CheckNames,AfterSelected,CheckTarget,CheckPartner) then
+                                        if PPairPads(CheckTarget,CheckPartner,CheckTargetPad,CheckPartnerPad) then
+                                            SelectionRestored := (Names.Text = CheckNames.Text) and
+                                                (BeforeSelected.Text = AfterSelected.Text) and
+                                                (Target.I_ObjectAddress = CheckTarget.I_ObjectAddress) and
+                                                (Partner.I_ObjectAddress = CheckPartner.I_ObjectAddress) and
+                                                (TargetPad.I_ObjectAddress = CheckTargetPad.I_ObjectAddress) and
+                                                (PartnerPad.I_ObjectAddress = CheckPartnerPad.I_ObjectAddress);
+                            end;
+                    end;
+                end;
+            end;
+        except SelectionRestored := False; end;
+        if Stage = 'returned' then
+        begin
+            if SelectionRestored and PGuard(Board) then ReturnVerified := True
+            else begin Stage := 'readback_failed'; ErrorCode := 'selection_not_restored_or_final_identity_failed'; end;
+        end;
+        if not PReceipt(Stage,ErrorCode,ReturnVerified,RouteAttempted,SelectionAttempted,SelectionRestored,
+            LockVerified,CopperPreserved,ReturnVerified,BeforeComplete,AfterComplete,BeforeCopper,AfterCopper,BeforeSelected,AfterSelected) then
+            ReturnVerified := False;
+        AfterCopper.Free; BeforeCopper.Free; Wanted.Free; AfterSelected.Free;
+        CheckSelected.Free; BeforeSelected.Free; CheckNames.Free; Names.Free;
+    end;
+end;
+"""
+
+
+def _build_pair_source(single_source):
+    if hashlib.sha256(single_source.encode()).hexdigest() != _SINGLE_SOURCE_SHA256:
+        raise ValueError('Single-TP source changed: pair derivative requires review')
+    component_start='function PComponents('
+    selection_start='procedure PSelect('
+    route_start='procedure RunSelectedTPRoute;'
+    for marker in (component_start,selection_start,route_start):
+        if single_source.count(marker)!=1:
+            raise ValueError('Ambiguous pair source routine boundary')
+    first=single_source.index(component_start)
+    middle=single_source.index(selection_start)
+    last=single_source.index(route_start)
+    if not first < middle < last:
+        raise ValueError('Invalid pair source routine ordering')
+    return (single_source[:first] + PAIR_COMPONENT_ROUTINES +
+            single_source[middle:last] + PAIR_ROUTE_ROUTINE)
+
+
+PAIR_SOURCE = _build_pair_source(SOURCE)

@@ -30,7 +30,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.qualification=self.root/'SitusQualification';self.qualification.mkdir()
         self.board=self.qualification/'candidate.PcbDoc';self.board.write_bytes(b'offline path fixture')
         self.pcb=str(self.board)
-        self.mode='success';self.code=0;self.claims=0
+        self.mode='success';self.code=0;self.claims=0;self.partner=None
         self.gate=asyncio.Event();self.sleep_entered=asyncio.Event()
         self.identity=dict(pid=PID,creation_filetime=int(CREATED),exe=EXE,user_sid='test',running=True)
         self.receipt=dict(success=True,stage='returned',route_attempted=True,return_verified=True,
@@ -68,6 +68,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request['pcb_path'],self.pcb)
         self.assertEqual(request['component_designator'],TP)
         self.assertEqual(request['expected_net'],NET)
+        self.assertEqual(request.get('partner_designator'),self.partner)
         if self.mode in ('missing','cancel'):raise FileNotFoundError('No native receipt')
         if self.mode=='malformed':raise ValueError('Native correlation mismatch')
         return dict(self.receipt)
@@ -88,7 +89,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def call(self,**changes):
         args=dict(qualification_root=self.qualification,pcb_path=self.pcb,
                   component_designator=TP,expected_net=NET,target_pid=PID,
-                  expected_creation_filetime=CREATED,operation_id=OP,timeout_seconds=1)
+                  expected_creation_filetime=CREATED,operation_id=OP,timeout_seconds=1,
+                  partner_designator=self.partner)
         args.update(changes)
         return await service.control(EXE,self.root,self.lock,**args)
 
@@ -105,7 +107,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.lock.locked());self.assertEqual(self.claims,0)
 
     def publish_native(self, stage='returned', **changes):
-        request=service.native.build_partial_request(self.pcb,OP,TP,NET)
+        request=(service.native.build_partial_request(self.pcb,OP,TP,NET) if self.partner is None
+                 else service.native.build_pair_request(self.pcb,OP,TP,self.partner,NET))
         receipt=dict(request,**{key:True for key in service.native.BOOLS},
             stage=stage,error='',before_copper_records=['existing-track'],
             after_copper_records=['existing-track','new-track'],
@@ -479,6 +482,68 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(service.script_recovery.blocked_state(self.root))
         self.launch.assert_called_once()
 
+    async def test_pair_uses_fixed_between_action_and_preserves_history_binding(self):
+        self.partner='J1'
+        result=await self.call()
+        self.assertTrue(result['success'],result)
+        self.assertEqual(result['partner_designator'],'J1')
+        folder=self.root/'situs_partial'/OP
+        request=json.loads((folder/'request.json').read_text('utf-8'))['request']
+        self.assertEqual(request['action'],'BetweenSelectedComponents')
+        self.assertEqual(request['partner_designator'],'J1')
+        source=(folder/'SelectedTPRoute.pas').read_text('utf-8')
+        self.assertIn("AddStringParameter('Action','BetweenSelectedComponents');",source)
+        self.assertNotIn("AddStringParameter('Action','OnSelectedComponents');",source)
+        changed=await self.call(partner_designator='J2')
+        self.assertFalse(changed['success']);self.assertIn('different request',changed['error'])
+        self.launch.assert_called_once()
+
+    async def test_existing_single_operation_cannot_be_reused_for_pair(self):
+        await self.call()
+        result=await self.call(partner_designator='J1')
+        self.assertFalse(result['success']);self.assertIn('different request',result['error'])
+        self.launch.assert_called_once()
+
+    async def test_invalid_partner_cannot_dispatch(self):
+        for partner in ('',TP,'J1\n','J1;Reset',True):
+            with self.subTest(partner=partner):
+                result=await self.call(partner_designator=partner)
+                self.assertFalse(result['success'] or result['dispatch_attempted'])
+        self.launch.assert_not_called();self.identify.assert_not_called()
+
+    async def test_real_pair_receipt_and_reconcile_preserve_failure(self):
+        self.partner='J1'
+        folder=await self.failed_copper_return()
+        original=(folder/'result.json').read_bytes()
+        result=await self.reconcile()
+        self.assertTrue(result['reconciled'],result)
+        self.assertFalse(result['success'] or result['routing_success'])
+        self.assertEqual((folder/'result.json').read_bytes(),original)
+        self.launch.assert_called_once()
+
+    async def test_pair_reconcile_rejects_changed_partner_in_outer_evidence(self):
+        self.partner='J1'
+        folder=await self.failed_copper_return()
+        path=folder/'result.json';original=json.loads(path.read_text('utf-8'))
+        original['partner_designator']='J2'
+        path.write_text(json.dumps(original),'utf-8')
+        result=await self.reconcile()
+        self.assertFalse(result['reconciled'])
+        self.assertIsNotNone(service.script_recovery.blocked_state(self.root))
+
+    async def test_actual_pair_wrapper_reaches_real_service(self):
+        self.partner='J1'
+        mcp,_=registered_wrapper(self.root,self.lock,'route_situs_tp_to_component')
+        with patch.dict(os.environ,{'ALTIUM_SITUS_QUALIFICATION_ROOT':str(self.qualification)}):
+            response=await mcp.call_tool('route_situs_tp_to_component',dict(
+                pcb_path=self.pcb,component_designator=TP,partner_designator='J1',expected_net=NET,
+                target_pid=PID,expected_creation_filetime='ft:'+CREATED,operation_id=OP,timeout_seconds=1))
+        result=json.loads(response[0].text)
+        self.assertTrue(result['success'],result)
+        self.assertEqual(result['partner_designator'],'J1')
+        self.assertEqual(result['creation_filetime_decimal'],CREATED)
+        self.launch.assert_called_once()
+
     async def test_actual_public_wrapper_reaches_service_with_exact_filetime(self):
         mcp, unused_lock = registered_wrapper(self.root, self.lock)
         with patch.dict(os.environ, {'ALTIUM_SITUS_QUALIFICATION_ROOT': str(self.qualification)}):
@@ -533,6 +598,34 @@ class PublicWrapperTests(unittest.IsolatedAsyncioTestCase):
         result=json.loads(response[0].text)
         self.assertFalse(result['success'] or result['reconciled'])
         reconcile.assert_not_called()
+        self.assertIs(sys.modules.get('main'),main_before)
+
+    async def test_actual_pair_public_schema_and_private_configuration(self):
+        main_before=sys.modules.get('main')
+        mcp,lock=registered_wrapper(name='route_situs_tp_to_component')
+        tools={tool.name:tool for tool in await mcp.list_tools()}
+        self.assertEqual(set(tools),{'route_situs_tp_to_component'})
+        schema=tools['route_situs_tp_to_component'].inputSchema
+        self.assertEqual(set(schema['properties']),{'pcb_path','component_designator','partner_designator',
+            'expected_net','target_pid','expected_creation_filetime','operation_id','timeout_seconds'})
+        self.assertEqual(schema['properties']['expected_creation_filetime']['type'],'string')
+        with patch.dict(os.environ,{'ALTIUM_SITUS_QUALIFICATION_ROOT':r'C:\qualified'}), \
+                patch.object(service,'control',return_value={'success':True}) as control:
+            response=await mcp.call_tool('route_situs_tp_to_component',dict(
+                pcb_path=r'C:\qualified\candidate.PcbDoc',component_designator=TP,
+                partner_designator='J1',expected_net=NET,target_pid=PID,
+                expected_creation_filetime='ft:'+CREATED,operation_id=OP))
+        self.assertTrue(json.loads(response[0].text)['success'])
+        self.assertEqual(control.call_args.args,(EXE,'exchange',lock))
+        self.assertEqual(control.call_args.kwargs['partner_designator'],'J1')
+        self.assertEqual(control.call_args.kwargs['expected_creation_filetime'],CREATED)
+        self.assertEqual(control.call_args.kwargs['qualification_root'],r'C:\qualified')
+        with patch.object(service,'control') as control:
+            response=await mcp.call_tool('route_situs_tp_to_component',dict(
+                pcb_path=r'C:\qualified\candidate.PcbDoc',component_designator=TP,
+                partner_designator='J1',expected_net=NET,target_pid=PID,
+                expected_creation_filetime='ft:01',operation_id=OP))
+        self.assertFalse(json.loads(response[0].text)['success']);control.assert_not_called()
         self.assertIs(sys.modules.get('main'),main_before)
 
     async def test_actual_fastmcp_schema_and_private_configuration(self):

@@ -731,3 +731,21 @@ directions, lock controls, custom-checkbox state, structured reports and native
 router lifecycle are not all covered by current tools. Router Stop is not the
 scripting debugger's Stop. Read the per-action bounds and reviewed commit before
 relying on a capability.
+
+### Native partial Situs qualification
+
+`route_situs_selected_tp` runs the fixed native `OnSelectedComponents` action
+for one single-pad test point. `route_situs_tp_to_component` selects that TP and
+one explicit partner for `BetweenSelectedComponents`; only their single shared
+expected net is eligible. Both use Situs Main, not the whole-board pass list.
+Set the private `ALTIUM_SITUS_QUALIFICATION_ROOT` to the allowed candidate tree.
+Exact active PCB, process ID and `ft:` creation identity, verified pre-route lock,
+selection restoration and free-copper snapshots are required. These tools do not
+change rules, save the board, use UI automation or prove connectivity/DRC.
+
+`reconcile_situs_selected_tp` releases a pending execution only when immutable
+receipts prove its known native return with complete snapshots and restored
+selection. The original copper-validation failure remains failed; reconciliation
+never retries, rolls back or declares routing successful. New native variants
+need runtime qualification after offline tests before their use is treated as
+verified. Existing single-TP generated source is pinned for historical evidence.

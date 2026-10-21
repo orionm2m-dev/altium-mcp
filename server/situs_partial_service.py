@@ -76,13 +76,16 @@ def _preflight(request, receipt_path):
 
 async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_path,
                   component_designator, expected_net, target_pid,
-                  expected_creation_filetime, operation_id='', timeout_seconds=15):
+                  expected_creation_filetime, operation_id='', timeout_seconds=15,
+                  partner_designator=None):
     """Dispatch the fixed selected single-pad TP action once on a saved candidate.
 
     expected_creation_filetime is the exact decimal string normalized by the
     public wrapper. qualification_root is private configuration, never a public input.
-    Native guards require exact PCB/TP/net and LockPreRoutes true. The action is
-    PCB:Autoroute with Action=OnSelectedComponents only. The module does not save,
+    Native guards require exact PCB/TP/net and LockPreRoutes true. An explicit
+    partner selects the fixed BetweenSelectedComponents builder; the
+    default remains OnSelectedComponents. Callers cannot choose a process/action.
+    The module does not save,
     select a strategy, change rules, toggle LockPreRoutes, invoke DRC or use UI.
     Locks and the pinned HANDLE survive caller cancellation through bounded
     observation. Unknown/partial outcomes retain the pending latch; no replay.
@@ -104,7 +107,11 @@ async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_pa
             raise ValueError('expected_creation_filetime must be a positive decimal FILETIME string')
         created = expected_creation_filetime
         operation_id = uuid.uuid4().hex if operation_id == '' else operation_id
-        request = native.build_partial_request(pcb_path, operation_id, component_designator, expected_net)
+        if partner_designator is None:
+            request = native.build_partial_request(pcb_path, operation_id, component_designator, expected_net)
+        else:
+            request = native.build_pair_request(pcb_path, operation_id, component_designator,
+                                                partner_designator, expected_net)
         approved_root = _candidate_scope(request['pcb_path'], qualification_root)
         exchange = Path(exchange_dir).resolve()
         if not exchange.is_dir():
@@ -127,6 +134,8 @@ async def control(exe, exchange_dir, command_lock, *, qualification_root, pcb_pa
                       target_pid=target_pid, creation_filetime_decimal=created,
                       qualification_root=approved_root, receipt_directory=str(folder),
                       source_sha256=hashlib.sha256(source.encode('utf-8')).hexdigest())
+        if partner_designator is not None:
+            result['partner_designator'] = request['partner_designator']
         async with command_lock:
             with emergency_stop.emergency_claim(exchange):
                 if folder.exists():
@@ -336,7 +345,8 @@ async def reconcile_known_return(exe, exchange_dir, command_lock, *, qualificati
                         or original.get('qualification_root') != approved_root
                         or original.get('receipt_directory') != str(folder)
                         or original.get('component_designator') != request['component_designator']
-                        or original.get('expected_net') != request['expected_net']):
+                        or original.get('expected_net') != request['expected_net']
+                        or original.get('partner_designator') != request.get('partner_designator')):
                     raise ValueError('Saved service evidence identity or source mismatch')
                 if (original.get('success') is not False
                         or original.get('dispatch_attempted') is not True
