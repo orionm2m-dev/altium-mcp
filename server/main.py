@@ -1442,6 +1442,33 @@ async def cancel_import_wizard_and_resume_pending_stop(
 
 
 @mcp.tool()
+async def reconcile_script_probe(ctx: Context, recovery_token: str) -> str:
+    """Reconcile only an existing completed probe for the exact pending token.
+
+    Reads existing evidence and current process/window identity under both locks.
+    A matching completed probe updates its recovery checkpoint; otherwise leaves
+    it blocked. Never launches a process, dispatches Stop or a new probe, restarts
+    Altium, changes focus, claims manual Stop, or saves documents.
+    """
+    async with altium_bridge._command_lock:
+        try:
+            with emergency_stop.emergency_claim(EXCHANGE_DIR):
+                old = script_recovery.blocked_state(EXCHANGE_DIR)
+                if (not isinstance(recovery_token, str) or not recovery_token
+                        or not old or old.get("phase") != "probe_pending"
+                        or old.get("token") != recovery_token):
+                    outcome = script_recovery._blocked(old or {},
+                        "Exact pending probe token is required", no_new_dispatch=True)
+                else:
+                    outcome = script_recovery._reconcile_late_probe(
+                        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, old)
+        except OSError as error:
+            outcome = {"recovered": False, "blocked": True, "error": str(error),
+                       "no_new_dispatch": True}
+    return json.dumps(outcome, indent=2)
+
+
+@mcp.tool()
 async def resume_completed_stop(ctx: Context, target_pid: int, recovery_token: str,
                                 timeout_seconds: int = 30,
                                 dispatch_timeout_seconds: int = 8) -> str:

@@ -137,6 +137,15 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
+### Reconcile an already completed probe without dispatch
+
+`reconcile_script_probe(recovery_token)` only checks the existing `probe_pending`
+checkpoint and its unique result, launcher completion and unchanged ready main
+session. It holds the bridge lock and OS claim and either records verified
+completion or remains blocked. It cannot dispatch Stop, a new probe or a fresh
+start, and does not change focus. Use the exact pending token; foreground must
+already be established with the separate guarded `focus_altium` tool if needed.
+
 ### Continue after an already completed Stop
 
 `resume_completed_stop(target_pid, recovery_token, timeout_seconds=30,

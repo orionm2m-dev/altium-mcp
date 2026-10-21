@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-21 — Reconcile an existing probe through a dispatch-free public tool
+
+Added `reconcile_script_probe(recovery_token)` as a narrow, locked wrapper around
+the existing late-result verifier. It requires the exact pending checkpoint and
+has no recovery-dispatch or fresh-start path. Focus and all new dispatches remain
+outside this tool. Mocked tests cover token/phase refusal, both locks, successful
+reconciliation and lock failure.
+
 ## 2026-10-21 — Resume a completed Stop without dispatching it again
 
 Added `resume_completed_stop` for an exact `blocked_after_stop` token with one
