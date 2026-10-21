@@ -24,6 +24,19 @@ import situs_native_settings as settings
 TERMINAL_STAGES = {"completed", "guard_failed", "expected_state_mismatch", "readback_failed"}
 
 
+def normalize_public_filetime(value):
+    """Decode the public ft:<decimal> token without JSON numeric coercion.
+
+    FastMCP pre-parses JSON-looking string arguments. The ft: prefix preserves
+    the exact integer spelling until this boundary; internal control still
+    accepts a decimal string. No numeric input or implicit conversion is allowed.
+    """
+    if (not isinstance(value, str) or re.fullmatch(r"ft:[1-9][0-9]{0,19}", value) is None
+            or int(value[3:]) >= 2 ** 64):
+        raise ValueError("expected_creation_filetime must be ft:<positive decimal FILETIME>")
+    return value[3:]
+
+
 def _write(path, data):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")

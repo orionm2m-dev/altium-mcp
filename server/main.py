@@ -1523,7 +1523,7 @@ async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str
     """Inspect or set the global Situs Lock All Pre-routes option without UIA.
 
     action is inspect or set. Requires one ready configured Altium process and
-    the exact active PCB path. FILETIME is a decimal string, never a JSON number.
+    the exact active PCB path. FILETIME must be a string prefixed ft: followed by exact decimal digits.
     set requires expected_checked and checked, compares fresh state, assigns at
     most once, then reads back. An already-satisfied value needs no assignment.
     This global PCB option is not a per-document setting; no board/preferences
@@ -1535,10 +1535,15 @@ async def control_situs_native_settings(ctx: Context, action: str, pcb_path: str
     compact; detailed native receipts and fixed source remain in receipt_directory.
     """
     import situs_native_settings_service
+    try:
+        created = situs_native_settings_service.normalize_public_filetime(expected_creation_filetime)
+    except (TypeError, ValueError) as error:
+        return json.dumps({"success": False, "dispatch_attempted": False,
+                           "error": str(error), "retry_allowed": False})
     outcome = await situs_native_settings_service.control(
         altium_bridge.config.altium_exe_path, EXCHANGE_DIR,
         altium_bridge._command_lock, action=action, pcb_path=pcb_path,
-        target_pid=target_pid, expected_creation_filetime=expected_creation_filetime,
+        target_pid=target_pid, expected_creation_filetime=created,
         operation_id=operation_id, expected_checked=expected_checked,
         checked=checked, timeout_seconds=timeout_seconds)
     return json.dumps(outcome)

@@ -19,6 +19,44 @@ EXE = r"C:\Altium\X2.EXE"
 OP = "a" * 32
 
 
+class PublicFiletimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_installed_fastmcp_preserves_prefixed_token_through_validation(self):
+        from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+
+        def public_boundary(expected_creation_filetime: str) -> str:
+            return service.normalize_public_filetime(expected_creation_filetime)
+
+        metadata = func_metadata(public_boundary)
+        for decimal in (CREATED, str(2 ** 64 - 1)):
+            arguments = {"expected_creation_filetime": "ft:" + decimal}
+            self.assertEqual(metadata.pre_parse_json(arguments), arguments)
+            result = await metadata.call_fn_with_arg_validation(
+                public_boundary, False, arguments, None)
+            self.assertEqual(result, decimal)
+            self.assertEqual(int(result), int(decimal))
+
+    def test_installed_fastmcp_demonstrates_unprefixed_decimal_coercion(self):
+        from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+        from pydantic import ValidationError
+
+        def public_boundary(expected_creation_filetime: str) -> str:
+            return expected_creation_filetime
+
+        metadata = func_metadata(public_boundary)
+        parsed = metadata.pre_parse_json({"expected_creation_filetime": CREATED})
+        self.assertIs(type(parsed["expected_creation_filetime"]), int)
+        with self.assertRaises(ValidationError):
+            metadata.arg_model.model_validate(parsed)
+
+    def test_public_normalizer_rejects_numeric_unprefixed_or_malformed_values(self):
+        for value in (True, False, int(CREATED), float(CREATED), CREATED, "0", "ft:0",
+                      "ft:01", "FT:" + CREATED, " ft:" + CREATED, "ft:" + CREATED + " ",
+                      "ft:1.0", "ft:1e17", "ft:-1", "ft:+1", "ft:" + str(2 ** 64), None):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    service.normalize_public_filetime(value)
+
+
 class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

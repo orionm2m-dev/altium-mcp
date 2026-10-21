@@ -14,6 +14,6 @@ Official references: [PCB System API](https://www.altium.com/documentation/altiu
 
 ## Public command
 
-`control_situs_native_settings` provides `inspect` and `set` through a fixed, dedicated script project. It holds the existing bridge lock and cross-process emergency claim, pins the configured process identity, and refuses ambiguous or unrecovered sessions. `expected_creation_filetime` is a decimal string to preserve all 64 bits. Native execution checks the active board path/object and process depths independently. No caller-supplied Pascal is accepted.
+`control_situs_native_settings` provides `inspect` and `set` through a fixed, dedicated script project. It holds the existing bridge lock and cross-process emergency claim, pins the configured process identity, and refuses ambiguous or unrecovered sessions. `expected_creation_filetime` uses `ft:<exact decimal digits>` to preserve all 64 bits and prevent FastMCP from parsing a numeric string as a JSON number. The public handler validates and removes the prefix; the internal service retains decimal text. Native execution checks the active board path/object and process depths independently. No caller-supplied Pascal is accepted.
 
 An operation ID binds the exact request and process. Repeating it returns historical evidence with `replayed: true` and `current_state_rechecked: false`; it does not dispatch again. Uncertain launch, cancellation or missing completion leaves the shared recovery latch pending. The command does not recover, stop or restart Altium automatically.
