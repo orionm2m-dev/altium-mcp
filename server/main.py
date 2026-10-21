@@ -1224,6 +1224,19 @@ def _dismiss_altium_dialogs():
 
 
 @mcp.tool()
+async def search_altium_api(ctx: Context, query: str, limit: int = 10) -> str:
+    """Search the local curated Altium API reference without native access.
+
+    Searches interface, member, signature and source title. Returns documented
+    declarations and official links with runtime_verified=false. The reference
+    is incomplete; absence means unknown. Observed incompatibility evidence
+    takes precedence over documentation. This does not certify PAS availability.
+    """
+    import api_reference
+    return json.dumps(api_reference.search(query, limit), indent=2)
+
+
+@mcp.tool()
 async def lint_altium_script(ctx: Context, script: str, declarations: str = "",
                              declarations_file: str = "") -> str:
     """Read-only DelphiScript preflight with the same input precedence as Run.

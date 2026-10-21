@@ -59,7 +59,7 @@ On a slow network the first build can exceed the client's 60-second startup time
 3. Update `manifest.json`: set `entry_point` to `start_server.py`, remove any `env`/`PYTHONPATH` fields, and use `manifest_version: "0.3"`
 4. Package the DXT — either use `dxt pack` or manually zip and rename:
 ```powershell
-Compress-Archive -Path manifest.json, start_server.py, pyproject.toml, server -DestinationPath altium-mcp.zip
+Compress-Archive -Path manifest.json, start_server.py, pyproject.toml, server, docs -DestinationPath altium-mcp.zip
 Rename-Item altium-mcp.zip altium-mcp.dxt
 ```
 
@@ -677,4 +677,31 @@ state. Successful offline tests do not establish native Altium execution.
 ```powershell
 python -m unittest discover -s server/tests -p test_script_lint.py -v
 python -m unittest discover -s server/tests -p test_sandbox_script_guard.py -v
+```
+
+
+### Search Altium API documentation through MCP
+
+`search_altium_api(query, limit=10)` reads the curated local reference in
+`docs/altium-api-reference/catalog.json`. Search case-insensitively by interface,
+member, signature or source title, for example `IPCB_Board.FileName` or
+`TCoordRect`. The result supplies declarations, access metadata and official
+source links, always labelled `DOCUMENTED` and `runtime_verified: false`.
+The limit is 1–50; total matches and truncation are reported.
+
+This tool makes no native calls, writes, network requests or dispatches. Missing
+or invalid reference files produce an explicit error. The negative compatibility
+catalog remains separate and takes precedence: matching observed failures are
+returned even when the documentation has no matching entry. No match means
+unknown, not unsupported. No inheritance or runtime argument compatibility is
+inferred. Include `docs/altium-api-reference` when packaging/deploying the server;
+the regular repository layout is required for reference lookup.
+
+Lint findings now optionally include exact receiver/member documentation matches.
+Those citations never remove an error, downgrade a warning or certify an API.
+If the documentation files are absent, the lint report says citations are
+unavailable and the mandatory negative compatibility checks still run.
+
+```powershell
+python -m unittest discover -s server/tests -p test_api_reference.py -v
 ```

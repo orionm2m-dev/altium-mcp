@@ -233,3 +233,16 @@ case-insensitivity, duplicate names, file precedence/encoding, rejection before
 any native/write/dispatch access, accepted single dispatch with a checked file
 snapshot, and unchanged sandbox error handling. No Altium execution was used to
 qualify these changes; this remains a bounded linter, not a compiler.
+
+
+## 2026-10-21 — Expose curated API reference through MCP
+
+Added offline `search_altium_api(query, limit)` for interface/member/signature and
+source-title lookup. Results retain documented/unverified status, official links,
+exact observed incompatibilities, match counts and explicit missing-file errors.
+No native access or documentation-based allowlist is introduced. Lint reports
+optionally attach matching documentation without changing their verdicts; absent
+documentation does not disable negative compatibility checks. Packaging examples
+now include the reference directory. Offline tests cover lookup, limits, failure
+evidence, missing files, unchanged lint severity and real FastMCP registration and
+call transport without importing the native application server.

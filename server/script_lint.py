@@ -213,9 +213,11 @@ def lint(script, declarations=""):
     body_tokens = scan(script,"script"); body_scope.end = len(body_tokens)
     body = Analyzer(body_tokens,"script",findings,body_scope)
     body.usages(catalog,decl.helpers)
+    import api_reference
+    documentation = api_reference.annotate_findings(findings)
     return dict(success=not any(f["severity"]=="error" for f in findings),
                 status="rejected" if any(f["severity"]=="error" for f in findings) else "no_known_blockers_found",
-                findings=findings, no_new_dispatch=True, native_compilation_verified=False,
+                findings=findings, documentation=documentation, no_new_dispatch=True, native_compilation_verified=False,
                 native_api_compatibility_verified=False, catalog_version=catalog["version"],
                 inputs_sha256={"script":hashlib.sha256(script.encode()).hexdigest(),"declarations":hashlib.sha256(declarations.encode()).hexdigest()},
                 limitations=["Not a DelphiScript compiler; syntax and runtime success are not certified.",
