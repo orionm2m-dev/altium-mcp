@@ -38,9 +38,9 @@ def _button(target, hwnd):
     return row
 
 
-def _message(target, hwnd, message):
+def _message(target, hwnd, message, wparam=0, lparam=0):
     reply = target.api.c.c_size_t()
-    if not target.api.api.SendMessageTimeoutW(hwnd, message, 0, 0, 0x22, 500,
+    if not target.api.api.SendMessageTimeoutW(hwnd, message, wparam, lparam, 0x22, 500,
                                              target.api.c.byref(reply)):
         raise OSError("Checkbox message failed or timed out; no retry")
     return int(reply.value)
@@ -49,7 +49,8 @@ def _message(target, hwnd, message):
 def _checkbox(target, hwnd):
     row = _button(target, hwnd)
     row["button_type"] = win32gui.GetWindowLong(hwnd, -16) & 0xF
-    if (row["class"] not in CHECKBOX_CLASSES or row["button_type"] not in {2, 3, 5, 6}
+    custom_xp = row["class"] == "TXPCheckBox" and row["button_type"] == 0
+    if (row["class"] not in CHECKBOX_CLASSES or (row["button_type"] not in {2, 3, 5, 6} and not custom_xp)
             or _caption(row["text"]) != RIP_UP_CAPTION):
         raise ValueError("Unsupported exact Rip-up checkbox class, caption or button style")
     state = _message(target, hwnd, 0x00F0)  # BM_GETCHECK; never a state-changing message.
@@ -89,7 +90,7 @@ def control(exe, action, target_hwnd, expected_main_title, checkbox_hwnd=None, e
         "message_pair_attempted": False, "message_pair_posted": False,
         "checkbox_message_attempted": False, "checkbox_message_completed": False,
         "checkbox_state_verified": False,
-        "messages_attempted": 0, "messages_posted": 0, "planned_messages": 0,
+        "messages_attempted": 0, "messages_posted": 0, "messages_completed": 0, "planned_messages": 0,
         "document_save_requested": False, "retry_performed": False,
         "document_binding": "exact main-window title (filename only); full path is not verified"}
     target = None
@@ -129,8 +130,30 @@ def control(exe, action, target_hwnd, expected_main_title, checkbox_hwnd=None, e
                 return dict(result, success=True, no_input=True, checkbox_state_verified=True,
                     already_enabled=True, checked_after=True)
             target.verify()
-            result["checkbox_message_attempted"] = True
-            _message(target, checkbox_hwnd, 0x00F5)  # One BM_CLICK so the VCL change handler runs.
+            custom_xp = checkbox["class"] == "TXPCheckBox" and checkbox["button_type"] == 0
+            if custom_xp:
+                rect = tuple(win32gui.GetClientRect(checkbox_hwnd))
+                left, top, right, bottom = rect
+                x, y = (left+right)//2, (top+bottom)//2
+                if right <= left or bottom <= top or not 0 <= x <= 32767 or not 0 <= y <= 32767:
+                    raise ValueError("TXPCheckBox has invalid control-client bounds")
+                messages = [(0x201, 1, x | (y << 16)), (0x202, 0, x | (y << 16))]
+                result.update(control_client_rect=list(rect), control_client_point=[x,y],
+                    dispatch_method="bounded_control_client_down_up", planned_messages=2)
+                for msg, wp, lp in messages:
+                    if (_checkbox(target, checkbox_hwnd) != checkbox or _main(target, expected_main_title) != main
+                            or tuple(win32gui.GetClientRect(checkbox_hwnd)) != rect):
+                        raise ValueError("TXPCheckBox or main window changed before gesture message")
+                    target.verify()
+                    result.update(checkbox_message_attempted=True, message_pair_attempted=True)
+                    result["messages_attempted"] += 1
+                    _message(target, checkbox_hwnd, msg, wp, lp)
+                    result["messages_completed"] += 1
+                result["message_pair_completed"] = True
+            else:
+                result.update(checkbox_message_attempted=True, planned_messages=1, messages_attempted=1)
+                _message(target, checkbox_hwnd, 0x00F5)  # One BM_CLICK for a standard checkbox.
+                result["messages_completed"] = 1
             result["checkbox_message_completed"] = True
             after = _checkbox(target, checkbox_hwnd)
             if (after != dict(checkbox, checked=True) or _main(target, expected_main_title) != main):
@@ -173,7 +196,7 @@ def control(exe, action, target_hwnd, expected_main_title, checkbox_hwnd=None, e
         attempted = result["button_message_attempted"] or result["checkbox_message_attempted"]
         return dict(result, error=str(error), blocked=not attempted,
             outcome_unknown=attempted,
-            partial_dispatch=0 < result["messages_posted"] < result["planned_messages"])
+            partial_dispatch=0 < result["messages_posted"] + result["messages_completed"] < result["planned_messages"])
     finally:
         if target is not None:
             target.close()

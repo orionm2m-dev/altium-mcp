@@ -110,6 +110,19 @@ class DrcInspectTests(unittest.TestCase):
         r=self.set_limit();self.assertFalse(r["success"]);self.assertTrue(r["outcome_unknown"])
         self.assertFalse(r["limit_readback_verified"])
 
+    def test_custom_xp_style_zero_reports_unknown_and_blocks_mutation(self):
+        self.rows[12]["class"]="TXPCheckBox";self.rows[12]["style"]=0
+        r=self.call();self.assertTrue(r["success"],r)
+        checkbox=r["controls"][1]
+        self.assertIn("check_state_error",checkbox);self.assertNotIn("check_state",checkbox)
+        self.assertEqual(checkbox["raw_bm_getcheck"],1)
+        self.assertTrue(self.set_limit()["blocked"])
+        self.assertFalse(any(c.args[2]==0xC for c in control._message.call_args_list))
+    def test_standard_checkbox_indeterminate_state_is_unknown(self):
+        control._message.side_effect=lambda *args:2
+        r=self.call();self.assertIn("check_state_error",r["controls"][1])
+        self.assertTrue(self.set_limit()["blocked"])
+
     def test_native_rejection_not_retried(self):
         control._message.side_effect=lambda target,hwnd,msg,*args:0 if msg==0xC else 1
         r=self.set_limit();self.assertFalse(r["success"]);self.assertTrue(r["outcome_unknown"])

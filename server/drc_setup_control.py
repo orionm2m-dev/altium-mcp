@@ -62,11 +62,24 @@ def _controls(target):
             skipped += 1
             continue
         row = _child(target, hwnd)
-        if row["class"] in CHECKBOX_CLASSES and row["style"] & 0xF in {2, 3, 5, 6}:
-            try:
-                row["check_state"] = _message(target, hwnd, 0xF0)
-            except OSError as error:
-                row["check_state_error"] = str(error)
+        if row["class"] in CHECKBOX_CLASSES:
+            button_type = row["style"] & 0xF
+            if button_type in {2, 3, 5, 6}:
+                try:
+                    state = _message(target, hwnd, 0xF0)
+                    if state not in {0, 1}:
+                        raise ValueError("Checkbox state is indeterminate or unsupported")
+                    row.update(check_state=state, check_state_source="BM_GETCHECK")
+                except (ValueError, OSError) as error:
+                    row["check_state_error"] = str(error)
+            elif row["class"] == "TXPCheckBox":
+                try:
+                    row["raw_bm_getcheck"] = _message(target, hwnd, 0xF0)
+                except OSError as error:
+                    row["check_read_error"] = str(error)
+                row["check_state_error"] = "Custom TXPCheckBox state getter is not yet qualified for DRC; raw reply is not verified state"
+            elif row["class"] != "Button":
+                row["check_state_error"] = "Unsupported checkbox style; state is unknown"
         if row["class"] == "TXPSpinEdit" and row["visible"]:
             try:
                 row["value_text"] = _numeric_text(target, hwnd)

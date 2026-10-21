@@ -1474,7 +1474,9 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
     its check state. enable_rip_up requires its observed checkbox_hwnd and boolean
     expected_checked. A matching unchecked standard/VCL checkbox receives one
     bounded BM_CLICK and is read back; already checked is a no-input success.
-    Unsupported styles, ambiguous controls or stale expected states are refused.
+    The observed TXPCheckBox with style low bits zero uses one bounded client-center
+    down/up gesture, guarded before each message, followed by checked readback.
+    Other unsupported styles, ambiguous controls or stale expected states are refused.
     This verifies the checkbox only, not dialog acceptance or routing completion.
     """
     import situs_setup_control
