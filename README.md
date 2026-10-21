@@ -137,20 +137,35 @@ request is cancelled. Offline mocked tests do not qualify native activation:
 python -m unittest discover -s server/tests -p test_altium_focus.py -v
 ```
 
-### Inspect or address one Situs Setup button
+### Inspect or control Situs Setup
 
 `control_situs_setup(action, target_hwnd, expected_main_title)` accepts `inspect`,
-`ok`, `cancel` or `route_all`. Inspect first. The exact `TSitusSetup` dialog and
+`ok`, `cancel`, `route_all` or `enable_rip_up`. Inspect first. The exact `TSitusSetup` dialog and
 configured process stay pinned; the visible main window must have the exact
 supplied title containing the scratch `.PcbDoc` filename. This is title evidence,
 not full-path verification. Inspection lists same-process standard/VCL buttons
-and counts skipped foreign descendants such as embedded webviews.
+and counts skipped foreign descendants such as embedded webviews. It also reports
+the exact `Rip-up Violations After Routing` checkbox, including its HWND, class
+and current checked state (or a state-read error for an unsupported control).
+
+To enable only that option, pass `action="enable_rip_up"`, the observed
+`checkbox_hwnd`, and boolean `expected_checked`. A unique visible enabled
+`Button`, `TCheckBox` or `TXPCheckBox` must expose a checkbox style
+(BS_CHECKBOX, BS_AUTOCHECKBOX, BS_3STATE or BS_AUTO3STATE) and a binary check
+state; indeterminate is refused. A stale expected state refuses input. When
+already checked and expected checked, the call succeeds without input. Otherwise
+one bounded BM_CLICK invokes the checkbox change handler, followed by BM_GETCHECK
+readback. Failed delivery/readback stays uncertain and is never retried. Inspect
+again before any further action. `checkbox_state_verified` proves the UI state
+only; accepting the dialog and starting routing remain separate actions. No
+BM_SETCHECK is used because changing only the visual state may omit application
+change notifications. Native qualification of this checkbox action is required.
 
 An action requires one visible enabled button with exactly the whitelisted
 caption. `TXPBitBtn` uses one targeted `WM_LBUTTONDOWN`/`WM_LBUTTONUP` pair at the
 center of its `GetClientRect` bounds; other supported buttons use one `BM_CLICK`.
 Button, dialog, main title and bounds are rechecked before each message. No global
-mouse/keyboard, screen coordinates, checkbox/settings changes, script, fallback
+mouse/keyboard, screen coordinates, other settings changes, script, fallback
 gesture or retry is used. Attempted/posted counts and a partial-pair flag preserve
 uncertain outcomes, with `completion_verified: false`; inspect the UI again
 before concluding the dialog closed or routing began. Both bridge and OS recovery

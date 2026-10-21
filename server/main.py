@@ -1386,8 +1386,9 @@ async def _run_altium_script_locked(ctx, script, timeout_seconds, declarations, 
 
 @mcp.tool()
 async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
-                              expected_main_title: str) -> str:
-    """Inspect exact Situs Setup, or address one OK, Cancel or Route All control.
+                              expected_main_title: str, checkbox_hwnd: int | None = None,
+                              expected_checked: bool | None = None) -> str:
+    """Inspect Situs Setup, enable its Rip-up checkbox, or address one action button.
 
     Binds to the configured process, exact TSitusSetup HWND and exact main title
     containing the scratch PcbDoc filename. The title does not verify a full path.
@@ -1395,15 +1396,21 @@ async def control_situs_setup(ctx: Context, action: str, target_hwnd: int,
     standard/VCL button with the requested whitelisted caption is eligible.
     TXPBitBtn uses one targeted client-center mouse-down/up message pair; other
     supported buttons use BM_CLICK. No global mouse/keyboard, screen coordinates,
-    checkbox changes, script dispatch, fallback or retry. Each message is guarded;
-    partial posting is reported separately from unverified action completion.
+    script dispatch, fallback or retry. Each message is guarded; partial posting
+    is reported separately from unverified action completion.
+    inspect also returns the exact Rip-up Violations After Routing checkbox and
+    its check state. enable_rip_up requires its observed checkbox_hwnd and boolean
+    expected_checked. A matching unchecked standard/VCL checkbox receives one
+    bounded BM_CLICK and is read back; already checked is a no-input success.
+    Unsupported styles, ambiguous controls or stale expected states are refused.
+    This verifies the checkbox only, not dialog acceptance or routing completion.
     """
     import situs_setup_control
     async with altium_bridge._command_lock:
         try:
             with emergency_stop.emergency_claim(EXCHANGE_DIR):
                 outcome = situs_setup_control.control(altium_bridge.config.altium_exe_path,
-                    action, target_hwnd, expected_main_title)
+                    action, target_hwnd, expected_main_title, checkbox_hwnd, expected_checked)
         except OSError as error:
             outcome = {"success": False, "blocked": True, "error": str(error),
                        "button_message_attempted": False, "completion_verified": False}

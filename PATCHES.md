@@ -1,5 +1,21 @@
 # Changes
 
+## 2026-10-21 — Read and explicitly enable the Situs Rip-up checkbox
+
+Inspect reports the exact Rip-up Violations After Routing control and check state.
+The new enable_rip_up action requires its observed HWND and expected current bool,
+checks the pinned process/dialog/main and supported checkbox class/style and binary check state,
+and sends at most one bounded BM_CLICK. Already enabled is a no-input success;
+stale state, unsupported controls and ambiguity refuse input. Readback verifies
+the checkbox only, not dialog acceptance or routing. No visual-only BM_SETCHECK,
+retry, other setting change or native call was used during development. Mocked
+tests cover readback, idempotence, stale/unknown state, identity/style refusal and
+uncertain delivery. Native qualification remains separate.
+
+References: [BM_GETCHECK](https://learn.microsoft.com/en-us/windows/win32/controls/bm-getcheck),
+[BM_CLICK](https://learn.microsoft.com/en-us/windows/win32/controls/bm-click),
+[SendMessageTimeout](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw).
+
 ## 2026-10-21 — Address observed TXPBitBtn controls with one client message pair
 
 A native Situs OK BM_CLICK was queued but left the dialog open. TXPBitBtn now

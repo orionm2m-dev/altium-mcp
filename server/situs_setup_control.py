@@ -5,6 +5,8 @@ from screenshot_target import CaptureTarget
 
 BUTTON_CLASSES = {"Button", "TButton", "TBitBtn", "TXPBitBtn"}
 CAPTIONS = {"ok": "ok", "cancel": "cancel", "route_all": "route all"}
+CHECKBOX_CLASSES = {"Button", "TCheckBox", "TXPCheckBox"}
+RIP_UP_CAPTION = "rip-up violations after routing"
 
 
 def _caption(text):
@@ -36,43 +38,106 @@ def _button(target, hwnd):
     return row
 
 
+def _message(target, hwnd, message):
+    reply = target.api.c.c_size_t()
+    if not target.api.api.SendMessageTimeoutW(hwnd, message, 0, 0, 0x22, 500,
+                                             target.api.c.byref(reply)):
+        raise OSError("Checkbox message failed or timed out; no retry")
+    return int(reply.value)
+
+
+def _checkbox(target, hwnd):
+    row = _button(target, hwnd)
+    row["button_type"] = win32gui.GetWindowLong(hwnd, -16) & 0xF
+    if (row["class"] not in CHECKBOX_CLASSES or row["button_type"] not in {2, 3, 5, 6}
+            or _caption(row["text"]) != RIP_UP_CAPTION):
+        raise ValueError("Unsupported exact Rip-up checkbox class, caption or button style")
+    state = _message(target, hwnd, 0x00F0)  # BM_GETCHECK; never a state-changing message.
+    if state not in {0, 1}:
+        raise ValueError("Rip-up checkbox state is indeterminate or unsupported")
+    if (_button(target, hwnd) != {k: v for k, v in row.items() if k != "button_type"}
+            or win32gui.GetWindowLong(hwnd, -16) & 0xF != row["button_type"]):
+        raise ValueError("Checkbox changed during state read")
+    target.verify()
+    return dict(row, checked=bool(state))
+
+
 def _buttons(target):
     handles = []
     win32gui.EnumChildWindows(target.hwnd, lambda hwnd, unused: handles.append(hwnd) or True, None)
-    rows, skipped = [], 0
+    rows, skipped, checkboxes = [], 0, []
     for hwnd in handles:
         if win32process.GetWindowThreadProcessId(hwnd)[1] != target.identity["pid"]:
             skipped += 1
             continue  # Embedded webview descendants can belong to a separate process.
-        if win32gui.GetClassName(hwnd) in BUTTON_CLASSES:
+        if _caption(win32gui.GetWindowText(hwnd)) == RIP_UP_CAPTION:
+            row = _button(target, hwnd)
+            try:
+                row = _checkbox(target, hwnd)
+            except (ValueError, OSError) as error:
+                row["state_error"] = str(error)
+            checkboxes.append(row)
+        elif win32gui.GetClassName(hwnd) in BUTTON_CLASSES:
             rows.append(_button(target, hwnd))
     target.verify()
-    return rows, skipped
+    return rows, skipped, checkboxes
 
 
-def control(exe, action, target_hwnd, expected_main_title):
+def control(exe, action, target_hwnd, expected_main_title, checkbox_hwnd=None, expected_checked=None):
     result = {"success": False, "action": action, "button_message_attempted": False,
         "button_message_posted": False, "completion_verified": False, "script_dispatched": False,
         "message_pair_attempted": False, "message_pair_posted": False,
+        "checkbox_message_attempted": False, "checkbox_message_completed": False,
+        "checkbox_state_verified": False,
         "messages_attempted": 0, "messages_posted": 0, "planned_messages": 0,
         "document_save_requested": False, "retry_performed": False,
         "document_binding": "exact main-window title (filename only); full path is not verified"}
     target = None
     try:
-        if action not in {"inspect", *CAPTIONS}:
-            raise ValueError("action must be inspect, ok, cancel or route_all")
+        if action not in {"inspect", "enable_rip_up", *CAPTIONS}:
+            raise ValueError("action must be inspect, enable_rip_up, ok, cancel or route_all")
+        if action == "enable_rip_up":
+            if type(expected_checked) is not bool or type(checkbox_hwnd) is not int or checkbox_hwnd <= 0:
+                raise ValueError("enable_rip_up requires observed checkbox_hwnd and boolean expected_checked")
+        elif checkbox_hwnd is not None or expected_checked is not None:
+            raise ValueError("Checkbox arguments are only valid with enable_rip_up")
         if (not isinstance(expected_main_title, str) or not expected_main_title.strip()
                 or ".pcbdoc" not in expected_main_title.casefold()):
             raise ValueError("Expected exact main-window title containing the scratch PcbDoc filename")
         target = CaptureTarget(exe, target_hwnd)
         main = _main(target, expected_main_title)
-        buttons, skipped = _buttons(target)
+        buttons, skipped, checkboxes = _buttons(target)
         result.update(identity=target.identity, dialog=target.window, main_window=main,
-            buttons=buttons, foreign_descendants_skipped=skipped)
+            buttons=buttons, checkboxes=checkboxes, foreign_descendants_skipped=skipped)
         if _main(target, expected_main_title) != main:
             raise ValueError("Main-window state changed during inspection")
         if action == "inspect":
             return dict(result, success=True, no_input=True)
+        if action == "enable_rip_up":
+            if (len(checkboxes) != 1 or checkboxes[0]["hwnd"] != checkbox_hwnd
+                    or not checkboxes[0]["visible"] or not checkboxes[0]["enabled"]
+                    or "state_error" in checkboxes[0]):
+                raise ValueError("One supported visible enabled Rip-up checkbox at the observed HWND is required")
+            checkbox = checkboxes[0]
+            if (_checkbox(target, checkbox_hwnd) != checkbox
+                    or _main(target, expected_main_title) != main):
+                raise ValueError("Checkbox or main window changed before enable request")
+            result.update(checkbox=checkbox, desired_checked=True, expected_checked=expected_checked)
+            if checkbox["checked"] != expected_checked:
+                raise ValueError("Rip-up checkbox differs from expected current state; no input")
+            if checkbox["checked"]:
+                return dict(result, success=True, no_input=True, checkbox_state_verified=True,
+                    already_enabled=True, checked_after=True)
+            target.verify()
+            result["checkbox_message_attempted"] = True
+            _message(target, checkbox_hwnd, 0x00F5)  # One BM_CLICK so the VCL change handler runs.
+            result["checkbox_message_completed"] = True
+            after = _checkbox(target, checkbox_hwnd)
+            if (after != dict(checkbox, checked=True) or _main(target, expected_main_title) != main):
+                raise ValueError("Rip-up enabled state could not be verified after the single click")
+            target.verify()
+            return dict(result, success=True, checkbox_state_verified=True, checked_after=True,
+                outcome="Rip-up checkbox reads checked; dialog acceptance and routing are separate actions")
         selected = [row for row in buttons if row["class"] in BUTTON_CLASSES
             and _caption(row["text"]) == CAPTIONS[action] and row["visible"] and row["enabled"]]
         if len(selected) != 1:
@@ -105,8 +170,9 @@ def control(exe, action, target_hwnd, expected_main_title):
             partial_dispatch=False,
             outcome="control message(s) posted; inspect subsequent UI to establish completion")
     except Exception as error:
-        return dict(result, error=str(error), blocked=not result["button_message_attempted"],
-            outcome_unknown=result["button_message_attempted"],
+        attempted = result["button_message_attempted"] or result["checkbox_message_attempted"]
+        return dict(result, error=str(error), blocked=not attempted,
+            outcome_unknown=attempted,
             partial_dispatch=0 < result["messages_posted"] < result["planned_messages"])
     finally:
         if target is not None:
