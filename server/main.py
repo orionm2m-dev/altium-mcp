@@ -1783,6 +1783,38 @@ async def resume_completed_stop(ctx: Context, target_pid: int, recovery_token: s
 
 
 @mcp.tool()
+async def close_altium_normally(ctx: Context, pcb_path: str, target_pid: int,
+        expected_creation_filetime: str, operation_id: str = "",
+        timeout_seconds: int = 15) -> str:
+    """Request ordinary exit only after a fresh complete clean native inventory.
+
+    Requires the exact current PCB, one configured process, and an exact
+    ft:<decimal FILETIME> creation token. Reads every loaded document's native
+    Modified flag through a dedicated fixed script; any modified, incomplete,
+    stale, or mismatched result refuses exit. The normal native Exit command is
+    sent at most once. No save, prompt answer, force termination, or restart.
+
+    Success requires the exact pinned main process and launcher to exit with
+    zero codes. A dialog, timeout, cancellation, or changed identity remains
+    blocked/unknown with no retry. Reused 32-hex operation IDs return historical
+    evidence only. No caller-provided inventory or executable is accepted.
+    """
+    import altium_orderly_close
+    import situs_native_settings_service
+    try:
+        created = situs_native_settings_service.normalize_public_filetime(expected_creation_filetime)
+    except (TypeError, ValueError) as error:
+        return json.dumps({"success": False, "dispatch_attempted": False,
+                           "force_termination_requested": False,
+                           "error": str(error), "retry_allowed": False})
+    outcome = await altium_orderly_close.close(
+        altium_bridge.config.altium_exe_path, EXCHANGE_DIR, altium_bridge._command_lock,
+        pcb_path=pcb_path, target_pid=target_pid, expected_creation_filetime=created,
+        operation_id=operation_id, timeout_seconds=timeout_seconds)
+    return json.dumps(outcome)
+
+
+@mcp.tool()
 async def start_altium(ctx: Context) -> str:
     """Explicit normal cold start of the configured executable only.
 
