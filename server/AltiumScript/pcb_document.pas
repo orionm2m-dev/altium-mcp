@@ -1466,6 +1466,7 @@ begin
     Result := nil;
     if Kind = 'BoardOutlineClearance' then Result := PCBServer.PCBRuleFactory(eRule_BoardOutlineClearance)
     else if Kind = 'Clearance' then Result := PCBServer.PCBRuleFactory(eRule_Clearance)
+    else if Kind = 'PolygonConnect' then Result := PCBServer.PCBRuleFactory(eRule_PolygonConnectStyle)
     else if Kind = 'Width' then Result := PCBServer.PCBRuleFactory(eRule_MaxMinWidth)
     else if Kind = 'RoutingViaStyle' then Result := PCBServer.PCBRuleFactory(eRule_RoutingViaStyle)
     else if Kind = 'HoleSize' then Result := PCBServer.PCBRuleFactory(eRule_MaxMinHoleSize)
@@ -1487,6 +1488,7 @@ begin
     Result := '';
     if Rule.RuleKind = eRule_BoardOutlineClearance then Result := 'BoardOutlineClearance'
     else if Rule.RuleKind = eRule_Clearance then Result := 'Clearance'
+    else if Rule.RuleKind = eRule_PolygonConnectStyle then Result := 'PolygonConnect'
     else if Rule.RuleKind = eRule_MaxMinWidth then Result := 'Width'
     else if Rule.RuleKind = eRule_RoutingViaStyle then Result := 'RoutingViaStyle'
     else if Rule.RuleKind = eRule_MaxMinHoleSize then Result := 'HoleSize'
@@ -1499,6 +1501,129 @@ begin
     else if Rule.RuleKind = eRule_MaxMinHeight then Result := 'Height'
     else if Rule.RuleKind = eRule_SolderMaskExpansion then Result := 'SolderMaskExpansion'
     else if Rule.RuleKind = eRule_PasteMaskExpansion then Result := 'PasteMaskExpansion';
+end;
+
+// Documented IPCB_PolygonConnectStyleRule.ConnectStyle / TPlaneConnectStyle.
+// A scoped exception changes only this enum; existing relief dimensions stay intact.
+function PolygonRuleStyle(Rule: IPCB_Rule): String;
+begin
+    Result := '';
+    if Rule.RuleKind <> eRule_PolygonConnectStyle then Exit;
+    if Rule.ConnectStyle = eDirectConnectToPlane then Result := 'direct'
+    else if Rule.ConnectStyle = eReliefConnectToPlane then Result := 'relief'
+    else if Rule.ConnectStyle = eNoConnect then Result := 'none';
+end;
+
+function PolygonRuleRequestedStyle(Values: String): String;
+begin
+    Result := '';
+    if Values = 'connect_style=direct' then Result := 'direct';
+    if Values = 'connect_style=relief' then Result := 'relief';
+    if Values = 'connect_style=none' then Result := 'none';
+end;
+
+function PolygonRuleBatch(Spec: TStringList): Boolean;
+var i: Integer;
+begin
+    Result := False;
+    for i := 0 to Spec.Count - 1 do
+        if (GetFieldFromPipeString(Spec[i], 2) = 'PolygonConnect') or
+           (Pos('connect_style=', GetFieldFromPipeString(Spec[i], 8)) > 0) then Result := True;
+end;
+
+function PolygonRuleBoardGuard(PcbPath: String; Board: IPCB_Board): String;
+var Doc: IServerDocument; Current: IPCB_Board; Module: IDispatch;
+begin
+    Result := 'exact requested PCB must be loaded, active and idle';
+    if PCBServer = nil then Exit;
+    if (Board = nil) or (Client.CurrentView = nil) then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(Doc.Kind, 'PCB') then Exit;
+    if not SameText(Doc.FileName, PcbPath) then Exit;
+    if not SameText(Board.FileName, PcbPath) then Exit;
+    Current := PCBServer.GetCurrentPCBBoard;
+    if Current = nil then Exit;
+    if Current.I_ObjectAddress <> Board.I_ObjectAddress then Exit;
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then Exit;
+    Result := '';
+end;
+
+function PolygonRulePreflight(Board: IPCB_Board; Spec: TStringList): String;
+var i, j, Priority: Integer; Rec, Name, Values, Kind, Field: String;
+    Rule: IPCB_Rule; Iter: IPCB_BoardIterator; Names, Priorities: TStringList;
+begin
+    Result := '';
+    Names := TStringList.Create;
+    Priorities := TStringList.Create;
+    try
+        // Compute final priorities, including unchanged polygon rules. Do not
+        // silently renumber the generic thermal rule when adding an exception.
+        Iter := Board.BoardIterator_Create;
+        try
+            Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+            Iter.AddFilter_Method(eProcessAll);
+            Rule := Iter.FirstPCBObject;
+            while Rule <> nil do
+            begin
+                if Rule.RuleKind = eRule_PolygonConnectStyle then
+                begin Names.Add(Rule.Name); Priorities.Add(IntToStr(Rule.Priority)); end;
+                Rule := Iter.NextPCBObject;
+            end;
+        finally
+            Board.BoardIterator_Destroy(Iter);
+        end;
+        for i := 0 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i];
+            if GetFieldFromPipeString(Rec, 0) = 'DELETE' then
+            begin Result := 'PolygonConnect batch cannot mix deletion'; Exit; end;
+            if GetFieldFromPipeString(Rec, 0) = 'RULE' then
+            begin
+                Name := GetFieldFromPipeString(Rec, 1);
+                Kind := GetFieldFromPipeString(Rec, 2);
+                Values := GetFieldFromPipeString(Rec, 8);
+                if Kind <> 'PolygonConnect' then
+                begin Result := 'PolygonConnect batch must contain only explicit PolygonConnect rules'; Exit; end;
+                if Trim(Name) = '' then begin Result := 'empty PolygonConnect name'; Exit; end;
+                for j := 0 to i - 1 do
+                    if SameText(GetFieldFromPipeString(Spec[j], 1), Name) then
+                    begin Result := 'duplicate PolygonConnect rule name'; Exit; end;
+                if (Values <> '') and (PolygonRuleRequestedStyle(Values) = '') then
+                begin Result := 'unsupported PolygonConnect value'; Exit; end;
+                Rule := FindRuleByName(Board, Name);
+                if Rule <> nil then
+                begin
+                    if Rule.RuleKind <> eRule_PolygonConnectStyle then
+                    begin Result := 'existing rule kind mismatch'; Exit; end;
+                end
+                else
+                begin
+                    if Values = '' then begin Result := 'new PolygonConnect requires connect_style'; Exit; end;
+                    if GetFieldFromPipeString(Rec, 5) = '' then
+                    begin Result := 'new PolygonConnect requires explicit priority'; Exit; end;
+                    Names.Add(Name); Priorities.Add('0');
+                end;
+                Field := GetFieldFromPipeString(Rec, 5);
+                if Field <> '' then
+                begin
+                    Priority := StrToInt(Field);
+                    if Priority < 1 then begin Result := 'PolygonConnect priority must be positive'; Exit; end;
+                    j := Names.IndexOf(Name);
+                    Priorities[j] := IntToStr(Priority);
+                end;
+            end;
+        end;
+        for i := 0 to Priorities.Count - 1 do
+            for j := i + 1 to Priorities.Count - 1 do
+                if Priorities[i] = Priorities[j] then
+                begin Result := 'PolygonConnect final priorities conflict'; Exit; end;
+    finally
+        Names.Free;
+        Priorities.Free;
+    end;
 end;
 
 // Set the numbers of a rule from 'key=value;key=value' (mm) the way its kind
@@ -1530,9 +1655,18 @@ begin
         begin
             Key := LowerCase(Trim(Copy(Item, 1, q - 1)));
             Val := Trim(Copy(Item, q + 1, Length(Item)));
-            V := MMsToCoord(SafeStrToFloat(Val));
+            V := 0;
+            if Key <> 'connect_style' then V := MMsToCoord(SafeStrToFloat(Val));
             Known := True;
-            if Kind = 'Width' then
+            if Kind = 'PolygonConnect' then
+            begin
+                if Key <> 'connect_style' then Known := False
+                else if Val = 'direct' then Rule.ConnectStyle := eDirectConnectToPlane
+                else if Val = 'relief' then Rule.ConnectStyle := eReliefConnectToPlane
+                else if Val = 'none' then Rule.ConnectStyle := eNoConnect
+                else Known := False;
+            end
+            else if Kind = 'Width' then
             begin
                 if Key = 'min' then Rule.MinLimit := V
                 else if Key = 'max' then Rule.MaxLimit := V
@@ -1636,10 +1770,11 @@ end;
 function SetPcbRulesReport(SpecPath: String): String;
 var
     Spec, Items : TStringList;
-    PcbPath, Key, Rec, Name, Kind, Field, Action, Unknown : String;
+    PcbPath, Key, Rec, Name, Kind, Field, Action, Unknown, Error, ExpectedStyle : String;
     Board   : IPCB_Board;
     Rule    : IPCB_Rule;
     i, Created, Updated, Deleted : Integer;
+    PolygonBatch, Verified : Boolean;
 begin
     if not FileExists(SpecPath) then
     begin
@@ -1657,13 +1792,24 @@ begin
     try
         for i := 0 to Spec.Count - 1 do
             if GetFieldFromPipeString(Spec[i], 0) = 'PCB' then PcbPath := GetFieldFromPipeString(Spec[i], 1);
-        Board := OpenBoardAtPath(PcbPath);
+        PolygonBatch := PolygonRuleBatch(Spec);
+        if PolygonBatch then
+        begin
+            Board := nil;
+            if PCBServer <> nil then Board := PCBServer.GetPCBBoardByPath(PcbPath);
+            Error := PolygonRuleBoardGuard(PcbPath, Board);
+            if Error = '' then Error := PolygonRulePreflight(Board, Spec);
+            if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        end
+        else Board := OpenBoardAtPath(PcbPath);
         if Board = nil then
         begin
             Result := PcbDocError('PCB document not found or cannot be opened: ' + PcbPath);
             Exit;
         end;
+        Verified := True;
         PCBServer.PreProcess;
+        try
         for i := 0 to Spec.Count - 1 do
         begin
             Rec := Spec[i];
@@ -1688,7 +1834,11 @@ begin
                 if Rule = nil then
                 begin
                     Rule := NewRuleOfKind(Kind);
-                    if Rule = nil then PcbDocWarn('rule ' + Name + ': unknown kind "' + Kind + '"')
+                    if Rule = nil then
+                    begin
+                        PcbDocWarn('rule ' + Name + ': unknown kind "' + Kind + '"');
+                        if PolygonBatch then Verified := False;
+                    end
                     else
                     begin
                         Rule.Name := Name;
@@ -1706,6 +1856,7 @@ begin
                 end;
                 if Rule <> nil then
                 begin
+                    try
                     Field := GetFieldFromPipeString(Rec, 3);
                     if Field <> '' then Rule.Scope1Expression := Field;
                     Field := GetFieldFromPipeString(Rec, 4);
@@ -1722,24 +1873,61 @@ begin
                         // are re-sorted below
                         Rule.SetState_Priority(StrToInt(Field));
                     end;
-                    if Action = 'updated' then
-                        PCBServer.SendMessageToRobots(Rule.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                    finally
+                        if Action = 'updated' then
+                            PCBServer.SendMessageToRobots(Rule.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                    end;
+                    if PolygonBatch then
+                    begin
+                        ExpectedStyle := PolygonRuleRequestedStyle(GetFieldFromPipeString(Rec, 8));
+                        if (ExpectedStyle <> '') and (PolygonRuleStyle(Rule) <> ExpectedStyle) then Verified := False;
+                        if Unknown <> '' then Verified := False;
+                        Field := GetFieldFromPipeString(Rec, 3);
+                        if (Field <> '') and (Rule.Scope1Expression <> Field) then Verified := False;
+                        Field := GetFieldFromPipeString(Rec, 4);
+                        if (Field <> '') and (Rule.Scope2Expression <> Field) then Verified := False;
+                        Field := GetFieldFromPipeString(Rec, 6);
+                        if (Field <> '') and (Rule.DRCEnabled <> (LowerCase(Field) = 'true')) then Verified := False;
+                    end;
                     if Unknown <> '' then PcbDocWarn('rule ' + Name + ' (' + Kind + '): keys not used: ' + Unknown);
                     Items.Add('{"name": ' + JSONStr(Rule.Name) + ', "kind": ' + JSONStr(Kind) +
                               ', "action": ' + JSONStr(Action) + ', "descriptor": ' + JSONStr(Rule.Descriptor) +
                               ', "scope1": ' + JSONStr(Rule.Scope1Expression) +
                               ', "scope2": ' + JSONStr(Rule.Scope2Expression) +
                               ', "priority": ' + IntToStr(Rule.Priority) +
-                              ', "enabled": ' + JSONBool(Rule.DRCEnabled) + '}');
+                              ', "enabled": ' + JSONBool(Rule.DRCEnabled) +
+                              ', "connect_style": ' + JSONStr(PolygonRuleStyle(Rule)) + '}');
                 end;
             end;
         end;
         // the priorities set above take effect once the rules are re-sorted
         Board.SortRulesByPriority;
-        PCBServer.PostProcess;
+        finally
+            PCBServer.PostProcess;
+        end;
+        if PolygonBatch then
+        begin
+            // Re-read priorities after SortRulesByPriority, before saving.
+            Error := PolygonRuleBoardGuard(PcbPath, Board);
+            for i := 0 to Spec.Count - 1 do
+                if GetFieldFromPipeString(Spec[i], 0) = 'RULE' then
+                begin
+                    Rule := FindRuleByName(Board, GetFieldFromPipeString(Spec[i], 1));
+                    if Rule = nil then Verified := False
+                    else
+                    begin
+                        Field := GetFieldFromPipeString(Spec[i], 5);
+                        if (Field <> '') and (Rule.Priority <> StrToInt(Field)) then Verified := False;
+                    end;
+                end;
+            if (Error <> '') or not Verified then
+            begin Result := PcbDocError('PolygonConnect readback failed; unsaved state may have changed; do not replay'); Exit; end;
+        end;
         Board.GraphicallyInvalidate;
-        SaveBoardDocument(PcbPath);
+        if not SaveBoardDocument(PcbPath) then
+        begin Result := PcbDocError('rule save failed; unsaved state may have changed; do not replay'); Exit; end;
         Result := '{"success": true, "path": ' + JSONStr(PcbPath) +
+                  ', "saved": true, "polygon_style_verified": ' + JSONBool(PolygonBatch) +
                   ', "created": ' + IntToStr(Created) + ', "updated": ' + IntToStr(Updated) +
                   ', "deleted": ' + IntToStr(Deleted) +
                   ', ' + BuildJSONArray(Items, 'rules') +

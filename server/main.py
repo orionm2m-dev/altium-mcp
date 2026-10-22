@@ -2980,6 +2980,24 @@ def _spec_number(value, name: str) -> str:
         raise ValueError(f"{name} must be a number, got {value!r}")
 
 
+def _rule_values_spec(kind: str, values: dict) -> str:
+    """Preserve legacy numeric rules; PolygonConnect has one explicit enum."""
+    if not isinstance(values, dict):
+        raise ValueError("values must be an object")
+    if kind == "PolygonConnect":
+        if set(values) - {"connect_style"}:
+            raise ValueError("PolygonConnect only supports connect_style; thermal dimensions remain unchanged")
+        if "connect_style" not in values:
+            return ""
+        style = values["connect_style"]
+        if not isinstance(style, str) or style not in {"direct", "relief", "none"}:
+            raise ValueError("connect_style must be direct, relief or none")
+        return "connect_style=" + style
+    if "connect_style" in values:
+        raise ValueError("connect_style requires explicit kind PolygonConnect")
+    return ";".join(f"{k}={_spec_number(v, k)}" for k, v in values.items())
+
+
 PCB_STACK_SPEC = EXCHANGE_DIR / "pcb_stack_spec.txt"
 PCB_OUTLINE_SPEC = EXCHANGE_DIR / "pcb_outline_spec.txt"
 PCB_RULES_SPEC = EXCHANGE_DIR / "pcb_rules_spec.txt"
@@ -3245,7 +3263,9 @@ async def run_pcb_drc(ctx: Context, pcb_path: str, run: bool = True, timeout_s: 
 @mcp.tool()
 async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
     """
-    Create, update or delete design rules of a board and save it. A rule is
+    Create, update or delete design rules of a board and save it. PolygonConnect
+    requests require the exact PCB already active and idle; they do not open it.
+    A rule is
     found by its name; one that does not exist yet is created of the kind
     given. Scopes, comment and the enabled flag change only when given.
 
@@ -3258,7 +3278,7 @@ async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
                 MinimumSolderMaskSliver, HoleToHoleClearance,
                 SilkToSolderMaskClearance, SilkToSilkClearance,
                 ComponentClearance, Height, SolderMaskExpansion or
-                PasteMaskExpansion;
+                PasteMaskExpansion or PolygonConnect;
             scope1, scope2 (str): query expressions such as All,
                 InNet('GND'), OnLayer('Top Layer'), IsPad;
             values (dict): the rule numbers in mm - gap (the clearance
@@ -3267,7 +3287,10 @@ async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
                 MinimumAnnularRing min), hole_min / hole_max /
                 hole_preferred and pad_min / pad_max / pad_preferred
                 (RoutingViaStyle), vertical_gap (ComponentClearance),
-                expansion (the mask expansion kinds);
+                expansion (the mask expansion kinds). PolygonConnect accepts only
+                connect_style: direct, relief or none; omitted thermal fields
+                remain unchanged. New PolygonConnect rules require explicit
+                positive priority; scopes are ordinary rule queries;
             priority (int): set as given - the other rules of the kind are
                 not renumbered, so keep the numbers distinct;
             enabled (bool), comment (str): optional;
@@ -3279,6 +3302,21 @@ async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
              warnings (unknown kinds, keys a kind has no use for).
     """
     logger.info(f"set_pcb_rules {pcb_path}: {len(rules or [])} rules")
+    polygon_batch = any(isinstance(r, dict) and r.get("kind") == "PolygonConnect" for r in rules or [])
+    if polygon_batch:
+        from pathlib import PureWindowsPath
+        if (not isinstance(pcb_path, str) or any(c in pcb_path for c in "|\r\n\x00")
+                or not PureWindowsPath(pcb_path).is_absolute()
+                or PureWindowsPath(pcb_path).suffix.lower() != ".pcbdoc"):
+            return json.dumps({"success": False, "error": "PolygonConnect requires an absolute Windows PcbDoc path"})
+        names = set()
+        for r in rules:
+            if not isinstance(r, dict) or r.get("kind") != "PolygonConnect" or r.get("delete"):
+                return json.dumps({"success": False, "error": "PolygonConnect batch requires only explicit PolygonConnect rules without delete"})
+            name = r.get("name")
+            if not isinstance(name, str) or name.casefold() in names:
+                return json.dumps({"success": False, "error": "PolygonConnect requires unique text names"})
+            names.add(name.casefold())
     lines = [f"PCB|{pcb_path}"]
     for r in rules or []:
         name = _spec_field(r.get("name", "")).strip()
@@ -3288,7 +3326,16 @@ async def set_pcb_rules(ctx: Context, pcb_path: str, rules: list) -> str:
             lines.append(f"DELETE|{name}")
             continue
         try:
-            values = ";".join(f"{k}={_spec_number(v, k)}" for k, v in (r.get("values") or {}).items())
+            if r.get("kind") == "PolygonConnect":
+                for field in ("name", "scope1", "scope2", "comment"):
+                    value = r.get(field, "")
+                    if not isinstance(value, str) or any(c in value for c in "|\r\n\x00"):
+                        raise ValueError(f"{field} must be text without spec delimiters")
+                if r.get("priority") is not None and (type(r["priority"]) is not int or r["priority"] < 1):
+                    raise ValueError("priority must be a positive integer")
+                if r.get("enabled") is not None and type(r["enabled"]) is not bool:
+                    raise ValueError("enabled must be Boolean")
+            values = _rule_values_spec(r.get("kind", ""), r.get("values") or {})
         except ValueError as e:
             return json.dumps({"success": False, "error": f"rule {name}: {e}"})
         priority = "" if r.get("priority") is None else str(int(r["priority"]))
