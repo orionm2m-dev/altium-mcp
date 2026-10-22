@@ -145,7 +145,7 @@ lists the real region enum `eRegionKind_Cutout`; the guessed identifier
 they do not replace local mutation/pour/save qualification.
 
 `set_pcb_rules` now has a narrow `PolygonConnect` ConnectStyle setter (offline validated; native qualification pending on 2026-10-22). See `docs/situs-reference/polygon-connect-style-contract.md`. Thermal dimension setters are still unavailable.
-This tool intentionally does not add a partially qualified rule setter. For
-local copper exclusion, use polygon cutouts and route an intentional stub to
-copper outside the void. If thermal/no-connect/direct rule control is needed,
-add it as a separately validated rule capability before use.
+Polygon creation and rule mutation remain separate tools. Qualify the new scoped
+style setter before use; its offline success does not replace native proof of
+effective via/pad connection after repour. Polygon cutouts represent physical
+copper exclusions, not an alternative to missing connection-rule controls.
