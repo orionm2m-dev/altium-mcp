@@ -149,3 +149,19 @@ Polygon creation and rule mutation remain separate tools. Qualify the new scoped
 style setter before use; its offline success does not replace native proof of
 effective via/pad connection after repour. Polygon cutouts represent physical
 copper exclusions, not an alternative to missing connection-rule controls.
+
+## Contour parsing and bounded caller wait (2026-10-22)
+
+A 38-object dry-run (two 720-vertex polygons plus 36 cutouts) completed natively
+in 643.647 seconds after the caller's 180-second timeout. No PCB was saved.
+The coordinate parser repeatedly scanned every long pipe-delimited record from
+its beginning. The polygon hot loops now split each record once into a local
+TStringList, preserving exact strings and the existing SafeStrToFloat/MMsToCoord
+conversion. Vertex count, contour, options, closure and readback stay unchanged.
+Offline equivalence/guard tests pass; native speed and current geometry acceptance
+must be measured separately.
+
+`set_pcb_polygons(timeout_s=180)` now accepts an integer from 1 to 3600. This
+limits the caller's wait, not Altium's operation. On timeout, inspect the trace
+and reconcile the late response and saved state before any further dispatch;
+there is no automatic retry. A caller can wait 900 seconds for a large batch.

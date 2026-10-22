@@ -1112,20 +1112,49 @@ begin
     end;
 end;
 
-function PourRequestKey(Board: IPCB_Board; Rec: String): String;
-var i, N: Integer;
+// One linear split per contour operation. Repeated GetFieldFromPipeString
+// inside vertex loops rescanned long records quadratically in DelphiScript.
+// Preserve empty/trailing fields and exact strings; conversion stays unchanged.
+procedure SplitPourFields(Rec: String; Fields: TStringList);
+var i, Start: Integer;
 begin
+    Fields.Clear;
+    Start := 1;
+    for i := 1 to Length(Rec) do
+        if Rec[i] = '|' then
+        begin
+            Fields.Add(Copy(Rec, Start, i - Start));
+            Start := i + 1;
+        end;
+    Fields.Add(Copy(Rec, Start, Length(Rec) - Start + 1));
+end;
+
+function PourFieldCoord(Fields: TStringList; Index: Integer): TCoord;
+var Field: String;
+begin
+    Field := '';
+    if (Index >= 0) and (Index < Fields.Count) then Field := Fields[Index];
+    Result := MMsToCoord(SafeStrToFloat(Field));
+end;
+
+function PourRequestKey(Board: IPCB_Board; Rec: String): String;
+var i, N: Integer; Fields: TStringList;
+begin
+    Fields := TStringList.Create;
+    try
+    SplitPourFields(Rec, Fields);
     Result := IntToStr(PrimitiveLayer(GetFieldFromPipeString(Rec, 4))) + '|' +
         JSONBool(GetFieldFromPipeString(Rec, 5) = '1');
     if GetFieldFromPipeString(Rec, 0) = 'POLYGON' then
         Result := Result + '|' + IntToStr(eSignalLayerPolygon) + '|' + IntToStr(ePolySolid) +
             '|' + IntToStr(ePolygonPourOver_SameNet) + '|' + JSONBool(GetFieldFromPipeString(Rec, 6) = '1') +
-            '|false|true|' + IntToStr(PrimitiveCoord(Rec, 7)) + '|' + IntToStr(PrimitiveCoord(Rec, 8));
+            '|false|true|' + IntToStr(PourFieldCoord(Fields, 7)) + '|' + IntToStr(PourFieldCoord(Fields, 8));
     N := StrToInt(GetFieldFromPipeString(Rec, 10));
     for i := 0 to N - 1 do
         Result := Result + '|' + IntToStr(ePolySegmentLine) + ',' +
-            IntToStr(Board.XOrigin + PrimitiveCoord(Rec, 11 + i * 2)) + ',' +
-            IntToStr(Board.YOrigin + PrimitiveCoord(Rec, 12 + i * 2));
+            IntToStr(Board.XOrigin + PourFieldCoord(Fields, 11 + i * 2)) + ',' +
+            IntToStr(Board.YOrigin + PourFieldCoord(Fields, 12 + i * 2));
+    finally Fields.Free; end;
 end;
 
 function PourCopperRegionCount(Poly: IPCB_Polygon): Integer;
@@ -1222,8 +1251,11 @@ begin
 end;
 
 procedure ApplyPourGeometry(Board: IPCB_Board; P: IPCB_Primitive; Rec: String);
-var Poly: IPCB_Polygon; Reg: IPCB_Region; Seg: TPolySegment; i, N, Count: Integer;
+var Poly: IPCB_Polygon; Reg: IPCB_Region; Seg: TPolySegment; i, N, Count: Integer; Fields: TStringList;
 begin
+    Fields := TStringList.Create;
+    try
+    SplitPourFields(Rec, Fields);
     N := StrToInt(GetFieldFromPipeString(Rec, 10));
     P.Layer := PrimitiveLayer(GetFieldFromPipeString(Rec, 4));
     P.IsKeepout := False;
@@ -1238,8 +1270,8 @@ begin
         Poly.RemoveDead := GetFieldFromPipeString(Rec, 6) = '1';
         Poly.RemoveIslandsByArea := False;
         Poly.RemoveNarrowNecks := True;
-        Poly.NeckWidthThreshold := PrimitiveCoord(Rec, 7);
-        Poly.ArcApproximation := PrimitiveCoord(Rec, 8);
+        Poly.NeckWidthThreshold := PourFieldCoord(Fields, 7);
+        Poly.ArcApproximation := PourFieldCoord(Fields, 8);
         Poly.PointCount := N;
     end else begin
         Reg := P;
@@ -1251,8 +1283,8 @@ begin
     for i := 0 to N - 1 do begin
         Seg := TPolySegment;
         Seg.Kind := ePolySegmentLine;
-        Seg.vx := Board.XOrigin + PrimitiveCoord(Rec, 11 + i * 2);
-        Seg.vy := Board.YOrigin + PrimitiveCoord(Rec, 12 + i * 2);
+        Seg.vx := Board.XOrigin + PourFieldCoord(Fields, 11 + i * 2);
+        Seg.vy := Board.YOrigin + PourFieldCoord(Fields, 12 + i * 2);
         if P.ObjectId = ePolyObject then Poly.Segments[i] := Seg else Reg.ShapeSegments[i] := Seg;
     end;
     if P.ObjectId = ePolyObject then begin
@@ -1262,11 +1294,12 @@ begin
         Seg := Poly.Segments[0];
         Poly.Segments[N] := Seg;
     end else Reg.UpdateContourFromShape(True);
+    finally Fields.Free; end;
 end;
 
 function SetPcbPolygonsReport(SpecPath: String): String;
 var
-    Spec, Names, Keys, Actions, Items, Trace: TStringList;
+    Spec, Names, Keys, Actions, Items, Trace, Fields: TStringList;
     Board: IPCB_Board;
     Net: IPCB_Net;
     P: IPCB_Primitive;
@@ -1279,6 +1312,7 @@ begin
     if not FileExists(SpecPath) then begin Result := PcbDocError('polygon spec does not exist'); Exit; end;
     Spec := TStringList.Create; Names := TStringList.Create; Keys := TStringList.Create;
     Actions := TStringList.Create; Items := TStringList.Create; Trace := TStringList.Create;
+    Fields := TStringList.Create;
     TracePath := ChangeFileExt(SpecPath, '.trace.txt');
     try
         KeepoutTrace(Trace, TracePath, 'load_spec', 0, '');
@@ -1297,6 +1331,7 @@ begin
             Rec := Spec[i]; Kind := GetFieldFromPipeString(Rec, 0);
             Action := GetFieldFromPipeString(Rec, 1); Name := GetFieldFromPipeString(Rec, 2);
             KeepoutTrace(Trace, TracePath, 'preflight', i, Name);
+            SplitPourFields(Rec, Fields);
             if (Kind <> 'POLYGON') and (Kind <> 'CUTOUT') then Error := 'invalid pour record kind';
             if (Action <> 'create') and (Action <> 'update') and (Action <> 'upsert') and
                (Action <> 'delete') and (Action <> 'repour') then Error := 'invalid pour operation';
@@ -1313,10 +1348,10 @@ begin
             if (Action <> 'delete') and (Action <> 'repour') then begin
                 N := StrToInt(GetFieldFromPipeString(Rec, 10));
                 if (N < 3) or (N > 4096) then Error := 'unsupported contour count';
-                if (PrimitiveCoord(Rec, 7) <= 0) or (PrimitiveCoord(Rec, 8) <= 0) then Error := 'neck/arc dimension rounds to zero';
+                if (PourFieldCoord(Fields, 7) <= 0) or (PourFieldCoord(Fields, 8) <= 0) then Error := 'neck/arc dimension rounds to zero';
                 for j := 0 to N - 1 do
-                    if (PrimitiveCoord(Rec, 11+j*2) = PrimitiveCoord(Rec, 11+((j+1) mod N)*2)) and
-                       (PrimitiveCoord(Rec, 12+j*2) = PrimitiveCoord(Rec, 12+((j+1) mod N)*2)) then Error := 'edge collapses in native coordinates';
+                    if (PourFieldCoord(Fields, 11+j*2) = PourFieldCoord(Fields, 11+((j+1) mod N)*2)) and
+                       (PourFieldCoord(Fields, 12+j*2) = PourFieldCoord(Fields, 12+((j+1) mod N)*2)) then Error := 'edge collapses in native coordinates';
             end;
             if Error <> '' then Break;
             P := FindPourObject(Board, Name, Count);
@@ -1441,5 +1476,5 @@ begin
             ', "path": ' + JSONStr(PcbPath) + ', "added": ' + IntToStr(Added) + ', "updated": ' + IntToStr(Updated) +
             ', "deleted": ' + IntToStr(Removed) + ', "unchanged": ' + IntToStr(Unchanged) +
             ', "repoured": ' + IntToStr(Repoured) + ', ' + BuildJSONArray(Items, 'objects') + '}';
-    finally Spec.Free; Names.Free; Keys.Free; Actions.Free; Items.Free; Trace.Free; end;
+    finally Spec.Free; Names.Free; Keys.Free; Actions.Free; Items.Free; Trace.Free; Fields.Free; end;
 end;

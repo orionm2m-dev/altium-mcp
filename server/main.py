@@ -3567,7 +3567,8 @@ async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias
 
 @mcp.tool()
 async def set_pcb_polygons(ctx: Context, pcb_path: str, polygons: list = None,
-                           cutouts: list = None, dry_run: bool = False) -> str:
+                           cutouts: list = None, dry_run: bool = False,
+                           timeout_s: int = 180) -> str:
     """Manage named solid copper pours and polygon-only cutouts, then repour/save.
 
     Millimetres relative to PCB origin. Each polygon has operation=create|update|
@@ -3595,15 +3596,20 @@ async def set_pcb_polygons(ctx: Context, pcb_path: str, polygons: list = None,
     checks exact names/geometry/options, deleted absence and nonempty generated
     copper before save. allow_empty=true explicitly permits an empty polygon.
     Success is not proof of complete connectivity or manufacturing compliance.
+    timeout_s (1..3600, default 180) bounds only the caller's wait. A timeout
+    does not cancel Altium: inspect the returned trace and reconcile the late
+    response/saved state before another dispatch. Never automatically replay.
     """
     try:
+        if type(timeout_s) is not int or not 1 <= timeout_s <= 3600:
+            raise ValueError("timeout_s must be an integer in 1..3600")
         spec = build_polygon_spec(pcb_path, polygons, cutouts, dry_run)
     except (ValueError, TypeError, KeyError) as exc:
         return json.dumps({"success": False, "error": str(exc)})
     (EXCHANGE_DIR / "pcb_polygons_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
     trace_path = EXCHANGE_DIR / "pcb_polygons_spec.trace.txt"
     trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
-    response = await altium_bridge.execute_command("set_pcb_polygons", {}, timeout=180)
+    response = await altium_bridge.execute_command("set_pcb_polygons", {}, timeout=timeout_s)
     try:
         trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
     except OSError:
