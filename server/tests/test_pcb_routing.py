@@ -127,7 +127,7 @@ class RoutingSpecTests(unittest.TestCase):
             self.assertFalse(bad['success'])
             env['altium_bridge'].execute_command.assert_not_awaited()
             result=json.loads(asyncio.run(env['set_pcb_routing'](None,PCB,[track()],[via()])))
-            env['altium_bridge'].execute_command.assert_awaited_once_with('set_pcb_routing',{})
+            env['altium_bridge'].execute_command.assert_awaited_once_with('set_pcb_routing',{},timeout=120)
             self.assertFalse(result['success'])
             self.assertEqual(result['last_phase'],'dispatch_pending')
             self.assertEqual((Path(directory)/'pcb_routing_spec.txt').read_text(),build_routing_spec(PCB,[track()],[via()]))
@@ -136,5 +136,45 @@ class RoutingSpecTests(unittest.TestCase):
         self.assertIn('DocumentPath=pcb_primitives.pas',(ROOT/'AltiumScript/Altium_API.PrjScr').read_text())
         self.assertNotIn('DocumentPath=pcb_routing.pas',(ROOT/'AltiumScript/Altium_API.PrjScr').read_text())
 
+
+
+    def test_timeout_bounds_fail_before_exchange_writes_or_dispatch(self):
+        tree=ast.parse((ROOT/'main.py').read_text(encoding='utf-8'))
+        chosen=[n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))
+                and n.name in {'_script_result','set_pcb_routing'}]
+        for n in chosen:n.decorator_list=[]
+        with tempfile.TemporaryDirectory() as directory:
+            exchange=Path(directory)
+            for filename in ('pcb_routing_spec.txt','pcb_routing_spec.trace.txt'):
+                (exchange/filename).write_text('previous operation',encoding='utf-8')
+            bridge=type('Bridge',(),{'execute_command':AsyncMock()})()
+            env=dict(json=json,Context=object,EXCHANGE_DIR=exchange,SPEC_ENCODING='utf-8',
+                     build_routing_spec=build_routing_spec,altium_bridge=bridge)
+            exec(compile(ast.Module(body=chosen,type_ignores=[]),'isolated_routing_timeout','exec'),env)
+            for timeout in (0,-1,3601,True,False,1.0,'120',None):
+                with self.subTest(timeout=timeout):
+                    result=json.loads(asyncio.run(env['set_pcb_routing'](None,PCB,[track()],timeout_s=timeout)))
+                    self.assertEqual(result,{'success':False,'error':'timeout_s must be an integer in 1..3600'})
+                    bridge.execute_command.assert_not_awaited()
+                    self.assertEqual({p.name:p.read_text(encoding='utf-8') for p in exchange.iterdir()},
+                                     {name:'previous operation' for name in ('pcb_routing_spec.txt','pcb_routing_spec.trace.txt')})
+
+    def test_custom_timeout_reaches_dispatch_once_and_does_not_replay_failure(self):
+        tree=ast.parse((ROOT/'main.py').read_text(encoding='utf-8'))
+        chosen=[n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))
+                and n.name in {'_script_result','set_pcb_routing'}]
+        for n in chosen:n.decorator_list=[]
+        for timeout in (1,600,3600):
+            with self.subTest(timeout=timeout),tempfile.TemporaryDirectory() as directory:
+                bridge=type('Bridge',(),{'execute_command':AsyncMock(return_value={'success':False,'error':'timeout'})})()
+                env=dict(json=json,Context=object,EXCHANGE_DIR=Path(directory),SPEC_ENCODING='utf-8',
+                         build_routing_spec=build_routing_spec,altium_bridge=bridge)
+                exec(compile(ast.Module(body=chosen,type_ignores=[]),'isolated_routing_timeout','exec'),env)
+                result=json.loads(asyncio.run(env['set_pcb_routing'](None,PCB,[track()],[via()],timeout_s=timeout)))
+                bridge.execute_command.assert_awaited_once_with('set_pcb_routing',{},timeout=timeout)
+                self.assertFalse(result['success'])
+                self.assertEqual(result['error'],'timeout')
+                self.assertEqual(result['last_phase'],'dispatch_pending')
+                self.assertEqual((Path(directory)/'pcb_routing_spec.txt').read_text(),build_routing_spec(PCB,[track()],[via()]))
 
 if __name__=='__main__': unittest.main()

@@ -1,6 +1,6 @@
 # Explicit PCB routing batches
 
-`set_pcb_routing(pcb_path, tracks=None, vias=None)` adds or deletes explicit
+`set_pcb_routing(pcb_path, tracks=None, vias=None, timeout_s=120)` adds or deletes explicit
 free copper tracks and standard through vias. It does not choose a route,
 create nets, move components, change widths/rules automatically or rip up
 unmentioned routing. Ground polygons, repour, differential-pair constraints,
@@ -66,6 +66,14 @@ must match; deletes must be absent. Saving happens only when all readbacks
 pass. Returned `native_geometry_key` contains the actual integer geometry;
 reported dimensions/coordinates are also read from the actual object.
 
+`timeout_s` is an integer from 1 to 3600 seconds (default 120). For a large
+batch, supply a longer wait such as `timeout_s=600`; it is passed unchanged to
+the native dispatcher and is not part of the geometry spec. Invalid values
+are rejected before any exchange files are written or a command is dispatched.
+The timeout bounds the caller's wait only: it does not cancel Altium, undo the
+batch, or automatically retry it. A late native completion can still succeed;
+reconcile the late response and saved state before any new dispatch.
+
 A bounded, flushed `pcb_routing_spec.trace.txt` retains the last 64 native
 phases alongside the exchange spec. A timeout or native interpreter failure
 can leave partial changes in memory; `finally` is not a guarantee against an
@@ -82,7 +90,8 @@ paths, critical loops and component preservation. A shortened ratsnest or
 ## Qualification
 
 Offline tests check record encoding, exact input constraints, duplicate and
-reversed-track requests, unsupported vias, public dispatch rejection and native
+reversed-track requests, unsupported vias, public dispatch rejection, timeout
+bounds/default/forwarding without replay, and native
 guard/save structure. They do not compile DelphiScript or call Altium.
 
 ```powershell

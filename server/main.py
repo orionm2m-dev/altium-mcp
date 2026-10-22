@@ -3520,7 +3520,8 @@ async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
 
 
 @mcp.tool()
-async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias: list = None) -> str:
+async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias: list = None,
+                          timeout_s: int = 120) -> str:
     """Add or precisely delete free copper tracks and standard through vias.
 
     This executes explicit geometry; it is not an autorouter and does not
@@ -3548,15 +3549,20 @@ async def set_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None, vias
     Saved geometry is NOT a clearance/short/connectivity or engineering-quality
     pass: run scoped DRC and independently inspect saved routing and net paths.
     Ground polygons/repour and differential-pair routing are not provided.
+    timeout_s (1..3600, default 120) bounds only the caller's wait. A timeout
+    does not cancel Altium: inspect the returned trace and reconcile the late
+    response/saved state before another dispatch. Never automatically replay.
     """
     try:
+        if type(timeout_s) is not int or not 1 <= timeout_s <= 3600:
+            raise ValueError("timeout_s must be an integer in 1..3600")
         spec = build_routing_spec(pcb_path, tracks, vias)
     except (ValueError, TypeError, KeyError) as exc:
         return json.dumps({"success": False, "error": str(exc)})
     (EXCHANGE_DIR / "pcb_routing_spec.txt").write_text(spec, encoding=SPEC_ENCODING, errors="strict")
     trace_path = EXCHANGE_DIR / "pcb_routing_spec.trace.txt"
     trace_path.write_text("dispatch_pending\n", encoding=SPEC_ENCODING)
-    response = await altium_bridge.execute_command("set_pcb_routing", {})
+    response = await altium_bridge.execute_command("set_pcb_routing", {}, timeout=timeout_s)
     try:
         trace_lines = trace_path.read_text(encoding=SPEC_ENCODING, errors="replace").splitlines()[-64:]
     except OSError:
