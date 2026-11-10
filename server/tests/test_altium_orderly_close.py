@@ -327,3 +327,94 @@ class PublicCloseTests(unittest.IsolatedAsyncioTestCase):
         worker.assert_not_awaited()
 
 if __name__=='__main__':unittest.main()
+
+
+class PendingInventoryRestartTests(unittest.TestCase):
+    """Unresolved pre-close inventory latch: a verified fresh start authorizes one probe only."""
+    NEW_PID=789
+
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name)
+        self.stack=ExitStack();self.addCleanup(self.stack.close)
+        canonical=close.emergency_stop._canonical(EXE)
+        self.previous=dict(pid=PID,creation_filetime=int(CREATED),exe=canonical,user_sid='sid',running=True)
+        self.new=dict(pid=self.NEW_PID,creation_filetime=int(CREATED)+5000,exe=canonical,user_sid='sid',running=True)
+        self.old=dict(phase='orderly_close_inventory_pending',token=OP,process_identity=self.previous,
+                      launches=[dict(phase='close_inventory',pid=456,exit_code=None)])
+        close.script_recovery._write_state(self.root,self.old)
+        startup=dict(success=True,launched=True,script_dispatched=False,mutation_replayed=False,exit_code=None,
+                     status='process_started_ui_unverified',configured_exe=EXE,target_pid=self.NEW_PID,
+                     identity=self.new,creation_filetime_decimal=str(self.new['creation_filetime']))
+        (self.root/'altium_startup.json').write_text(json.dumps(startup),encoding='utf-8')
+        self.main=Mock();self.main.identity.return_value=self.new
+        self.main.__enter__=Mock(return_value=self.main);self.main.__exit__=Mock(return_value=False)
+        self.launcher=None  # None: OpenProcess fails with ERROR_INVALID_PARAMETER (absent PID)
+        def factory(pid,*unused,**unused_kw):
+            if pid==self.NEW_PID:return self.main
+            if pid==456 and self.launcher is not None:return self.launcher
+            error=OSError('absent');error.winerror=87;raise error
+        self.stack.enter_context(patch.object(close.emergency_stop,'WinProcess',side_effect=factory))
+        self.stack.enter_context(patch.object(close.emergency_stop,'_valid_identity'))
+        self.stack.enter_context(patch.object(close.emergency_stop,'_current_sid',return_value='sid'))
+        self.exited=self.stack.enter_context(patch.object(close.emergency_stop,'_exact_target_has_exited',return_value=True))
+        self.ready=self.stack.enter_context(patch.object(close,'_ready',return_value={'hwnd':1}))
+        self.stack.enter_context(patch.object(close.script_recovery,'_launches',{}))
+
+    def live_launcher(self,exe):
+        launcher=Mock();launcher.__enter__=Mock(return_value=launcher);launcher.__exit__=Mock(return_value=False)
+        launcher.exit_observation.return_value=dict(pid=456,creation_filetime=int(CREATED)+1,exit_code=259)
+        launcher.identity.return_value=dict(pid=456,creation_filetime=int(CREATED)+1,exe=exe,user_sid='sid',running=True)
+        return launcher
+
+    def test_absent_launcher_and_exited_main_authorize_probe(self):
+        result=close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+        self.assertEqual(result['identity'],self.new)
+        self.assertEqual(result['environment']['target_pid'],self.NEW_PID)
+        self.assertTrue(result['environment']['ready']);self.assertFalse(result['environment']['native_idle_verified'])
+        self.assertTrue(result['evidence']['new_probe_required']);self.assertFalse(result['evidence']['quit_dispatched'])
+        self.assertFalse(result['evidence']['inventory_receipt_present'])
+        self.exited.assert_called_once_with(self.previous);self.ready.assert_called_once_with(EXE,self.NEW_PID)
+        self.assertEqual(close.script_recovery.blocked_state(self.root),self.old)  # latch untouched here
+
+    def test_launcher_pid_reused_by_unrelated_process_is_absence(self):
+        self.launcher=self.live_launcher(r'c:\browser\chrome.exe')
+        result=close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+        self.assertTrue(result['evidence']['inventory_launcher_pid_reused'])
+
+    def test_live_configured_launcher_blocks(self):
+        self.launcher=self.live_launcher(close.emergency_stop._canonical(EXE))
+        with self.assertRaisesRegex(ValueError,'still present'):
+            close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+        self.ready.assert_not_called()
+
+    def test_exited_launcher_records_exit_code(self):
+        self.launcher=self.live_launcher(r'c:\x.exe')
+        self.launcher.exit_observation.return_value=dict(pid=456,creation_filetime=int(CREATED)+1,exit_code=1)
+        result=close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+        self.assertEqual(result['evidence']['inventory_launcher_recorded_exit_code'],1)
+        self.launcher.identity.assert_not_called()
+
+    def test_previous_main_still_running_blocks(self):
+        self.exited.return_value=False
+        with self.assertRaisesRegex(ValueError,'has not exited'):
+            close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+        self.ready.assert_not_called()
+
+    def test_other_phase_or_older_start_blocks(self):
+        other=dict(self.old,phase='orderly_close_pending');close.script_recovery._write_state(self.root,other)
+        with self.assertRaisesRegex(ValueError,'Exact pending inventory checkpoint'):
+            close.fresh_start_after_pending_inventory(EXE,self.root,other)
+        close.script_recovery._write_state(self.root,self.old)
+        startup=json.loads((self.root/'altium_startup.json').read_text())
+        startup['identity']['creation_filetime']=int(CREATED)-1;startup['creation_filetime_decimal']=str(int(CREATED)-1)
+        (self.root/'altium_startup.json').write_text(json.dumps(startup))
+        with self.assertRaisesRegex(ValueError,'normal-start receipt'):
+            close.fresh_start_after_pending_inventory(EXE,self.root,self.old)
+
+    def test_recovery_routes_inventory_latch_and_reports_block(self):
+        with patch.object(close,'fresh_start_after_pending_inventory',side_effect=ValueError('no evidence')) as verify:
+            result=asyncio.run(close.script_recovery._recover_emergency_serialized(EXE,self.root))
+        verify.assert_called_once_with(EXE,self.root,self.old)
+        self.assertTrue(result['blocked']);self.assertIn('Pending inventory/new-start verification failed: no evidence',result['error'])
+        self.assertEqual(close.script_recovery.blocked_state(self.root),self.old)

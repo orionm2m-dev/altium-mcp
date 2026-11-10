@@ -1,5 +1,24 @@
 # Changes
 
+## 2026-11-09 — Recover after an unresolved pre-close inventory latch
+
+close_altium_normally leaves the latch in orderly_close_inventory_pending when its
+dedicated inventory launcher never returns a verified receipt. Once that Altium
+process is gone the latch could not be resolved: fresh_start_after_pending_close
+accepts only orderly_close_pending, and manual Stop confirmation refuses because
+the current process is not the pending operation's. Added
+fresh_start_after_pending_inventory in altium_orderly_close, routed from
+_recover_emergency_serialized. It requires the exact checkpoint on disk, a
+complete previous identity under the current user, exactly one recorded
+inventory launcher that is owned-and-exited, absent, exited, or whose PID is now
+an unrelated image, the exact previous main proven exited by creation time, a
+newer successful public normal-start receipt and that same ready process; it
+then authorizes only the usual read-only probe and records the evidence. No
+quit, Stop, latch deletion, save or mutation replay. The inventory itself is
+never retroactively completed. Tests cover absence, PID reuse, a live configured
+launcher, exit-code recording, a still-running previous main, wrong phase, an
+older start and the recovery routing.
+
 ## 2026-10-21 — Bind windowless error acknowledgment to explicit visual evidence
 
 The observed Error dialog exposes only empty TXPExtPanel controls and its OK

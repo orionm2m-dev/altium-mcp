@@ -368,6 +368,104 @@ def fresh_start_after_pending_close(exe, exchange_dir, old):
         'quit_replayed':False,'stop_dispatched':False})
 
 
+def fresh_start_after_pending_inventory(exe, exchange_dir, old):
+    """Verify evidence for one new read-only probe after an unresolved pre-close inventory.
+
+    The dedicated inventory launcher never returned a verified receipt, so the
+    former process was never asked to quit and its historical fate is unknown.
+    Current absence of that exact identity, an exited or absent inventory
+    launcher and a newer owned normal-start receipt authorize only a new
+    executor probe, not retrospective completion of the inventory or close.
+    Caller holds the bridge lock and cross-process recovery claim.
+    """
+    exchange = Path(exchange_dir)
+    latch_path = exchange / 'script_recovery_state.json'
+    raw = latch_path.read_bytes()
+    token = old.get('token')
+    if (json.loads(raw) != old or old.get('phase') != 'orderly_close_inventory_pending'
+            or not isinstance(token, str) or re.fullmatch('[0-9a-f]{32}', token) is None):
+        raise ValueError('Exact pending inventory checkpoint required')
+    previous = old.get('process_identity')
+    if (not isinstance(previous, dict) or previous.get('exe') != emergency_stop._canonical(exe)
+            or previous.get('user_sid') != emergency_stop._current_sid()
+            or type(previous.get('pid')) is not int or previous['pid'] <= 0
+            or type(previous.get('creation_filetime')) is not int or previous['creation_filetime'] <= 0):
+        raise ValueError('Complete previous main identity required')
+    launches = old.get('launches', [])
+    if (len(launches) != 1 or launches[0].get('phase') != 'close_inventory'
+            or type(launches[0].get('pid')) is not int or launches[0]['pid'] <= 0
+            or launches[0]['pid'] == previous['pid']):
+        raise ValueError('Exactly one recorded inventory launcher required')
+    startup_path = exchange / 'altium_startup.json'
+    frozen = {path: path.read_bytes() for path in (startup_path,)}
+    startup = json.loads(frozen[startup_path]); identity = startup.get('identity')
+    if (not isinstance(identity, dict) or startup.get('success') is not True
+            or startup.get('launched') is not True or startup.get('script_dispatched') is not False
+            or startup.get('mutation_replayed') is not False or startup.get('exit_code') is not None
+            or startup.get('status') != 'process_started_ui_unverified'
+            or emergency_stop._canonical(startup.get('configured_exe', '')) != emergency_stop._canonical(exe)
+            or type(identity.get('pid')) is not int or identity['pid'] <= 0
+            or startup.get('target_pid') != identity['pid']
+            or type(identity.get('creation_filetime')) is not int
+            or identity['creation_filetime'] <= previous['creation_filetime']
+            or startup.get('creation_filetime_decimal') != str(identity['creation_filetime'])):
+        raise ValueError('Newer exact successful public normal-start receipt required')
+    launcher_pid = launches[0]['pid']
+    launcher_exit = launches[0].get('exit_code')
+    launcher_pid_reused = False
+    owned = script_recovery._launches.get(launcher_pid)
+    if owned is not None:
+        launcher_exit = owned.poll()
+        if launcher_exit is None:
+            raise ValueError('The owned inventory launcher is still running')
+    else:
+        try:
+            launcher = emergency_stop.WinProcess(launcher_pid)
+        except OSError as error:
+            if getattr(error, 'winerror', None) != 87:
+                raise
+        else:
+            with launcher:
+                observed = launcher.exit_observation()
+                if observed.get('pid') != launcher_pid or type(observed.get('exit_code')) is not int:
+                    raise ValueError('Inventory launcher exit observation is unavailable')
+                if observed['exit_code'] == 259:
+                    # STILL_ACTIVE: the launcher itself, or an unrelated process that reuses its PID.
+                    live = launcher.identity()
+                    if (live.get('exe') == emergency_stop._canonical(exe)
+                            and not emergency_stop._same_identity(live, identity)):
+                        raise ValueError('Inventory launcher is still present')
+                    launcher_pid_reused = True
+                else:
+                    launcher_exit = observed['exit_code']
+    if not emergency_stop._exact_target_has_exited(previous):
+        raise ValueError('The previous exact main process has not exited')
+    receipt = exchange / 'orderly_close' / token / (token + '.json')
+    with emergency_stop.WinProcess(identity['pid']) as main:
+        current = main.identity()
+        emergency_stop._valid_identity(current, exe, identity['pid'])
+        if not emergency_stop._same_identity(current, identity):
+            raise ValueError('Current main differs from recorded normal start')
+        main_window = _ready(exe, identity['pid'])
+        environment = dict(ready=True, target_pid=identity['pid'],
+            configured_process_ids=[identity['pid']],
+            process_windows={identity['pid']: [main_window]},
+            foreground_required=False, native_idle_verified=False)
+        if not emergency_stop._same_identity(main.identity(), current):
+            raise ValueError('New main changed during verification')
+        if latch_path.read_bytes() != raw or any(path.read_bytes() != data for path, data in frozen.items()):
+            raise ValueError('Recovery or startup evidence changed')
+    return dict(identity=current, environment=environment, evidence={
+        'previous_main_identity': previous, 'previous_inventory_token': token,
+        'previous_main_absence_verified': True, 'previous_main_historical_exit_code': None,
+        'previous_inventory_retroactively_completed': False,
+        'inventory_receipt_present': receipt.exists(),
+        'inventory_launcher_recorded_exit_code': launcher_exit,
+        'inventory_launcher_pid_reused': launcher_pid_reused,
+        'normal_start_identity_verified': True, 'new_probe_required': True,
+        'quit_dispatched': False, 'stop_dispatched': False})
+
+
 def verify_restart_after_probe(exe, expected_identity):
     """Bind a matching probe receipt to the same ready restarted process.
 

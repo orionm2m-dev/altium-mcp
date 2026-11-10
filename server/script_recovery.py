@@ -469,6 +469,14 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
             return _blocked(old, "Pending ordinary close/new-start verification failed: " + str(error),
                             no_new_dispatch=True)
+    elif (old and old.get("phase") == "orderly_close_inventory_pending" and not manual_stop_confirmed
+            and verified_stop is None):
+        try:
+            from altium_orderly_close import fresh_start_after_pending_inventory
+            restarted = fresh_start_after_pending_inventory(exe, exchange_dir, old)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return _blocked(old, "Pending inventory/new-start verification failed: " + str(error),
+                            no_new_dispatch=True)
     fresh_emergency = bool(old and old.get("require_fresh_instance"))
     if fresh_emergency:
         import emergency_stop
@@ -597,7 +605,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                 if outcome == {"probe": "executor ok", "token": token}:
                     if verified_stop is not None and hasattr(verified_stop, "validate_after_probe"):
                         verified_stop.validate_after_probe(exe, exchange_dir, state)
-                    if restarted is not None and old.get("phase") == "orderly_close_pending":
+                    if restarted is not None and old.get("phase") in ("orderly_close_pending",
+                                                                       "orderly_close_inventory_pending"):
                         from altium_orderly_close import verify_restart_after_probe
                         state["restart_after_probe"] = verify_restart_after_probe(exe, fresh_identity)
                     state["phase"] = "recovered"
