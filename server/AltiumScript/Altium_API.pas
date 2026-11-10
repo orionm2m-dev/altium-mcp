@@ -1171,6 +1171,8 @@ begin
             Result := UpdatePcbFromProjectReport(ParamValueOf('project_path'), ParamValueOf('pcb_path'));
         'recover_pcb_process':
             Result := RecoverPcbProcessReport(ROOT_DIR + 'pcb_process_recovery_spec.txt');
+        'control_pcb_mechanical_objects':
+            Result := MechanicalControlReport(ParamValueOf('spec_path'));
         'set_pcb_pads':
             Result := SetPcbPadsReport(ROOT_DIR + 'pcb_pads_spec.txt');
         'set_pcb_keepouts':

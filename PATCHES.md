@@ -265,3 +265,7 @@ documentation does not disable negative compatibility checks. Packaging examples
 now include the reference directory. Offline tests cover lookup, limits, failure
 evidence, missing files, unchanged lint severity and real FastMCP registration and
 call transport without importing the native application server.
+
+## 2026-11-10 — Guarded mechanical primitive control
+
+Added native inspection and exact-key deletion for free NPTH pads and named straight-edge keepout regions. Batch preflight, ownership/path/process guards and absence readback gate saving. Offline tests pass; native qualification is tracked in dev/PCB_MECHANICAL_CONTROL.md.

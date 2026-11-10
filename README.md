@@ -763,3 +763,7 @@ errors detected after dispatch; the mutation outcome remains unknown.
 Use only a verified native recovery path before dispatching again. A recognized
 error does not authorize an older explicit UI acknowledgment tool, nor does a
 recovery request imply that any error dialog has already been resolved.
+
+### Guarded mechanical primitive removal
+
+`control_pcb_mechanical_objects` reads eligible free NPTH pads and named keepout regions on an already active PCB. Deletion requires the exact returned identity and native geometry key for every target. Stale keys, foreign ownership and ambiguous identities are refused before mutation. All requested identities must disappear before saving. Partial failures are not rolled back or replayed. Production qualification is limited to the native observations recorded in `dev/PCB_MECHANICAL_CONTROL.md`.

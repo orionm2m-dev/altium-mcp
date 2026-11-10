@@ -1478,3 +1478,161 @@ begin
             ', "repoured": ' + IntToStr(Repoured) + ', ' + BuildJSONArray(Items, 'objects') + '}';
     finally Spec.Free; Names.Free; Keys.Free; Actions.Free; Items.Free; Trace.Free; Fields.Free; end;
 end;
+
+// Narrow mechanical inventory and deletion. Never opens/focuses a document.
+// A delete requires the complete key returned by a prior native inspection.
+function MechanicalObjectKind(P: IPCB_Primitive): String;
+var Pad: IPCB_Pad; Reg: IPCB_Region;
+begin
+    Result := '';
+    if P = nil then Exit;
+    if P.Component <> nil then Exit;
+    if P.InPolygon then Exit;
+    if P.Net <> nil then Exit;
+    if P.ObjectId = ePadObject then begin
+        Pad := P;
+        if Pad.IsKeepout or Pad.Plated or (Pad.Layer <> eMultiLayer) then Exit;
+        if (Pad.Mode <> ePadMode_Simple) or (Pad.HoleSize <= 0) then Exit;
+        if (Pad.HoleType <> 0) or (Pad.TopShape <> eRounded) then Exit;
+        if (Pad.TopXSize > Pad.HoleSize) or (Pad.TopYSize > Pad.HoleSize) then Exit;
+        if Pad.Name = '' then Exit;
+        Result := 'free_npth';
+    end else if P.ObjectId = eRegionObject then begin
+        Reg := P;
+        if not Reg.IsKeepout then Exit;
+        if (Reg.Kind <> eRegionKind_Copper) or (Reg.Name = '') or (Reg.HoleCount <> 0) then Exit;
+        if PourShapeGuard(P) <> '' then Exit;
+        Result := 'keepout_region';
+    end;
+end;
+
+function MechanicalObjectName(P: IPCB_Primitive): String;
+var Pad: IPCB_Pad; Reg: IPCB_Region;
+begin
+    Result := '';
+    if P.ObjectId = ePadObject then begin Pad := P; Result := Pad.Name; end
+    else if P.ObjectId = eRegionObject then begin Reg := P; Result := Reg.Name; end;
+end;
+
+function MechanicalObjectKey(P: IPCB_Primitive): String;
+var Pad: IPCB_Pad;
+begin
+    Result := MechanicalObjectKind(P);
+    if Result = '' then Exit;
+    Result := Result + ':' + IntToStr(P.Layer) + ':' + JSONBool(not P.Moveable);
+    if P.ObjectId = ePadObject then begin
+        Pad := P;
+        Result := Result + ':' + IntToStr(Pad.X) + ':' + IntToStr(Pad.Y) +
+            ':' + IntToStr(Pad.TopXSize) + ':' + IntToStr(Pad.TopYSize) + ':' + IntToStr(Pad.HoleSize) +
+            ':' + PcbDocNum('0.########', Pad.Rotation);
+    end else Result := Result + ':' + StringReplace(PourGeometryKey(P), '|', ';', 1);
+end;
+
+function MechanicalFind(Board: IPCB_Board; Kind, Name: String; var Count: Integer): IPCB_Primitive;
+begin
+    Result := nil; Count := 0;
+    if Kind = 'free_npth' then Result := FindPrimitivePad(Board, '', Name, Count)
+    else if Kind = 'keepout_region' then Result := FindKeepoutPrimitive(Board, Name, Count);
+end;
+
+function MechanicalInventory(Board: IPCB_Board): String;
+var Iter: IPCB_BoardIterator; P: IPCB_Primitive; Items: TStringList; Kind: String;
+begin
+    Items := TStringList.Create;
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject, eRegionObject));
+        Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        P := Iter.FirstPCBObject;
+        while P <> nil do begin
+            Kind := MechanicalObjectKind(P);
+            if Kind <> '' then Items.Add('{"kind":' + JSONStr(Kind) + ',"name":' +
+                JSONStr(MechanicalObjectName(P)) + ',"expected_key":' + JSONStr(MechanicalObjectKey(P)) + '}');
+            P := Iter.NextPCBObject;
+        end;
+        Result := BuildJSONArray(Items, 'inventory');
+    finally Board.BoardIterator_Destroy(Iter); Items.Free; end;
+end;
+
+function MechanicalTargetGuard(Board: IPCB_Board; Rec: String; var P: IPCB_Primitive): String;
+var Kind, Name: String; Count: Integer;
+begin
+    Kind := GetFieldFromPipeString(Rec, 0); Name := GetFieldFromPipeString(Rec, 1);
+    P := MechanicalFind(Board, Kind, Name, Count);
+    Result := '';
+    if Count <> 1 then Result := 'target must resolve exactly once: ' + Name
+    else if MechanicalObjectKind(P) <> Kind then Result := 'target ownership/type is unsupported: ' + Name
+    else if MechanicalObjectName(P) <> Name then Result := 'exact target name is required: ' + Name
+    else if MechanicalObjectKey(P) <> GetFieldFromPipeString(Rec, 2) then Result := 'target changed since inspect: ' + Name;
+end;
+
+function MechanicalControlReport(SpecPath: String): String;
+var Spec, Deleted: TStringList; Board: IPCB_Board; Doc: IServerDocument; P: IPCB_Primitive;
+    Path, Action, Error, Before, After, Rec, Kind, Name: String;
+    i, j, Count, Removed: Integer; Saved, Verified: Boolean;
+begin
+    if not FileExists(SpecPath) then begin Result := PcbDocError('mechanical spec missing'); Exit; end;
+    Spec := TStringList.Create; Deleted := TStringList.Create;
+    try
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count < 2 then begin Result := PcbDocError('mechanical spec incomplete'); Exit; end;
+        Path := GetFieldFromPipeString(Spec[0], 1); Action := GetFieldFromPipeString(Spec[1], 1);
+        Error := PcbPrimitiveProcessGuard(0);
+        if Error = '' then begin
+            if Client.CurrentView = nil then Error := 'no current view'
+            else begin
+                Doc := Client.CurrentView.OwnerDocument;
+                if Doc = nil then Error := 'no current document'
+                else if not SameText(Doc.FileName, Path) or not SameText(Doc.Kind, 'PCB') then Error := 'exact PCB must already be active';
+            end;
+        end;
+        if Error = '' then begin
+            Board := PCBServer.GetCurrentPCBBoard;
+            if Board = nil then Error := 'no current PCB'
+            else if not SameText(Board.FileName, Path) then Error := 'current PCB differs';
+        end;
+        if (Action <> 'inspect') and (Action <> 'delete') then Error := 'unsupported action';
+        if (Action = 'inspect') and (Spec.Count <> 2) then Error := 'inspect must not include targets';
+        if (Action = 'delete') and ((Spec.Count < 3) or (Spec.Count > 66)) then Error := 'invalid deletion count';
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        Before := MechanicalInventory(Board);
+        Removed := 0; Saved := False; Verified := True;
+        if Action = 'delete' then begin
+            for i := 2 to Spec.Count - 1 do begin
+                Error := MechanicalTargetGuard(Board, Spec[i], P);
+                for j := 2 to i - 1 do
+                    if SameText(GetFieldFromPipeString(Spec[j],0), GetFieldFromPipeString(Spec[i],0)) and
+                       SameText(GetFieldFromPipeString(Spec[j],1), GetFieldFromPipeString(Spec[i],1)) then Error := 'duplicate target';
+                if Error <> '' then Break;
+            end;
+            if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+            PCBServer.PreProcess;
+            try
+                for i := 2 to Spec.Count - 1 do begin
+                    Rec := Spec[i]; Error := MechanicalTargetGuard(Board, Rec, P);
+                    if Error <> '' then Break;
+                    Board.RemovePCBObject(P); Removed := Removed + 1;
+                    Deleted.Add(JSONStr(GetFieldFromPipeString(Rec, 1)));
+                end;
+            finally PCBServer.PostProcess; end;
+            for i := 2 to Spec.Count - 1 do begin
+                P := MechanicalFind(Board, GetFieldFromPipeString(Spec[i],0), GetFieldFromPipeString(Spec[i],1), Count);
+                if Count <> 0 then Verified := False;
+            end;
+            if Removed <> Spec.Count - 2 then Verified := False;
+            if PcbPrimitiveProcessGuard(0) <> '' then Verified := False;
+            if not Verified and (Error = '') then Error := 'removal readback failed; board not saved';
+            if Verified and (Error = '') then begin
+                Board.GraphicallyInvalidate; Board.ViewManager_FullUpdate;
+                Saved := SaveBoardDocument(Path);
+                if not Saved then Error := 'save failed';
+            end;
+        end;
+        After := MechanicalInventory(Board);
+        Result := '{"success":' + JSONBool((Error = '') and Verified and ((Action = 'inspect') or Saved)) +
+            ',"action":' + JSONStr(Action) + ',"path":' + JSONStr(Path) + ',"error":' + JSONStr(Error) +
+            ',"removed":' + IntToStr(Removed) + ',"saved":' + JSONBool(Saved) + ',"verified":' + JSONBool(Verified) +
+            ',"before":{' + Before + '},"after":{' + After + '},' + BuildJSONArray(Deleted, 'deleted_names') + '}';
+    finally Spec.Free; Deleted.Free; end;
+end;

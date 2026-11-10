@@ -5980,6 +5980,31 @@ async def get_server_status(ctx: Context) -> str:
     
     return json.dumps(status, indent=2)
 
+
+@mcp.tool()
+async def control_pcb_mechanical_objects(ctx: Context, pcb_path: str, action: str = "inspect", targets: Optional[list] = None) -> str:
+    """Inspect or delete exact free mechanical primitives on the active PCB.
+
+    Inspect is read-only and returns eligible free round, simple unconnected
+    NPTH pads and free named straight-edge keepout regions with expected_key.
+    Delete requires targets [{kind, name, expected_key}] copied from inspection.
+    All identities, ownership and complete keys are checked before mutation.
+    Missing/ambiguous/changed targets refuse the entire preflight. Every removed
+    identity is read back absent before saving. No open, focus, UI, rollback,
+    generic primitive deletion, net edits, or component-pad deletion.
+    A returned failure may leave partial in-memory changes; never auto-replay.
+    """
+    from pcb_mechanical_control import build_mechanical_control_spec
+    try:
+        spec = build_mechanical_control_spec(pcb_path, action, targets)
+    except (ValueError, TypeError, KeyError) as error:
+        return json.dumps({"success": False, "error": str(error), "native_dispatched": False})
+    spec_path = EXCHANGE_DIR / ("pcb_mechanical_control_" + uuid.uuid4().hex + ".txt")
+    spec_path.write_text(spec, encoding=SPEC_ENCODING, errors="strict")
+    response = await altium_bridge.execute_command("control_pcb_mechanical_objects", {"spec_path": str(spec_path)})
+    return _script_result(response, {"spec_path": str(spec_path), "no_ui": True})
+
+
 if __name__ == "__main__":
     logger.info("Starting Altium MCP Server...")
     logger.info(f"Using MCP directory: {MCP_DIR}")
