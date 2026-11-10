@@ -39,36 +39,69 @@ begin
     Result := StringReplace(FormatFloat(Fmt, V), ',', '.', REPLACEALL);
 end;
 
-// Open (or focus) a PCB document and return its board. Opening a path that does
-// not exist would hand back a new empty board, so a missing file is refused.
-function OpenBoardAtPath(Path: String): IPCB_Board;
-var
-    Doc : IServerDocument;
+// Canonical path identity is mandatory: AD26 can load slash aliases as
+// different boards backed by the same file. Never choose one arbitrarily.
+function CanonicalPcbDocumentPath(Path: String): String;
+begin
+    Result := ExpandFileName(StringReplace(Path, '/', '\', REPLACEALL));
+end;
+
+function FindUniquePcbDocument(Path: String; var Matches: Integer): IServerDocument;
+var Module: IServerModule; Doc: IServerDocument; I: Integer;
 begin
     Result := nil;
+    Matches := 0;
+    Path := CanonicalPcbDocumentPath(Path);
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then Exit;
+    for I := 0 to Module.DocumentCount - 1 do
+    begin
+        Doc := Module.Documents[I];
+        if SameText(CanonicalPcbDocumentPath(Doc.FileName), Path) then
+        begin
+            Matches := Matches + 1;
+            Result := Doc;
+        end;
+    end;
+    if Matches <> 1 then Result := nil;
+end;
+
+function OpenBoardAtPath(Path: String): IPCB_Board;
+var Doc: IServerDocument; Current: IPCB_Board; Matches: Integer;
+begin
+    Result := nil;
+    Path := CanonicalPcbDocumentPath(Path);
     if not FileExists(Path) then Exit;
-    Doc := Client.GetDocumentByPath(Path);
-    if Doc = nil then Doc := Client.OpenDocument('PCB', Path);
+    Doc := FindUniquePcbDocument(Path, Matches);
+    if Matches > 1 then Exit;
+    if Matches = 0 then Doc := Client.OpenDocument('PCB', Path);
     if Doc = nil then Exit;
     Client.ShowDocument(Doc);
-    Doc.Focus;
     if PCBServer = nil then Exit;
-    Result := PCBServer.GetPCBBoardByPath(Path);
-    if Result = nil then Result := PCBServer.GetCurrentPCBBoard;
+    Result := PCBServer.GetPCBBoardByPath(Doc.FileName);
+    if Result = nil then Exit;
+    if not SameText(CanonicalPcbDocumentPath(Result.FileName), Path) then
+    begin Result := nil; Exit; end;
+    Current := PCBServer.GetCurrentPCBBoard;
+    if Current = nil then begin Result := nil; Exit; end;
+    if Current.I_ObjectAddress <> Result.I_ObjectAddress then Result := nil;
 end;
 
 function SaveBoardDocument(Path: String): Boolean;
-var
-    Doc : IServerDocument;
+var Doc: IServerDocument; Current: IPCB_Board; Matches: Integer;
 begin
     Result := False;
-    Doc := Client.GetDocumentByPath(Path);
-    if Doc = nil then Exit;
+    Doc := FindUniquePcbDocument(Path, Matches);
+    if (Doc = nil) or (Matches <> 1) then Exit;
+    if Client.CurrentView = nil then Exit;
+    if not SameText(Client.CurrentView.OwnerDocument.FileName, Doc.FileName) then Exit;
+    Current := PCBServer.GetCurrentPCBBoard;
+    if Current = nil then Exit;
+    if not SameText(Current.FileName, Doc.FileName) then Exit;
     Doc.Modified := True;
     Result := Doc.DoFileSave('PCB Binary File');
 end;
 
-// Open a project (current afterwards) or return nil.
 function OpenProjectAtPath(Path: String): IProject;
 begin
     Result := nil;
@@ -781,7 +814,8 @@ begin
         PCBServer.PostProcess;
         Board.GraphicallyInvalidate;
         Board.ViewManager_FullUpdate;
-        SaveBoardDocument(PcbPath);
+        if not SaveBoardDocument(PcbPath) then
+        begin Result := PcbDocError('outline changed in memory but exact document save was refused'); Exit; end;
         // BoundingRectangle lags behind a rebuilt outline; the extent comes from the vertices.
         Verts.Clear;
         for i := 0 to Board.BoardOutline.PointCount - 1 do

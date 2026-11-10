@@ -1679,6 +1679,7 @@ var
     Doc  : IServerDocument;
     Ext, Kind : String;
     WasOpen : Boolean;
+    PcbMatches : Integer;
 begin
     if not FileExists(Path) then
     begin
@@ -1696,7 +1697,14 @@ begin
         Result := '{"success": false, "error": ' + JSONStr('not a document kind this tool opens (projects go through open_project): ' + Path) + '}';
         Exit;
     end;
-    Doc := Client.GetDocumentByPath(Path);
+    if Kind = 'PCB' then
+    begin
+        Path := CanonicalPcbDocumentPath(Path);
+        Doc := FindUniquePcbDocument(Path, PcbMatches);
+        if PcbMatches > 1 then
+        begin Result := '{"success":false,"error":"duplicate loaded PCB path aliases; opening refused"}'; Exit; end;
+    end
+    else Doc := Client.GetDocumentByPath(Path);
     WasOpen := Doc <> nil;
     if Doc = nil then Doc := Client.OpenDocument(Kind, Path);
     if Doc = nil then
@@ -1715,14 +1723,16 @@ var
     Doc  : IServerDocument;
     Ext, Format : String;
     Saved, Missing : TStringList;
-    i    : Integer;
+    i, PcbMatches : Integer;
     Ok   : Boolean;
 begin
     Saved := TStringList.Create;
     Missing := TStringList.Create;
     for i := 0 to Paths.Count - 1 do
     begin
-        Doc := Client.GetDocumentByPath(Paths[i]);
+        if SameText(ExtractFileExt(Paths[i]), '.PcbDoc') then
+            Doc := FindUniquePcbDocument(Paths[i], PcbMatches)
+        else Doc := Client.GetDocumentByPath(Paths[i]);
         if Doc = nil then
         begin
             Missing.Add(JSONStr(Paths[i]));
