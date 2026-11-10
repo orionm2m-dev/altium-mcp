@@ -919,7 +919,7 @@ begin
                 AddJSONProperty(LayerProps, 'layer_id', Layer2String(LayerObject.LayerID));
                 AddJSONProperty(LayerProps, 'material_type', 'Copper');
                 AddJSONNumber(LayerProps, 'copper_thickness_mils', LayerObject.CopperThickness / 10000);
-                AddJSONNumber(LayerProps, 'copper_thickness_um', LayerObject.CopperThickness / 254);
+                AddJSONNumber(LayerProps, 'copper_thickness_um', LayerObject.CopperThickness * 0.00254);
                 
                 // Add copper thickness to total
                 TotalThickness := TotalThickness + (LayerObject.CopperThickness / 10000);
@@ -937,7 +937,7 @@ begin
                     
                     AddJSONProperty(LayerProps, 'dielectric_material', LayerObject.Dielectric.DielectricMaterial);
                     AddJSONNumber(LayerProps, 'dielectric_height_mils', LayerObject.Dielectric.DielectricHeight / 10000);
-                    AddJSONNumber(LayerProps, 'dielectric_height_um', LayerObject.Dielectric.DielectricHeight / 254);
+                    AddJSONNumber(LayerProps, 'dielectric_height_um', LayerObject.Dielectric.DielectricHeight * 0.00254);
                     AddJSONNumber(LayerProps, 'dielectric_constant', LayerObject.Dielectric.DielectricConstant);
                     
                     // Add dielectric thickness to total
