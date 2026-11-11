@@ -269,3 +269,10 @@ call transport without importing the native application server.
 ## 2026-11-10 — Guarded mechanical primitive control
 
 Added native inspection and exact-key deletion for free NPTH pads and named straight-edge keepout regions. Batch preflight, ownership/path/process guards and absence readback gate saving. Offline tests pass; native qualification is tracked in dev/PCB_MECHANICAL_CONTROL.md.
+
+
+## 2026-11-11 — Preserve Situs drafts and verified ECAD workflow knowledge
+
+The separate preservation commit `461e9c6` records the previously uncommitted Situs lifecycle, generated-native-command, routing-rule and saved-DRC modules, isolated probes, required JSON dependencies and offline evidence. All 61 focused tests pass; PowerShell syntax parsing passes. Native routing/rule execution is not certified. The menu module uses Windows UI and is not an ordinary-work fallback under VYBRO policy. Exact old Sandbox and stackdump bytes are archived without resetting the live originals.
+
+The verified D44 native implementation is already in `5c39bb4`, `2764b26` and `ef0fefb`. `docs/situs-reference/pcb-native-lessons-20261111.md` records timeout reconciliation, locale-safe model import, model identity-based persistence, native geometry checks, actual-repour connectivity gates and explicit DRC/Texts6 qualification limits. This documentation change dispatches no application operation.
