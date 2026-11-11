@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "status": "INSTALLED_DOTNET_METADATA_NOT_DELPHISCRIPT_QUALIFIED",
+  "assembly": "Altium.Edp.Interfaces.dll",
+  "assembly_sha256": "66a2c1da130dbb316f8e112b7a76b6774bbd438533d2d42ab5e8e79647fd1009",
+  "captured_date": "2026-10-21",
+  "runtime_verified": false,
+  "enums": [
+    {
+      "name": "RT_PCB.TRuleKind",
+      "values": [
+        {
+          "name": "eRule_Clearance",
+          "value": 0
+        },
+        {
+          "name": "eRule_ParallelSegment",
+          "value": 1
+        },
+        {
+          "name": "eRule_MaxMinWidth",
+          "value": 2
+        },
+        {
+          "name": "eRule_MaxMinLength",
+          "value": 3
+        },
+        {
+          "name": "eRule_MatchedLengths",
+          "value": 4
+        },
+        {
+          "name": "eRule_DaisyChainStubLength",
+          "value": 5
+        },
+        {
+          "name": "eRule_PowerPlaneConnectStyle",
+          "value": 6
+        },
+        {
+          "name": "eRule_RoutingTopology",
+          "value": 7
+        },
+        {
+          "name": "eRule_RoutingPriority",
+          "value": 8
+        },
+        {
+          "name": "eRule_RoutingLayers",
+          "value": 9
+        },
+        {
+          "name": "eRule_RoutingCornerStyle",
+          "value": 10
+        },
+        {
+          "name": "eRule_RoutingViaStyle",
+          "value": 11
+        },
+        {
+          "name": "eRule_PowerPlaneClearance",
+          "value": 12
+        },
+        {
+          "name": "eRule_SolderMaskExpansion",
+          "value": 13
+        },
+        {
+          "name": "eRule_PasteMaskExpansion",
+          "value": 14
+        },
+        {
+          "name": "eRule_ShortCircuit",
+          "value": 15
+        },
+        {
+          "name": "eRule_BrokenNets",
+          "value": 16
+        },
+        {
+          "name": "eRule_ViasUnderSMD",
+          "value": 17
+        },
+        {
+          "name": "eRule_MaximumViaCount",
+          "value": 18
+        },
+        {
+          "name": "eRule_MinimumAnnularRing",
+          "value": 19
+        },
+        {
+          "name": "eRule_PolygonConnectStyle",
+          "value": 20
+        },
+        {
+          "name": "eRule_AcuteAngle",
+          "value": 21
+        },
+        {
+          "name": "eRule_ConfinementConstraint",
+          "value": 22
+        },
+        {
+          "name": "eRule_SMDToCorner",
+          "value": 23
+        },
+        {
+          "name": "eRule_ComponentClearance",
+          "value": 24
+        },
+        {
+          "name": "eRule_ComponentRotations",
+          "value": 25
+        },
+        {
+          "name": "eRule_PermittedLayers",
+          "value": 26
+        },
+        {
+          "name": "eRule_NetsToIgnore",
+          "value": 27
+        },
+        {
+          "name": "eRule_SignalStimulus",
+          "value": 28
+        },
+        {
+          "name": "eRule_Overshoot_FallingEdge",
+          "value": 29
+        },
+        {
+          "name": "eRule_Overshoot_RisingEdge",
+          "value": 30
+        },
+        {
+          "name": "eRule_Undershoot_FallingEdge",
+          "value": 31
+        },
+        {
+          "name": "eRule_Undershoot_RisingEdge",
+          "value": 32
+        },
+        {
+          "name": "eRule_MaxMinImpedance",
+          "value": 33
+        },
+        {
+          "name": "eRule_SignalTopValue",
+          "value": 34
+        },
+        {
+          "name": "eRule_SignalBaseValue",
+          "value": 35
+        },
+        {
+          "name": "eRule_FlightTime_RisingEdge",
+          "value": 36
+        },
+        {
+          "name": "eRule_FlightTime_FallingEdge",
+          "value": 37
+        },
+        {
+          "name": "eRule_LayerStack",
+          "value": 38
+        },
+        {
+          "name": "eRule_MaxSlope_RisingEdge",
+          "value": 39
+        },
+        {
+          "name": "eRule_MaxSlope_FallingEdge",
+          "value": 40
+        },
+        {
+          "name": "eRule_SupplyNets",
+          "value": 41
+        },
+        {
+          "name": "eRule_MaxMinHoleSize",
+          "value": 42
+        },
+        {
+          "name": "eRule_TestPointStyle",
+          "value": 43
+        },
+        {
+          "name": "eRule_TestPointUsage",
+          "value": 44
+        },
+        {
+          "name": "eRule_UnconnectedPin",
+          "value": 45
+        },
+        {
+          "name": "eRule_SMDToPlane",
+          "value": 46
+        },
+        {
+          "name": "eRule_SMDNeckDown",
+          "value": 47
+        },
+        {
+          "name": "eRule_LayerPair",
+          "value": 48
+        },
+        {
+          "name": "eRule_FanoutControl",
+          "value": 49
+        },
+        {
+          "name": "eRule_MaxMinHeight",
+          "value": 50
+        },
+        {
+          "name": "eRule_DifferentialPairsRouting",
+          "value": 51
+        },
+        {
+          "name": "eRule_HoleToHoleClearance",
+          "value": 52
+        },
+        {
+          "name": "eRule_MinimumSolderMaskSliver",
+          "value": 53
+        },
+        {
+          "name": "eRule_SilkToSolderMaskClearance",
+          "value": 54
+        },
+        {
+          "name": "eRule_SilkToSilkClearance",
+          "value": 55
+        },
+        {
+          "name": "eRule_NetAntennae",
+          "value": 56
+        },
+        {
+          "name": "eRule_AssyTestPointStyle",
+          "value": 57
+        },
+        {
+          "name": "eRule_AssyTestPointUsage",
+          "value": 58
+        },
+        {
+          "name": "eRule_SilkToBoardRegion",
+          "value": 59
+        },
+        {
+          "name": "eRule_SMDPADEntry",
+          "value": 60
+        },
+        {
+          "name": "eRule_None",
+          "value": 61
+        },
+        {
+          "name": "eRule_ModifiedPolygon",
+          "value": 62
+        },
+        {
+          "name": "eRule_BoardOutlineClearance",
+          "value": 63
+        },
+        {
+          "name": "eRule_BackDrilling",
+          "value": 64
+        },
+        {
+          "name": "eRule_Creepage",
+          "value": 65
+        },
+        {
+          "name": "eRule_ReturnPath",
+          "value": 66
+        },
+        {
+          "name": "eRule_RoutingNeckDown",
+          "value": 67
+        },
+        {
+          "name": "eRule_Wirebonding",
+          "value": 68
+        },
+        {
+          "name": "eRule_ZAxisClearance",
+          "value": 69
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TRouteVia",
+      "values": [
+        {
+          "name": "eViaThruHole",
+          "value": 0
+        },
+        {
+          "name": "eViaBlindBuriedPair",
+          "value": 1
+        },
+        {
+          "name": "eViaBlindBuriedAny",
+          "value": 2
+        },
+        {
+          "name": "eViaNone",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TFanoutStyle",
+      "values": [
+        {
+          "name": "eFanoutStyle_Auto",
+          "value": 0
+        },
+        {
+          "name": "eFanoutStyle_Rows",
+          "value": 1
+        },
+        {
+          "name": "eFanoutStyle_Staggered",
+          "value": 2
+        },
+        {
+          "name": "eFanoutStyle_BGA",
+          "value": 3
+        },
+        {
+          "name": "eFanoutStyle_UnderPads",
+          "value": 4
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TFanoutDirection",
+      "values": [
+        {
+          "name": "eFanoutDirection_None",
+          "value": 0
+        },
+        {
+          "name": "eFanoutDirection_InOnly",
+          "value": 1
+        },
+        {
+          "name": "eFanoutDirection_OutOnly",
+          "value": 2
+        },
+        {
+          "name": "eFanoutDirection_InThenOut",
+          "value": 3
+        },
+        {
+          "name": "eFanoutDirection_OutThenIn",
+          "value": 4
+        },
+        {
+          "name": "eFanoutDirection_Alternating",
+          "value": 5
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TBGAFanoutDirection",
+      "values": [
+        {
+          "name": "eBGAFanoutDirection_Out",
+          "value": 0
+        },
+        {
+          "name": "eBGAFanoutDirection_NE",
+          "value": 1
+        },
+        {
+          "name": "eBGAFanoutDirection_SE",
+          "value": 2
+        },
+        {
+          "name": "eBGAFanoutDirection_SW",
+          "value": 3
+        },
+        {
+          "name": "eBGAFanoutDirection_NW",
+          "value": 4
+        },
+        {
+          "name": "eBGAFanoutDirection_In",
+          "value": 5
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TBGAFanoutViaMode",
+      "values": [
+        {
+          "name": "eBGAFanoutVia_Closest",
+          "value": 0
+        },
+        {
+          "name": "eBGAFanoutVia_Centered",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TObjectClearanceId",
+      "values": [
+        {
+          "name": "eObjectClearanceID_Arc",
+          "value": 0
+        },
+        {
+          "name": "eObjectClearanceID_Track",
+          "value": 1
+        },
+        {
+          "name": "eObjectClearanceID_SMDPad",
+          "value": 2
+        },
+        {
+          "name": "eObjectClearanceID_THPad",
+          "value": 3
+        },
+        {
+          "name": "eObjectClearanceID_Via",
+          "value": 4
+        },
+        {
+          "name": "eObjectClearanceID_Fill",
+          "value": 5
+        },
+        {
+          "name": "eObjectClearanceID_Poly",
+          "value": 6
+        },
+        {
+          "name": "eObjectClearanceID_Region",
+          "value": 7
+        },
+        {
+          "name": "eObjectClearanceID_Text",
+          "value": 8
+        },
+        {
+          "name": "eObjectClearanceID_Hole",
+          "value": 9
+        },
+        {
+          "name": "eObjectClearanceID_OutlineEdge",
+          "value": 10
+        },
+        {
+          "name": "eObjectClearanceID_CavityEdge",
+          "value": 11
+        },
+        {
+          "name": "eObjectClearanceID_CutoutEdge",
+          "value": 12
+        },
+        {
+          "name": "eObjectClearanceID_SplitBarrier",
+          "value": 13
+        },
+        {
+          "name": "eObjectClearanceID_SplitContinuation",
+          "value": 14
+        }
+      ]
+    },
+    {
+      "name": "RT_PCB.TClearanceConstraintMode",
+      "values": [
+        {
+          "name": "eClearanceConstraintMode_SingleClearance",
+          "value": 0
+        },
+        {
+          "name": "eClearanceConstraintMode_ObjectsClearance",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

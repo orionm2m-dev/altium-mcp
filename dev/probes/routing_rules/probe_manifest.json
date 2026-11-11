@@ -1,0 +1,31 @@
+{
+  "status": "STANDALONE_READONLY_PROBES_NOT_EXECUTED",
+  "production_project_modified": false,
+  "procedure": "RunProbe",
+  "required_external_units": [],
+  "runtime_interfaces_used": [
+    "IPCB_Board",
+    "IPCB_Rule",
+    "IPCB_BoardIterator",
+    "IServerDocument",
+    "IDispatch"
+  ],
+  "template_parameters": [
+    "PCB_PATH",
+    "REPORT_PATH",
+    "PROBE_ID"
+  ],
+  "sequence": [
+    "01_width_scalar",
+    "02_via_scalar",
+    "03_width_layers",
+    "04_width_impedance",
+    "05_via_style",
+    "06_routing_layers",
+    "07_fanout",
+    "08_clearance_matrix",
+    "09_outline_matrix"
+  ],
+  "completion_contract": "Report must match the unique probe_id, success=true, stage=completed and matched_rules>0. before_getters or no matching rule is not qualification. Report-file existence alone is insufficient.",
+  "setter_qualification": false
+}

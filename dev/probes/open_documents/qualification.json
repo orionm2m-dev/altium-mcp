@@ -1,0 +1,29 @@
+{
+  "status": "PREPARED_NOT_DISPATCHED",
+  "native_calls_performed": false,
+  "static_lint": "PASS no known blockers, API unverified warnings preserved",
+  "native_compilation_verified": false,
+  "native_binding_verified": false,
+  "template_sha256": "180F180A3525D935D4DF79542EAE2AD942BE75D0AFF846281DFA92E76B8E5113",
+  "evidence": {
+    "metadata": "installed_document_inventory_metadata.json",
+    "assembly_sha256": "2B6D82E0B1BE92BF2454764072BC14E9F170D0B80343C0C9469DA4CE97C1C397",
+    "official_sources": [
+      "https://www.altium.com/documentation/altium-dxp-developer/iclient-interface",
+      "https://www.altium.com/documentation/altium-dxp-developer/system-api"
+    ],
+    "installed_assembly": "Altium.SDK.Interfaces.dll"
+  },
+  "methods": [
+    "IClient.GetCount -> int",
+    "IClient.Internal_GetServerModule(int) -> object: script GetServerModule",
+    "IServerModule.GetDocumentCount -> int",
+    "IServerModule.Internal_GetDocuments(int) -> object: script Documents[index]",
+    "IServerModule.GetModuleName -> string",
+    "IServerDocument.GetFileName -> string",
+    "IServerDocument.GetKind -> string",
+    "IServerDocument.GetModified -> bool"
+  ],
+  "behavior": "Unique request receipt, all loaded server document containers read twice, counts and serialized values compared, current PCB identity/path and native depth guards before/after. Any exception/incomplete/change returns complete=false. No save/close/focus/document open.",
+  "limits": "Managed ABI corroborates member existence, not DelphiScript binding; the dirty flag is current memory state, not disk equality or save permission. Panel-only/native unsupported getters may yield incomplete. Script host must pin exact PID and serialize dispatch."
+}

@@ -1,0 +1,315 @@
+{
+  "success": true,
+  "status": "no_known_blockers_found",
+  "findings": [
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 28,
+      "column": 15,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Client",
+      "receiver_type": null,
+      "member": "CurrentView"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 29,
+      "column": 31,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "CurrentView",
+      "receiver_type": null,
+      "member": "OwnerDocument"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 31,
+      "column": 25,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Doc",
+      "receiver_type": "iserverdocument",
+      "member": "FileName",
+      "documentation": [
+        {
+          "interface": "IServerDocument",
+          "declaring_interface": "IServerDocument",
+          "member": "FileName",
+          "member_kind": "property",
+          "signature": "Property FileName : Widestring Read GetFileName;",
+          "access": "read",
+          "status": "DOCUMENTED",
+          "runtime_verified": false,
+          "evidence_kind": "declaration",
+          "source_id": "system",
+          "source_url": "https://www.altium.com/documentation/altium-dxp-developer/system-api",
+          "source_heading": "IServerDocument / FileName",
+          "retrieved": "2026-10-21",
+          "documented_platform": "Delphi SDK reference",
+          "getter_in_declaration": "GetFileName",
+          "setter_in_declaration": null,
+          "source_title": "System API",
+          "observed_incompatibilities": []
+        }
+      ]
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 31,
+      "column": 89,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Doc",
+      "receiver_type": "iserverdocument",
+      "member": "Kind"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 32,
+      "column": 30,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "PCBServer",
+      "receiver_type": null,
+      "member": "GetCurrentPCBBoard"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 34,
+      "column": 22,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "OriginalBoard",
+      "receiver_type": "ipcb_board",
+      "member": "I_ObjectAddress"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 34,
+      "column": 53,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "ActiveBoard",
+      "receiver_type": "ipcb_board",
+      "member": "I_ObjectAddress"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 35,
+      "column": 33,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "ActiveBoard",
+      "receiver_type": "ipcb_board",
+      "member": "FileName",
+      "documentation": [
+        {
+          "interface": "IPCB_Board",
+          "declaring_interface": "IPCB_Board",
+          "member": "FileName",
+          "member_kind": "property",
+          "signature": "Property FileName : TPCBString Read GetState_FileName;",
+          "access": "read",
+          "status": "DOCUMENTED",
+          "runtime_verified": false,
+          "evidence_kind": "declaration",
+          "source_id": "pcb-system",
+          "source_url": "https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference",
+          "source_heading": "IPCB_Board / FileName",
+          "retrieved": "2026-10-21",
+          "documented_platform": "Delphi SDK reference",
+          "getter_in_declaration": "GetState_FileName",
+          "setter_in_declaration": null,
+          "source_title": "PCB API System Interfaces reference",
+          "observed_incompatibilities": []
+        }
+      ]
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 36,
+      "column": 25,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Client",
+      "receiver_type": null,
+      "member": "GetServerModuleByName"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 38,
+      "column": 16,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Client",
+      "receiver_type": null,
+      "member": "ProcessControl"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 38,
+      "column": 31,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "ProcessControl",
+      "receiver_type": null,
+      "member": "ProcessDepth"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 38,
+      "column": 64,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "PcbModule",
+      "receiver_type": "iservermodule",
+      "member": "ProcessControl"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 46,
+      "column": 27,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Client",
+      "receiver_type": null,
+      "member": "GetCount"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 50,
+      "column": 26,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Client",
+      "receiver_type": null,
+      "member": "GetServerModule"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 52,
+      "column": 33,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Module",
+      "receiver_type": "iservermodule",
+      "member": "DocumentCount"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 55,
+      "column": 94,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Module",
+      "receiver_type": "iservermodule",
+      "member": "ModuleName"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 58,
+      "column": 27,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Module",
+      "receiver_type": "iservermodule",
+      "member": "Documents"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 62,
+      "column": 84,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Doc",
+      "receiver_type": "iserverdocument",
+      "member": "Modified"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 95,
+      "column": 26,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "TStringList",
+      "receiver_type": null,
+      "member": "Create"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 97,
+      "column": 15,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Lines",
+      "receiver_type": "tstringlist",
+      "member": "Text"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 102,
+      "column": 160,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Lines",
+      "receiver_type": "tstringlist",
+      "member": "SaveToFile"
+    },
+    {
+      "severity": "warning",
+      "code": "unverified_member",
+      "source": "declarations",
+      "line": 103,
+      "column": 19,
+      "message": "Member availability is not verified by the compatibility catalog.",
+      "receiver": "Lines",
+      "receiver_type": "tstringlist",
+      "member": "Free"
+    }
+  ],
+  "documentation": {
+    "available": true,
+    "catalog_edition": "2026-10-21.1",
+    "catalog_sha256": "27c58970f0a3b38215ba075d7146bc6f6068d0bdfbf1115810089a2b09263c28",
+    "findings_with_references": 2,
+    "changes_lint_verdict": false,
+    "runtime_verified": false
+  },
+  "no_new_dispatch": true,
+  "native_compilation_verified": false,
+  "native_api_compatibility_verified": false,
+  "catalog_version": "2026-10-21.1",
+  "inputs_sha256": {
+    "script": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declarations": "3a39a5280aef46a363b642344cd5d2f6e5674b212caa97f3db3ee3b1cbd30f7c"
+  },
+  "limitations": [
+    "Not a DelphiScript compiler; syntax and runtime success are not certified.",
+    "Only listed typed receiver/member incompatibilities are blocking; all other member availability is unverified.",
+    "Direct var/parameter types and lexical routine scopes only; aliases, casts, dynamic dispatch and chained return types are unresolved. A source containing with disables typed-member rejection for that source.",
+    "Unknown standalone calls with parentheses are warnings; bare calls and external units are not resolved.",
+    "Duplicate checks cover simple variables/parameters/constants and sandbox collisions, not full Pascal declaration grammar."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "native_calls": false,
+  "modules": [
+    "server.tests.test_situs_native",
+    "server.tests.test_situs_lifecycle",
+    "server.tests.test_situs_route_menu",
+    "server.tests.test_routing_rules",
+    "server.tests.test_routing_rule_probes",
+    "server.tests.test_saved_drc_options"
+  ],
+  "tests_run": 61,
+  "failures": [],
+  "errors": [],
+  "skipped": [],
+  "success": true,
+  "elapsed_seconds": 2.623
+}

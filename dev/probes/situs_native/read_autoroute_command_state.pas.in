@@ -1,0 +1,109 @@
+// Standalone read-only qualification, no helper units. Procedure RunProbe.
+// Official legacy declaration (ICommandLauncher):
+// Procedure GetCommandState(ACommandName, AParameters: PChar;
+//   const AContext: IServerDocumentView; var Enabled, Checked, Visible: LongBool;
+//   Caption, ImageFile: PChar);
+// https://www.altium.com/documentation/altium-dxp-developer/system-api
+// Typed legacy launcher; ordinary script Strings, no raw pointer casts or Board casts.
+// String/PChar marshaling and output readback remain probe-only until this succeeds.
+function ProbeQuote(S: String): String;
+var I: Integer; C: String;
+begin
+    Result := '"';
+    for I := 1 to Length(S) do
+    begin
+        C := Copy(S, I, 1);
+        if C = '\' then Result := Result + '\\'
+        else if C = '"' then Result := Result + '\"'
+        else if C = #13 then Result := Result + '\r'
+        else if C = #10 then Result := Result + '\n'
+        else if C = #9 then Result := Result + '\t'
+        else Result := Result + C;
+    end;
+    Result := Result + '"';
+end;
+
+
+function ProbeBool(Value: Boolean): String;
+begin
+    if Value then Result := 'true' else Result := 'false';
+end;
+
+function ProbeUnpad(Value: String): String;
+var N: Integer;
+begin
+    N := Pos(#0, Value);
+    if N > 0 then Result := Copy(Value, 1, N - 1) else Result := Value;
+end;
+
+procedure ProbeReport(ReportPath, ProbeId, Action, Stage, Extra: String; Success: Boolean);
+var Lines: TStringList;
+begin
+    Lines := TStringList.Create;
+    try
+        Lines.Text := '{"probe_id":' + ProbeQuote(ProbeId) + ',"action":' + ProbeQuote(Action) +
+          ',"stage":' + ProbeQuote(Stage) + ',"success":' + ProbeBool(Success) +
+          ',"no_routing_command_dispatched":true,"no_save":true,"routing_state_verified":false,' + Extra + '}';
+        Lines.SaveToFile(ReportPath);
+    finally
+        Lines.Free;
+    end;
+end;
+
+procedure RunProbe;
+var
+    PcbPath, ReportPath, ProbeId, Action: String;
+    CommandName, Parameters, Caption, ImageFile: String;
+    Enabled, Checked, Visible: LongBool;
+    Board, Current: IPCB_Board;
+    Doc: IServerDocument;
+    Module: IDispatch;
+    Launcher: ICommandLauncher;
+begin
+    PcbPath := '__PCB_PATH__';
+    ReportPath := '__REPORT_PATH__';
+    ProbeId := '__PROBE_ID__';
+    Action := '__ACTION__';
+    if FileExists(ReportPath) then Exit;
+    if not SameText(ExtractFileExt(ReportPath), '.json') or SameText(PcbPath, ReportPath) then Exit;
+    if (Action <> 'Start') and (Action <> 'Setup') and (Action <> 'Stop') and (Action <> 'Pause') and (Action <> 'Reset') then Exit;
+    ProbeReport(ReportPath, ProbeId, Action, 'entered', '"getter_returned":false', False);
+    if PCBServer = nil then Exit;
+    if Client.CurrentView = nil then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(Doc.FileName, PcbPath) or not SameText(Doc.Kind, 'PCB') then Exit;
+    Board := PCBServer.GetPCBBoardByPath(PcbPath);
+    Current := PCBServer.GetCurrentPCBBoard;
+    if (Board = nil) or (Current = nil) then Exit;
+    if (Board.I_ObjectAddress <> Current.I_ObjectAddress) or not SameText(Board.FileName, PcbPath) then Exit;
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then Exit;
+    ProbeReport(ReportPath, ProbeId, Action, 'before_launcher', '"getter_returned":false', False);
+    Launcher := Client.GetCommandLauncher;
+    if Launcher = nil then Exit;
+    // Allocate script string storage for legacy output parameters. No manual PChar casts.
+    CommandName := 'PCB:Autoroute';
+    Parameters := 'Action=' + Action + #0 + StringOfChar(#0, 4096);
+    Caption := StringOfChar(#0, 4096);
+    ImageFile := StringOfChar(#0, 4096);
+    Enabled := False;
+    Checked := False;
+    Visible := False;
+    ProbeReport(ReportPath, ProbeId, Action, 'before_command_state', '"getter_returned":false', False);
+    Launcher.GetCommandState(CommandName, Parameters, Client.CurrentView,
+                             Enabled, Checked, Visible, Caption, ImageFile);
+    Current := PCBServer.GetCurrentPCBBoard;
+    if Current = nil then Exit;
+    if (Current.I_ObjectAddress <> Board.I_ObjectAddress) or not SameText(Current.FileName, PcbPath) then Exit;
+    if Client.CurrentView = nil then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(Doc.FileName, PcbPath) or not SameText(Doc.Kind, 'PCB') then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then Exit;
+    ProbeReport(ReportPath, ProbeId, Action, 'completed',
+      '"getter_returned":true,"enabled":' + ProbeBool(Enabled) + ',"checked":' + ProbeBool(Checked) +
+      ',"visible":' + ProbeBool(Visible) + ',"parameters":' + ProbeQuote(ProbeUnpad(Parameters)) +
+      ',"caption":' + ProbeQuote(ProbeUnpad(Caption)) + ',"image_file":' + ProbeQuote(ProbeUnpad(ImageFile)), True);
+end;

@@ -1,0 +1,9 @@
+{
+  "status": "PRODUCTION_UNIT_RESTORED_DRAFT_PRESERVED",
+  "restored_commit": "92ef179bba7476ca10980db559eda7e1267ab155",
+  "restored_sha256": "594063b11f4e84059f0c73915d361b7c43a9ee95bbd8754c7b2beba146f4f419",
+  "draft_sha256": "e49ef7edbbc4af0f31e158f17a84ca3773f99c62d4f2fc36105b80bca58ef037",
+  "draft_path": "dev/probes/routing_rules/pcb_document.candidate.pas",
+  "production_path": "server/AltiumScript/pcb_document.pas",
+  "native_calls": 0
+}

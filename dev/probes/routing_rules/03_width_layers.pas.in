@@ -1,0 +1,121 @@
+// Standalone read-only qualification probe. Do not add candidate units to the production project.
+// Replace the three __...__ placeholders with escaped Pascal string values.
+function ProbeQuote(S: String): String;
+var I: Integer; C: String;
+begin
+    Result := '"';
+    for I := 1 to Length(S) do
+    begin
+        C := Copy(S, I, 1);
+        if C = '\' then Result := Result + '\\'
+        else if C = '"' then Result := Result + '\"'
+        else if C = #13 then Result := Result + '\r'
+        else if C = #10 then Result := Result + '\n'
+        else if C = #9 then Result := Result + '\t'
+        else Result := Result + C;
+    end;
+    Result := Result + '"';
+end;
+
+function ProbeBool(B: Boolean): String;
+begin
+    if B then Result := 'true' else Result := 'false';
+end;
+
+function ProbeArray(Items: TStringList): String;
+var I: Integer;
+begin
+    Result := '[';
+    for I := 0 to Items.Count - 1 do
+    begin
+        if I <> 0 then Result := Result + ',';
+        Result := Result + Items[I];
+    end;
+    Result := Result + ']';
+end;
+
+procedure ProbeReport(ReportPath, ProbeId, Stage, Details: String; Success: Boolean);
+var Lines: TStringList;
+begin
+    Lines := TStringList.Create;
+    try
+        Lines.Text := '{"probe_id":' + ProbeQuote(ProbeId) + ',"success":' + ProbeBool(Success) +
+                      ',"stage":' + ProbeQuote(Stage) + ',"no_board_write":true,"no_save":true,' + Details + '}';
+        Lines.SaveToFile(ReportPath);
+    finally
+        Lines.Free;
+    end;
+end;
+
+procedure RunProbe;
+var
+    PcbPath, ReportPath, ProbeId, Values: String;
+    Board, Current: IPCB_Board;
+    Doc: IServerDocument;
+    Module: IDispatch;
+    Iter: IPCB_BoardIterator;
+    Rule: IPCB_Rule;
+    Rows, Parts: TStringList;
+    L, A, B: Integer;
+begin
+    PcbPath := '__PCB_PATH__';
+    ReportPath := '__REPORT_PATH__';
+    ProbeId := '__PROBE_ID__';
+    if FileExists(ReportPath) then Exit;
+    if SameText(PcbPath, ReportPath) or not SameText(ExtractFileExt(ReportPath), '.json') then Exit;
+    if (PCBServer = nil) or (Client.CurrentView = nil) then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"PCB server/current view missing"', False); Exit; end;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"current document missing"', False); Exit; end;
+    if not SameText(Doc.FileName, PcbPath) or not SameText(Doc.Kind, 'PCB') then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"activate exact requested PCB"', False); Exit; end;
+    Board := PCBServer.GetPCBBoardByPath(PcbPath);
+    Current := PCBServer.GetCurrentPCBBoard;
+    if (Board = nil) or (Current = nil) then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"requested/current board not loaded"', False); Exit; end;
+    if (Board.I_ObjectAddress <> Current.I_ObjectAddress) or not SameText(Board.FileName, PcbPath) then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"board identity mismatch"', False); Exit; end;
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"PCB module missing"', False); Exit; end;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then
+    begin ProbeReport(ReportPath, ProbeId, 'guard', '"error":"client/PCB not idle"', False); Exit; end;
+    ProbeReport(ReportPath, ProbeId, 'before_getters', '"completed":false', False);
+    Rows := TStringList.Create;
+    Parts := TStringList.Create;
+    Iter := Board.BoardIterator_Create;
+    try
+        Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Rule := Iter.FirstPCBObject;
+        while Rule <> nil do
+        begin
+            if Ord(Rule.RuleKind) = 2 then
+            begin
+                Parts.Clear;
+                for L := 1 to 32 do
+                    Parts.Add('{"layer_id":' + IntToStr(L) + ',"min_native":' + IntToStr(Rule.MinWidth[L]) + ',"preferred_native":' + IntToStr(Rule.FavoredWidth[L]) + ',"max_native":' + IntToStr(Rule.MaxWidth[L]) + '}');
+                Values := ProbeArray(Parts);
+                Rows.Add('{"name":' + ProbeQuote(Rule.Name) + ',"priority":' + IntToStr(Rule.Priority) +
+                         ',"enabled":' + ProbeBool(Rule.DRCEnabled) + ',"scope1":' + ProbeQuote(Rule.Scope1Expression) +
+                         ',"scope2":' + ProbeQuote(Rule.Scope2Expression) + ',"values":' + Values + '}');
+            end;
+            Rule := Iter.NextPCBObject;
+        end;
+        Current := PCBServer.GetCurrentPCBBoard;
+        if Current = nil then
+        begin ProbeReport(ReportPath, ProbeId, 'after_getters', '"error":"current board missing"', False); Exit; end;
+        if (Current.I_ObjectAddress <> Board.I_ObjectAddress) or not SameText(Current.FileName, PcbPath) then
+        begin ProbeReport(ReportPath, ProbeId, 'after_getters', '"error":"current board identity changed"', False); Exit; end;
+        if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then
+        begin ProbeReport(ReportPath, ProbeId, 'after_getters', '"error":"client/PCB depth changed"', False); Exit; end;
+        ProbeReport(ReportPath, ProbeId, 'completed', '"kind_id":2,"matched_rules":' + IntToStr(Rows.Count) +
+                    ',"api_access_exercised":' + ProbeBool(Rows.Count > 0) + ',"rules":' + ProbeArray(Rows), Rows.Count > 0);
+    finally
+        Board.BoardIterator_Destroy(Iter);
+        Rows.Free;
+        Parts.Free;
+    end;
+end;

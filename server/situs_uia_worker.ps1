@@ -71,6 +71,18 @@ try {
     }
     function Read-Snapshot {
         $root = Assert-Session
+        if ($q.scope_path) {
+            $path = @($q.scope_path)
+            if (($path -join '|') -notin @('Route', 'Route|Auto Route')) { throw 'Unsupported routing menu scope' }
+            foreach ($part in $path) {
+                $nameCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, [string]$part)
+                $typeCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
+                $condition = [System.Windows.Automation.AndCondition]::new($nameCondition, $typeCondition)
+                $matches = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+                if ($matches.Count -ne 1 -or $matches[0].Current.ProcessId -ne $q.identity.pid) { throw ('Exact menu scope unavailable or ambiguous: ' + $part) }
+                $root = $matches[0]
+            }
+        }
         $rows = [Collections.Generic.List[object]]::new()
         $elements = @{}
         $queue = [Collections.Generic.Queue[object]]::new()
@@ -165,5 +177,3 @@ try {
     @{success=$false; input_attempted=$attempted; error=$_.Exception.Message; retry_performed=$false} | ConvertTo-Json -Depth 8 -Compress
     exit 1
 }
-
-

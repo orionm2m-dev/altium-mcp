@@ -1,0 +1,62 @@
+// Standalone read-only probe; no helper units. Procedure RunProbe.
+// Documented: PCBServer.SystemOptions -> IPCB_SystemOptions.LockPreRoutes.
+// https://www.altium.com/documentation/altium-dxp-developer/pcb-api-system-interfaces-reference
+// Replace __PCB_PATH__, __REPORT_PATH__, __PROBE_ID__ using Pascal apostrophe doubling.
+procedure WriteProbeReport(ReportPath, ProbeId, Stage, Extra: String; Success: Boolean);
+var Lines: TStringList; SuccessText: String;
+begin
+    if Success then SuccessText := 'true' else SuccessText := 'false';
+    Lines := TStringList.Create;
+    try
+        Lines.Text := '{"probe_id":"' + ProbeId + '","stage":"' + Stage + '","success":' + SuccessText +
+                      ',"no_board_write":true,"no_save":true,' + Extra + '}';
+        Lines.SaveToFile(ReportPath);
+    finally
+        Lines.Free;
+    end;
+end;
+
+procedure RunProbe;
+var
+    PcbPath, ReportPath, ProbeId, LockText: String;
+    Board, Current: IPCB_Board;
+    Doc: IServerDocument;
+    Module: IDispatch;
+    Options: IPCB_SystemOptions;
+    Locked: Boolean;
+begin
+    PcbPath := '__PCB_PATH__';
+    ReportPath := '__REPORT_PATH__';
+    ProbeId := '__PROBE_ID__';
+    if FileExists(ReportPath) then Exit;
+    if not SameText(ExtractFileExt(ReportPath), '.json') then Exit;
+    if SameText(PcbPath, ReportPath) then Exit;
+    WriteProbeReport(ReportPath, ProbeId, 'entered', '"getter_exercised":false', False);
+    if PCBServer = nil then Exit;
+    if Client.CurrentView = nil then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(Doc.FileName, PcbPath) or not SameText(Doc.Kind, 'PCB') then Exit;
+    Board := PCBServer.GetPCBBoardByPath(PcbPath);
+    Current := PCBServer.GetCurrentPCBBoard;
+    if (Board = nil) or (Current = nil) then Exit;
+    if (Board.I_ObjectAddress <> Current.I_ObjectAddress) or not SameText(Board.FileName, PcbPath) then Exit;
+    Module := Client.ServerModuleByName('PCB');
+    if Module = nil then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then Exit;
+    WriteProbeReport(ReportPath, ProbeId, 'before_options_acquisition', '"getter_exercised":false', False);
+    Options := PCBServer.SystemOptions;
+    if Options = nil then Exit;
+    WriteProbeReport(ReportPath, ProbeId, 'before_lock_getter', '"getter_exercised":false', False);
+    Locked := Options.LockPreRoutes;
+    Current := PCBServer.GetCurrentPCBBoard;
+    if Current = nil then Exit;
+    if (Current.I_ObjectAddress <> Board.I_ObjectAddress) or not SameText(Current.FileName, PcbPath) then Exit;
+    if Client.CurrentView = nil then Exit;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then Exit;
+    if not SameText(Doc.FileName, PcbPath) or not SameText(Doc.Kind, 'PCB') then Exit;
+    if (Client.ProcessControl.ProcessDepth <> 0) or (Module.ProcessControl.ProcessDepth <> 0) then Exit;
+    if Locked then LockText := 'true' else LockText := 'false';
+    WriteProbeReport(ReportPath, ProbeId, 'completed', '"getter_exercised":true,"lock_preroutes":' + LockText, True);
+end;
