@@ -3576,6 +3576,53 @@ async def set_pcb_3d_silkscreen(ctx: Context, pcb_path: str, visible: bool) -> s
 
 
 @mcp.tool()
+async def set_pcb_3d_board_opacity(ctx: Context, pcb_path: str, opacity: float) -> str:
+    """Set PCB core opacity in 3D; 1.0 makes the two-layer substrate opaque.
+
+    Native current-PCB guard, fresh save and exact saved-profile readback.
+    Changes only core opacity; prepreg, silk, mask and copper remain as set.
+    Does not change physical PCB geometry, routing or fabrication objects.
+    """
+    import olefile, re
+    from pcb_component_models import path as model_path
+    def profile():
+        with olefile.OleFileIO(pcb_path) as doc:
+            raw=doc.openstream('Board6/Data').read().decode('latin1')
+        kinds=re.findall(r'\|3DCONFIGTYPE=([^|\r]*)',raw)
+        configs=re.findall(r'\|3DCONFIGURATION=([^|\r]*)',raw)
+        if kinds!=['.config_3d'] or len(configs)!=1:
+            raise ValueError('Unique saved .config_3d profile required')
+        value=configs[0].replace('`','|')
+        fields=dict(item.split('=',1) for item in value.split('|') if '=' in item)
+        return value,fields
+    try:
+        pcb_path=model_path(pcb_path,{'.pcbdoc'})
+        if isinstance(opacity,bool) or not isinstance(opacity,(int,float)) or not 0 <= opacity <= 1:raise ValueError('opacity must be finite between0and1')
+        snapshot=json.loads(_script_result(await altium_bridge.execute_command('snapshot_pcb_3d_view',{'pcb_path':pcb_path})))
+        if not snapshot.get('success'):return json.dumps(snapshot)
+        before,fields=profile()
+        changed={'CFG3D.BOARDCORECOLOROPACITY':format(opacity,'.6f')}
+        updated=before
+        for key,val in changed.items():
+            if key not in fields:raise ValueError('Missing saved profile key: '+key)
+            updated,count=re.subn(r'(?<=\|)'+re.escape(key)+r'=[^|]*',key+'='+val,updated)
+            if count!=1:raise ValueError('Ambiguous saved profile key: '+key)
+        spec='\n'.join([pcb_path,'.config_3d',updated,format(opacity,'.6f')])+'\n'
+        (EXCHANGE_DIR/'pcb_3d_board_opacity_spec.txt').write_text(spec,encoding=SPEC_ENCODING,errors='strict')
+        result=json.loads(_script_result(await altium_bridge.execute_command('set_pcb_3d_board_opacity',{})))
+        if result.get('success'):
+            unused,after=profile()
+            expected=dict(fields,**changed)
+            result['other_3d_profile_keys_unchanged']=all(after.get(k)==v for k,v in fields.items() if k not in changed) and set(after)==set(fields)
+            result['saved_profile_verified']=after==expected
+            result['success']=bool(result['saved_profile_verified'])
+            result['changed_settings']=changed
+        return json.dumps(result)
+    except (ValueError,TypeError,OSError,KeyError) as exc:
+        return json.dumps({'success':False,'error':str(exc)})
+
+
+@mcp.tool()
 async def set_pcb_component_models(ctx: Context, pcb_path: str, models: list, timeout_s: int = 300) -> str:
     """Attach embedded STEP bodies to exact placed components, add-only.
 

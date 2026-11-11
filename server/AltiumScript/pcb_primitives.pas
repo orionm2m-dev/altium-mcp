@@ -1906,3 +1906,25 @@ begin
           ',"bottom_opacity":'+PcbDocNum('0.000000',Board.GetState_ViewConfigOpacity3D(eBottomOverlay))+'}';
     finally Spec.Free; end;
 end;
+
+
+function Set3DBoardOpacityReport(SpecPath: String): String;
+var Board: IPCB_Board; Error,Path: String; Spec: TStringList;
+    Applied,Saved: Boolean; Expected: Double;
+begin
+    Spec := TStringList.Create;
+    try
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count<>4 then begin Result := PcbDocError('invalid3Dopacity spec'); Exit; end;
+        Path := Spec[0]; Error := ModelBoardGuard(Path,Board);
+        if Error<>'' then begin Result := PcbDocError(Error); Exit; end;
+        if Spec[1]<>'.config_3d' then begin Result := PcbDocError('unsupported config kind'); Exit; end;
+        Expected := SafeStrToFloat(Spec[3]);
+        if (Expected<0) or (Expected>1) then begin Result := PcbDocError('invalid opacity'); Exit; end;
+        Applied := Board.SetState_ViewConfigFromString_ForceRebuild(Spec[1],Spec[2]);
+        if not Applied then begin Result := PcbDocError('native configuration was refused'); Exit; end;
+        Board.GraphicallyInvalidate; Board.ViewManager_FullUpdate;
+        Saved := SaveBoardDocument(Path);
+        Result := '{"success":'+JSONBool(Saved)+',"saved":'+JSONBool(Saved)+',"native_profile_applied":true}';
+    finally Spec.Free; end;
+end;

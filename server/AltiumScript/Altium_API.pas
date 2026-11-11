@@ -1177,6 +1177,8 @@ begin
             Result := SetPcbPadsReport(ROOT_DIR + 'pcb_pads_spec.txt');
         'set_pcb_keepouts':
             Result := SetPcbKeepoutsReport(ROOT_DIR + 'pcb_keepouts_spec.txt');
+        'set_pcb_3d_board_opacity':
+            Result := Set3DBoardOpacityReport(ROOT_DIR + 'pcb_3d_board_opacity_spec.txt');
         'snapshot_pcb_3d_view':
             Result := Snapshot3DViewReport(ParamValueOf('pcb_path'));
         'set_pcb_3d_silkscreen':
