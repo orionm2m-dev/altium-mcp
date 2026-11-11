@@ -198,6 +198,41 @@ def _manual_stop_background_environment(exe, environment, previous_state):
     return result
 
 
+def _native_stop_environment(exe, environment, expected=None):
+    """Verify one configured native Stop target without foreground or input."""
+    import emergency_stop
+    from situs_native_settings_service import _environment
+    pid = environment.get("target_pid")
+    if (type(pid) is not int or pid <= 0
+            or environment.get("configured_process_ids") != [pid]
+            or environment.get("unresolved_launch_ids")
+            or environment.get("script_errors") or environment.get("dialog_handles")):
+        raise ValueError("Native Stop target has unresolved process/modal blockers")
+    with emergency_stop.WinProcess(pid) as process:
+        before = process.identity()
+        emergency_stop._valid_identity(before, exe, pid)
+        if type(before.get("creation_filetime")) is not int or before["creation_filetime"] <= 0:
+            raise ValueError("Native Stop process creation identity is unavailable")
+        if expected is not None and not emergency_stop._same_identity(expected, before):
+            raise ValueError("Native Stop process identity changed")
+        readiness = _environment(exe, pid)
+        if (readiness.get("main_responsive") is not True
+                or type(readiness.get("main_hwnd")) is not int or readiness["main_hwnd"] <= 0
+                or readiness.get("foreground_required") is not False
+                or readiness.get("focus_or_input_requested") is not False):
+            raise ValueError("Native Stop exact main-window readiness was not verified")
+        after = process.identity()
+        emergency_stop._valid_identity(after, exe, pid)
+        if not emergency_stop._same_identity(before, after):
+            raise ValueError("Native Stop identity changed during readiness check")
+    result = dict(environment, ready=True, ui_responsive=True,
+                  foreground_required=False, focus_or_input_requested=False,
+                  native_idle_verified=False, native_stop_identity=after,
+                  native_stop_readiness=readiness)
+    result.pop("reason", None)
+    return result
+
+
 def _launch(exe, argument):
     # Preserve Altium's raw process syntax without cmd.exe, shell escaping or
     # inherited MCP pipes. The returned handle belongs to X2, not a shell.
@@ -287,7 +322,7 @@ def _pending_probe_evidence(exchange_dir, old):
     outcome = json.loads(result_raw.decode("utf-8-sig"))
     if outcome != {"probe": "executor ok", "token": token}:
         raise ValueError("Existing probe result does not match this recovery token")
-    expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity")
+    expected = old.get("fresh_instance_identity") or old.get("verified_prior_stop_exit", {}).get("main_identity") or old.get("process_identity")
     manual_identity = _manual_stop_probe_identity(old)
     if manual_identity is not None:
         if expected is not None and not emergency_stop._same_identity(expected, manual_identity):
@@ -356,6 +391,10 @@ def _reconcile_late_probe(exe, exchange_dir, old):
                     and environment.get("foreground_confirmed") is False):
                 environment = _manual_stop_background_environment(
                     exe, environment, {"process_identity": expected})
+                background_verified = True
+            if (old.get("process_identity") is not None
+                    and environment.get("foreground_confirmed") is False):
+                environment = _native_stop_environment(exe, environment, expected)
                 background_verified = True
             windows = environment.get("process_windows", {})
             rows = windows.get(expected["pid"], windows.get(str(expected["pid"]), []))
@@ -444,6 +483,59 @@ def _fresh_start_after_pending_probe(exe, exchange_dir, old):
                 "old_main_exit_verified": True, "new_probe_required": True}}
 
 
+def _native_stop_launcher_exit(stop_pid):
+    """Prove only absence/exit, never infer successful delivery from absence."""
+    import emergency_stop
+    for process in _launches.values():
+        if process.poll() is None:
+            raise ValueError("A recovery launcher is still running")
+    owned = _launches.get(stop_pid)
+    if owned is not None:
+        return {"source": "owned_popen", "exit_code": owned.poll(), "exited": True}
+    try:
+        process = emergency_stop.WinProcess(stop_pid)
+    except OSError as error:
+        if getattr(error, "winerror", None) != 87:
+            raise
+        return {"source": "pid_absent_at_open", "exit_code": None, "exited": True,
+                "historical_creation_verified": False}
+    with process:
+        observed = process.exit_observation()
+    if (observed.get("pid") != stop_pid or type(observed.get("exit_code")) is not int
+            or observed["exit_code"] == 259):
+        raise ValueError("The exact recorded Stop PID is live or its exit is unconfirmed")
+    return {"source": "query_handle_exited", "exit_code": observed["exit_code"],
+            "exited": True, "historical_creation_verified": False}
+
+
+def _resume_native_stop_evidence(exe, exchange_dir, old):
+    """Permit only a fresh read-only probe after one late Stop launcher exit."""
+    path = Path(exchange_dir) / "script_recovery_state.json"
+    raw = path.read_bytes()
+    launches = old.get("launches", [])
+    identity = old.get("process_identity")
+    if (json.loads(raw) != old or old.get("phase") != "stop_pending"
+            or old.get("manual_stop_confirmed") is not False
+            or old.get("fresh_instance_confirmed") is not False
+            or old.get("probe_result_path") or old.get("require_fresh_instance")
+            or not isinstance(identity, dict)
+            or old.get("environment", {}).get("native_stop_identity") != identity
+            or len(launches) != 1 or launches[0].get("phase") != "stop"
+            or launches[0].get("exit_code") is not None
+            or type(launches[0].get("pid")) is not int or launches[0]["pid"] <= 0
+            or launches[0]["pid"] == identity.get("pid")):
+        raise ValueError("One exact background-native Stop checkpoint is required")
+    observation = _native_stop_launcher_exit(launches[0]["pid"])
+    environment = _native_stop_environment(exe, inspect_environment(exe), identity)
+    if path.read_bytes() != raw:
+        raise ValueError("Native Stop checkpoint changed during reconciliation")
+    return {"environment": environment, "evidence": {
+        "kind": "late_native_stop_exit_read_only_probe_only", "main_identity": identity,
+        "stop_pid": launches[0]["pid"], "launcher": observation,
+        "stop_delivery_verified": False, "stop_redispatched": False,
+        "manual_stop_confirmed": False, "prior_latch_token": old["token"]}}
+
+
 async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                   dispatch_timeout_seconds=8, manual_stop_confirmed=False, *, verified_stop=None):
     """Caller holds the shared bridge lock throughout this operation."""
@@ -451,6 +543,13 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         return _blocked({}, "Probe timeout must be 1..60s; dispatch timeout 1..15s")
     old = blocked_state(exchange_dir)
     restarted = None
+    native_stop_resume = None
+    if (old and old.get("phase") == "stop_pending" and old.get("process_identity")
+            and not manual_stop_confirmed and verified_stop is None):
+        try:
+            native_stop_resume = _resume_native_stop_evidence(exe, exchange_dir, old)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+            return _blocked(old, "Late native Stop reconciliation failed: " + str(error), no_new_dispatch=True)
     if (old and old.get("phase") == "probe_pending" and not manual_stop_confirmed
             and verified_stop is None):
         reconciled = _reconcile_late_probe(exe, exchange_dir, old)
@@ -498,11 +597,11 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     if pending:
         return _blocked(old or {}, "Previous recovery launcher is still running",
                         pending_launch_ids=pending)
-    if old and not manual_stop_confirmed and not fresh_emergency and verified_stop is None and restarted is None:
+    if old and not manual_stop_confirmed and not fresh_emergency and verified_stop is None and restarted is None and native_stop_resume is None:
         return _blocked(old, "Previous recovery is unresolved; no new launch dispatched")
     recorded_pending = [item["pid"] for item in (old or {}).get("launches", [])
                         if item.get("pid") and item.get("exit_code") is None]
-    environment = restarted["environment"] if restarted is not None else inspect_environment(exe, recorded_pending)
+    environment = native_stop_resume["environment"] if native_stop_resume is not None else (restarted["environment"] if restarted is not None else inspect_environment(exe, recorded_pending))
     if (manual_stop_confirmed and environment.get("ready") is False
             and environment.get("foreground_confirmed") is False
             and not environment.get("unresolved_launch_ids")
@@ -512,10 +611,20 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
         except (OSError, ValueError, TypeError, KeyError) as error:
             return _blocked(old or {}, "Manual Stop background readiness failed: " + str(error),
                             environment=environment)
+    # Native EditScript:Stop does not require UI focus. Only an initial,
+    # unlatched recovery may enter this branch; pending operations still block.
+    if (not manual_stop_confirmed and old is None and verified_stop is None
+            and environment.get("ready") is False
+            and environment.get("foreground_confirmed") is False):
+        try:
+            environment = _native_stop_environment(exe, environment)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            return _blocked({}, "Native Stop background readiness failed: " + str(error),
+                            environment=environment)
     if not environment.get("ready"):
         return _blocked(old or {}, environment.get("reason", "Preflight failed"),
                         environment=environment)
-    stop_evidence = None
+    stop_evidence = native_stop_resume["evidence"] if native_stop_resume is not None else None
     if verified_stop is not None:
         try:
             stop_evidence = verified_stop.consume(exe, exchange_dir, old, environment)
@@ -552,6 +661,8 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
     state = {"token": token, "phase": "preflight", "environment": environment,
              "manual_stop_confirmed": manual_stop_confirmed,
              "fresh_instance_confirmed": fresh_identity is not None, "launches": []}
+    if "native_stop_identity" in environment:
+        state["process_identity"] = environment["native_stop_identity"]
     if stop_evidence is not None:
         state["verified_prior_stop_exit"] = stop_evidence
     if fresh_identity is not None:
@@ -585,6 +696,10 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
             # Exit 0 permits only a read-only probe; it does not prove Stop was
             # delivered or that any native PCB transaction has been balanced.
             environment = inspect_environment(exe)
+            if "process_identity" in state:
+                environment = _native_stop_environment(exe, environment, state["process_identity"])
+                state["after_stop_environment"] = environment
+                _write_state(exchange_dir, state)
             if not environment.get("ready"):
                 state["phase"] = "blocked_after_stop"
                 _write_state(exchange_dir, state)
@@ -609,6 +724,9 @@ async def _recover_emergency_serialized(exe, exchange_dir, timeout_seconds=30,
                                                                        "orderly_close_inventory_pending"):
                         from altium_orderly_close import verify_restart_after_probe
                         state["restart_after_probe"] = verify_restart_after_probe(exe, fresh_identity)
+                    if "process_identity" in state:
+                        state["after_probe_environment"] = _native_stop_environment(
+                            exe, inspect_environment(exe), state["process_identity"])
                     state["phase"] = "recovered"
                     _write_state(exchange_dir, state)
                     return {"recovered": True, "blocked": False, "probe": outcome,

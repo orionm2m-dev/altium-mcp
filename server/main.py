@@ -1814,8 +1814,9 @@ async def recover_script_executor(ctx: Context, timeout_seconds: int = 30,
                                   manual_stop_confirmed: bool = False) -> str:
     """Bounded Stop + unique read-only probe, serialized with bridge commands.
 
-    Requires one configured Altium process, foreground and responsive UI, and
-    no modal dialog. Does not press keys, close/answer dialogs, save documents,
+    Requires one configured Altium process with a responsive exact main window
+    and no modal dialog. Initial native Stop/probe also works in the background
+    after process identity verification, without focus or input. Does not press keys, close/answer dialogs, save documents,
     terminate processes or retry mutations. Failed/pending dispatch is latched
     across server restarts. After manually stopping the failed script using
     Ctrl+F3, set manual_stop_confirmed=true to probe without another Stop.
@@ -3517,6 +3518,34 @@ async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
         trace_lines = []
     return _script_result(response, {"trace_path": str(trace_path),
                                      "last_phase": trace_lines[-1] if trace_lines else None})
+
+
+@mcp.tool()
+async def inspect_pcb_routing(ctx: Context, pcb_path: str, tracks: list = None,
+                              vias: list = None, timeout_s: int = 120) -> str:
+    """Read exact routing objects without mutating or saving the current PCB.
+
+    Inputs use set_pcb_routing's exact geometry and add/delete expected final
+    states, but this command only observes. It never applies those operations.
+    Both process depths must be zero; the requested PCB must already be current.
+    Returns existence counts, exact observed geometry/net/lock state, and whether
+    each target matches the requested final state. Missing add targets or still
+    present delete targets return matches=false; they are never repaired here.
+    Ambiguous, foreign-net, owned and keepout objects fail closed. No opening,
+    focus change, transaction repair, connectivity rebuild, save, or retry.
+    Use only after an interrupted command has stopped and idle was established.
+    This is neither a DRC nor a verification of saved-file persistence.
+    """
+    try:
+        if type(timeout_s) is not int or not 1 <= timeout_s <= 3600:
+            raise ValueError("timeout_s must be an integer in 1..3600")
+        spec = build_routing_spec(pcb_path, tracks, vias)
+    except (ValueError, TypeError, KeyError) as exc:
+        return json.dumps({"success": False, "error": str(exc)})
+    (EXCHANGE_DIR / "pcb_routing_inspection_spec.txt").write_text(
+        spec, encoding=SPEC_ENCODING, errors="strict")
+    response = await altium_bridge.execute_command("inspect_pcb_routing", {}, timeout=timeout_s)
+    return _script_result(response)
 
 
 @mcp.tool()

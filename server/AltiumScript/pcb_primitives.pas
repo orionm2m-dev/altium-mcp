@@ -772,6 +772,93 @@ begin
         ', "native_geometry_key": ' + JSONStr(RoutingObjectKey(P)) + ', "verified": true}';
 end;
 
+// Read-only reconciliation of an interrupted exact routing request.
+// Does not focus/open a document, repair a transaction, rebuild, or save.
+function InspectPcbRoutingReport(SpecPath: String): String;
+var
+    Spec, Keys, Items : TStringList;
+    Board : IPCB_Board;
+    Doc : IServerDocument;
+    P : IPCB_Primitive;
+    Net : IPCB_Net;
+    PcbPath, Error, Rec, Key, NetName, Action, Observed : String;
+    i, Count, NetCount : Integer;
+    Matches, AllMatches : Boolean;
+begin
+    if not FileExists(SpecPath) then
+    begin Result := PcbDocError('routing inspection spec does not exist'); Exit; end;
+    Spec := TStringList.Create; Keys := TStringList.Create; Items := TStringList.Create;
+    try
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count < 2 then
+        begin Result := PcbDocError('routing inspection must not be empty'); Exit; end;
+        PcbPath := GetFieldFromPipeString(Spec[0], 1);
+        Error := PcbPrimitiveProcessGuard(0);
+        if (Error = '') and (not FileExists(PcbPath)) then Error := 'requested PCB file does not exist';
+        if Error = '' then
+        begin
+            if Client.CurrentView = nil then Error := 'there is no current document view'
+            else
+            begin
+                Doc := Client.CurrentView.OwnerDocument;
+                if Doc = nil then Error := 'there is no current document'
+                else if not SameText(Doc.FileName, PcbPath) then Error := 'current document differs from requested PCB'
+                else if not SameText(Doc.Kind, 'PCB') then Error := 'current document is not a PCB';
+            end;
+        end;
+        if Error = '' then
+        begin
+            Board := GetBoardSafe(0);
+            if Board = nil then Error := 'current PCB board is unavailable'
+            else if not SameText(Board.FileName, PcbPath) then Error := 'current board differs from requested PCB';
+        end;
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        // Validate all inputs before collecting any observations.
+        for i := 1 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i]; Error := RoutingRecordGuard(Board, Rec);
+            if Error <> '' then Break;
+            NetName := GetFieldFromPipeString(Rec, 2);
+            Net := RoutingNet(Board, NetName, NetCount);
+            if NetCount <> 1 then begin Error := 'net must resolve exactly once: ' + NetName; Break; end;
+            Key := RoutingRequestKey(Board, Rec);
+            if Keys.IndexOf(Key) >= 0 then begin Error := 'duplicate native routing geometry in inspection'; Break; end;
+            Keys.Add(Key);
+        end;
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        AllMatches := True;
+        for i := 1 to Spec.Count - 1 do
+        begin
+            Rec := Spec[i]; Key := Keys[i - 1];
+            Action := GetFieldFromPipeString(Rec, 1); NetName := GetFieldFromPipeString(Rec, 2);
+            P := FindRoutingPrimitive(Board, Key, Count);
+            Matches := False; Observed := 'null';
+            if Count > 1 then Error := 'multiple routing objects match exact geometry'
+            else if Count = 1 then
+            begin
+                Error := RoutingOwnershipGuard(P, NetName);
+                if Error = '' then
+                begin
+                    Observed := RoutingReadbackJSON(Board, P, 'observed', i);
+                    Matches := (Action = 'add') and (P.Moveable = (GetFieldFromPipeString(Rec, 9) = '0'));
+                end;
+            end
+            else Matches := Action = 'delete';
+            if Error <> '' then Matches := False;
+            AllMatches := AllMatches and Matches;
+            Items.Add('{"index": ' + IntToStr(i) + ', "requested_operation": ' + JSONStr(Action) +
+                ', "requested_net": ' + JSONStr(NetName) + ', "native_geometry_key": ' + JSONStr(Key) +
+                ', "present_count": ' + IntToStr(Count) + ', "matches_requested_final_state": ' + JSONBool(Matches) +
+                ', "error": ' + JSONStr(Error) + ', "observed": ' + Observed + '}');
+            if Error <> '' then Break;
+        end;
+        Result := '{"success": ' + JSONBool(Error = '') + ', "error": ' + JSONStr(Error) +
+            ', "path": ' + JSONStr(PcbPath) + ', "read_only": true, "saved": false, "mutation_attempted": false' +
+            ', "all_match_requested_final_state": ' + JSONBool(AllMatches and (Error = '')) +
+            ', ' + BuildJSONArray(Items, 'observations') + '}';
+    finally Spec.Free; Keys.Free; Items.Free; end;
+end;
+
 function SetPcbRoutingReport(SpecPath: String): String;
 var
     Spec, Keys, Actions, Items, Trace : TStringList;
@@ -927,11 +1014,16 @@ begin
                     P.Moveable := GetFieldFromPipeString(Rec, 9) = '0';
                     KeepoutTrace(Trace, TracePath, 'register_object', i, NetName);
                     Board.AddPCBObject(P);
+                    KeepoutTrace(Trace, TracePath, 'add_object_completed', i, NetName);
                     PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, P.I_ObjectAddress);
+                    KeepoutTrace(Trace, TracePath, 'registration_message_completed', i, NetName);
                     Added := Added + 1;
                     Actions.Add('added');
+                    KeepoutTrace(Trace, TracePath, 'local_key_readback', i, NetName);
                     if RoutingObjectKey(P) <> Key then Error := 'new routing geometry readback mismatch';
+                    KeepoutTrace(Trace, TracePath, 'local_key_readback_completed', i, NetName);
                     if Error = '' then Error := RoutingOwnershipGuard(P, NetName);
+                    KeepoutTrace(Trace, TracePath, 'ownership_readback_completed', i, NetName);
                     if Error <> '' then Break;
                 end;
             end;

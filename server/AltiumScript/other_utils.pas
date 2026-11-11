@@ -179,6 +179,7 @@ begin
        (CommandName = 'recover_pcb_process') or
        (CommandName = 'set_pcb_pads') or
        (CommandName = 'set_pcb_keepouts') or
+       (CommandName = 'inspect_pcb_routing') or
        (CommandName = 'set_pcb_routing') or
        (CommandName = 'set_pcb_polygons') or
        (CommandName = 'save_documents') then

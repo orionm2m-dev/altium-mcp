@@ -1177,6 +1177,8 @@ begin
             Result := SetPcbPadsReport(ROOT_DIR + 'pcb_pads_spec.txt');
         'set_pcb_keepouts':
             Result := SetPcbKeepoutsReport(ROOT_DIR + 'pcb_keepouts_spec.txt');
+        'inspect_pcb_routing':
+            Result := InspectPcbRoutingReport(ROOT_DIR + 'pcb_routing_inspection_spec.txt');
         'set_pcb_routing':
             Result := SetPcbRoutingReport(ROOT_DIR + 'pcb_routing_spec.txt');
         'set_pcb_polygons':
