@@ -86,10 +86,10 @@ def fresh_image_sha256(exe, hwnd, expected_identity):
 def verify(target, confirmation):
     required = {"receipt_path", "image_sha256", "classification"}
     if (not isinstance(confirmation, dict) or set(confirmation) != required
-            or confirmation["classification"] != "undeclared_identifier"
+            or confirmation["classification"] not in {"undeclared_identifier", "numeric_conversion_error"}
             or not isinstance(confirmation["image_sha256"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", confirmation["image_sha256"])):
-        raise ValueError("Visual confirmation requires receipt_path, PNG image_sha256 and undeclared_identifier classification")
+        raise ValueError("Visual confirmation requires receipt_path, PNG image_sha256 and supported script-error classification")
     receipt_path = Path(confirmation["receipt_path"])
     if not receipt_path.is_absolute() or receipt_path.stat().st_size > 2_000_000:
         raise ValueError("Expected an absolute bounded public screenshot receipt file")
@@ -125,6 +125,6 @@ def verify(target, confirmation):
     if fresh_image_sha256(target.exe, target.hwnd, target.identity) != expected:
         raise ValueError("Live dialog image changed since visual confirmation; no input")
     target.verify()
-    return {"classification": "undeclared_identifier", "classification_source": "caller visual confirmation; not OCR",
+    return {"classification": confirmation["classification"], "classification_source": "caller visual confirmation; not OCR",
         "receipt_path": str(receipt_path), "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
         "image_sha256": expected, "fresh_image_matches": True}

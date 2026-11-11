@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from step_export import export_step
 from pcb_primitives import build_pad_spec, build_keepout_spec, build_process_recovery_spec
 from pcb_routing import build_routing_spec
+from pcb_component_models import build_models_spec
 from pcb_polygons import build_polygon_spec
 import dialogs
 import script_guard
@@ -1452,7 +1453,7 @@ async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
                                    expected_error_text: str = "",
                                    button_hwnd: int | None = None,
                                    visual_confirmation: dict | None = None) -> str:
-    """Inspect or acknowledge one exact owned Undeclared identifier error.
+    """Inspect or acknowledge one exact owned, whitelisted script error.
 
     inspect reads a pinned configured Altium Error/TMessageForm and its child
     text through bounded WM_GETTEXT, returning the exact error text and OK HWND.
@@ -1466,7 +1467,9 @@ async def acknowledge_script_error(ctx: Context, action: str, target_pid: int,
     gesture does not prove dialog closure or executor recovery; inspect next.
     For windowless message text only, visual_confirmation may supply exactly
     receipt_path (absolute public get_screenshot receipt), image_sha256 (its PNG)
-    and classification='undeclared_identifier'. The caller must have viewed that
+    and classification='undeclared_identifier' or 'numeric_conversion_error'.
+    The latter requires exact EConvertError numeric floating-point error text.
+    The caller must have viewed that
     exact image. Its pinned identity and fresh same-method full-image hash must
     match before input; this is explicit visual attestation, not machine OCR.
     Any readable conflicting message refuses this path. expected_error_text and
@@ -3518,6 +3521,96 @@ async def set_pcb_keepouts(ctx: Context, pcb_path: str, keepouts: list) -> str:
         trace_lines = []
     return _script_result(response, {"trace_path": str(trace_path),
                                      "last_phase": trace_lines[-1] if trace_lines else None})
+
+
+@mcp.tool()
+async def set_pcb_3d_silkscreen(ctx: Context, pcb_path: str, visible: bool) -> str:
+    """Show/hide both silkscreen sides in 3D without editing silk primitives.
+
+    Exact PCB must already be current, Client/PCB depth zero. Saves a fresh
+    native snapshot, reads its .config_3d profile, changes only the two visibility
+    flags and two opacity values, applies through the native Board API, saves
+    and verifies every other profile key unchanged. visible=true sets opacity1.
+    Does not set 2D visibility, open/focus, remove text or alter fabrication data.
+    """
+    import olefile, re
+    from pcb_component_models import path as model_path
+    def profile():
+        with olefile.OleFileIO(pcb_path) as doc:
+            raw=doc.openstream('Board6/Data').read().decode('latin1')
+        kinds=re.findall(r'\|3DCONFIGTYPE=([^|\r]*)',raw)
+        configs=re.findall(r'\|3DCONFIGURATION=([^|\r]*)',raw)
+        if kinds!=['.config_3d'] or len(configs)!=1:
+            raise ValueError('Unique saved .config_3d profile required')
+        value=configs[0].replace('`','|')
+        fields=dict(item.split('=',1) for item in value.split('|') if '=' in item)
+        return value,fields
+    try:
+        pcb_path=model_path(pcb_path,{'.pcbdoc'})
+        if type(visible) is not bool:raise ValueError('visible must be boolean')
+        snapshot=json.loads(_script_result(await altium_bridge.execute_command('snapshot_pcb_3d_view',{'pcb_path':pcb_path})))
+        if not snapshot.get('success'):return json.dumps(snapshot)
+        before,fields=profile()
+        changed={'CFG3D.SHOWTOPSILKSCREEN':'TRUE' if visible else 'FALSE',
+                 'CFG3D.SHOWBOTSILKSCREEN':'TRUE' if visible else 'FALSE',
+                 'CFG3D.TOPSILKSCREENCOLOROPACITY':'1.000000' if visible else '0.000000',
+                 'CFG3D.BOTSILKSCREENCOLOROPACITY':'1.000000' if visible else '0.000000'}
+        updated=before
+        for key,val in changed.items():
+            if key not in fields:raise ValueError('Missing saved profile key: '+key)
+            updated,count=re.subn(r'(?<=\|)'+re.escape(key)+r'=[^|]*',key+'='+val,updated)
+            if count!=1:raise ValueError('Ambiguous saved profile key: '+key)
+        spec='\n'.join([pcb_path,'.config_3d',updated,'1' if visible else '0'])+'\n'
+        (EXCHANGE_DIR/'pcb_3d_silkscreen_spec.txt').write_text(spec,encoding=SPEC_ENCODING,errors='strict')
+        result=json.loads(_script_result(await altium_bridge.execute_command('set_pcb_3d_silkscreen',{})))
+        if result.get('success'):
+            unused,after=profile()
+            expected=dict(fields,**changed)
+            result['other_3d_profile_keys_unchanged']=all(after.get(k)==v for k,v in fields.items() if k not in changed) and set(after)==set(fields)
+            result['saved_profile_verified']=after==expected
+            result['success']=bool(result['saved_profile_verified'])
+            result['changed_settings']=changed
+        return json.dumps(result)
+    except (ValueError,TypeError,OSError,KeyError) as exc:
+        return json.dumps({'success':False,'error':str(exc)})
+
+
+@mcp.tool()
+async def set_pcb_component_models(ctx: Context, pcb_path: str, models: list, timeout_s: int = 300) -> str:
+    """Attach embedded STEP bodies to exact placed components, add-only.
+
+    The PCB must already be current and both native process depths zero.
+    Each record requires designator, model_path, sha256, x_mm, y_mm,
+    rotation_deg, side, footprint, bounds_xy_mm=[xmin,ymin,xmax,ymax], color.
+    Models are pre-oriented in board XY axes about the component origin;
+    positive model Z extends away from the chosen board side. XY bounds are
+    relative to that component origin. Top through-hole models may have negative
+    Z tails. PCB positions are mm relative to board origin. color is a native
+    TColor integer (0xBBGGRR). Models become component-owned on Mechanical13.
+    Whole batch identity/file/hash/import/bounds checked before mutation.
+    Existing bodies, ambiguous components or changed placements are refused.
+    Never moves components/pads/copper. Saves after ownership/readback check.
+    Timeout does not cancel execution; inspect trace and late reply before retry.
+    No claim of manufacturer's geometry, tolerances or DRC is made by import.
+    """
+    try:
+        if type(timeout_s) is not int or not 1 <= timeout_s <= 3600:
+            raise ValueError('timeout_s must be 1..3600')
+        spec = build_models_spec(pcb_path, models)
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        return json.dumps({'success': False, 'error': str(exc)})
+    path = EXCHANGE_DIR / 'pcb_component_models_spec.txt'
+    path.write_text(spec, encoding=SPEC_ENCODING, errors='strict')
+    Path(str(path)+'.trace.txt').write_text('dispatch_pending\n',encoding=SPEC_ENCODING)
+    response = await altium_bridge.execute_command('set_pcb_component_models', {}, timeout=timeout_s)
+    return _script_result(response, {'trace_path': str(path)+'.trace.txt'})
+
+
+@mcp.tool()
+async def inspect_pcb_component_models(ctx: Context, pcb_path: str) -> str:
+    """Read native component-owned 3D bodies without opening, saving or modifying PCB."""
+    response = await altium_bridge.execute_command('inspect_pcb_component_models', {'pcb_path':pcb_path})
+    return _script_result(response)
 
 
 @mcp.tool()

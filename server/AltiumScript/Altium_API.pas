@@ -1177,6 +1177,14 @@ begin
             Result := SetPcbPadsReport(ROOT_DIR + 'pcb_pads_spec.txt');
         'set_pcb_keepouts':
             Result := SetPcbKeepoutsReport(ROOT_DIR + 'pcb_keepouts_spec.txt');
+        'snapshot_pcb_3d_view':
+            Result := Snapshot3DViewReport(ParamValueOf('pcb_path'));
+        'set_pcb_3d_silkscreen':
+            Result := Set3DSilkscreenReport(ROOT_DIR + 'pcb_3d_silkscreen_spec.txt');
+        'set_pcb_component_models':
+            Result := SetComponentModelsReport(ROOT_DIR + 'pcb_component_models_spec.txt');
+        'inspect_pcb_component_models':
+            Result := InspectComponentModelsReport(ParamValueOf('pcb_path'));
         'inspect_pcb_routing':
             Result := InspectPcbRoutingReport(ROOT_DIR + 'pcb_routing_inspection_spec.txt');
         'set_pcb_routing':

@@ -106,10 +106,29 @@ class ErrorDialogTests(unittest.TestCase):
         import script_error_visual
         self.rows[11]["content"] = ""
         with patch.object(script_error_visual, "verify", side_effect=ValueError("Live image changed")) as verify:
-            self.assertTrue(self.call("acknowledge", visual_confirmation={})["blocked"])
+            self.assertTrue(self.call("acknowledge", visual_confirmation={"classification": "undeclared_identifier"})["blocked"])
             self.rows[11]["content"] = "Save the document?"
-            self.assertTrue(self.call("acknowledge", visual_confirmation={})["blocked"])
+            self.assertTrue(self.call("acknowledge", visual_confirmation={"classification": "undeclared_identifier"})["blocked"])
             self.assertEqual(verify.call_count, 1)
+        self.send.assert_not_called()
+
+    def test_numeric_error_requires_matching_visual_attestation(self):
+        import script_error_visual
+        self.rows[11]["content"] = ""
+        text = "EConvertError '-4.97499894' is not a valid floating point value"
+        evidence = {"classification": "numeric_conversion_error", "receipt_path": "receipt.json", "image_sha256": "a" * 64}
+        with patch.object(script_error_visual, "verify", return_value={"fresh_image_matches": True}) as verify:
+            result = self.call("acknowledge", expected_error_text=text, visual_confirmation=evidence)
+            self.assertTrue(result["success"], result)
+            verify.assert_called_once_with(self.target, evidence)
+        self.assertEqual(self.send.call_count, 2)
+
+    def test_numeric_whitelist_refuses_save_crash_and_class_mismatch(self):
+        self.rows[11]["content"] = ""
+        evidence = {"classification": "numeric_conversion_error"}
+        for text in ("Save the document?", "EAccessViolation", "EConvertError 'C:/project' is not a valid floating point value", TEXT):
+            with self.subTest(text=text):
+                self.assertTrue(self.call("acknowledge", expected_error_text=text, visual_confirmation=evidence)["blocked"])
         self.send.assert_not_called()
 
     def test_wrong_pid_dialog_title_main_or_process_identity_refuses(self):

@@ -74,6 +74,14 @@ def _snapshot(target, target_pid, expected_title):
         "refusal_reason": None if eligible else "Readable Undeclared identifier text and one supported enabled OK button are required"}
 
 
+def _visual_error_class(text):
+    if re.fullmatch(r"Undeclared identifier:\s*\S[^\r\n]*", text, re.IGNORECASE):
+        return "undeclared_identifier"
+    if re.fullmatch(r"EConvertError\s+'[-+]?(?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)' is not a valid floating point value", text):
+        return "numeric_conversion_error"
+    return None
+
+
 def control(exe, action, target_pid, target_hwnd, expected_main_title,
             expected_error_text="", button_hwnd=None, visual_confirmation=None):
     result = {"success": False, "action": action, "input_attempted": False,
@@ -101,8 +109,9 @@ def control(exe, action, target_pid, target_hwnd, expected_main_title,
             return dict(result, success=True, no_input=True)
         if visual_confirmation is not None:
             if (not snapshot["visual_confirmation_eligible"]
-                    or not re.fullmatch(r"Undeclared identifier:\s*\S[^\r\n]*", expected_error_text, re.IGNORECASE)):
-                raise ValueError("Visual confirmation is only for a windowless Undeclared identifier message with unique OK")
+                    or _visual_error_class(expected_error_text) is None
+                    or visual_confirmation.get("classification") != _visual_error_class(expected_error_text)):
+                raise ValueError("Visual confirmation requires exact supported informational error text, matching classification and unique OK")
         elif not snapshot["acknowledgment_allowed"] or snapshot["error_text"] != expected_error_text:
             raise ValueError("Dialog does not match the inspected informational error text")
         if snapshot["button"] is None or snapshot["button"]["hwnd"] != button_hwnd:

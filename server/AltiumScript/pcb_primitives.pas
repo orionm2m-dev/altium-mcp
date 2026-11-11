@@ -1728,3 +1728,181 @@ begin
             ',"before":{' + Before + '},"after":{' + After + '},' + BuildJSONArray(Deleted, 'deleted_names') + '}';
     finally Spec.Free; Deleted.Free; end;
 end;
+
+// Add-only, hash-pinned STEP attachment. Geometry is pre-oriented in PCB XY axes.
+// Placement and side must exactly match expectations; never moves components.
+function ComponentModelCount(Comp: IPCB_Component): Integer;
+var It: IPCB_GroupIterator; Body: IPCB_ComponentBody;
+begin
+    Result := 0; It := Comp.GroupIterator_Create;
+    It.AddFilter_ObjectSet(MkSet(eComponentBodyObject)); Body := It.FirstPCBObject;
+    while Body <> nil do begin Result := Result + 1; Body := It.NextPCBObject; end;
+    Comp.GroupIterator_Destroy(It);
+end;
+
+function ModelBoardGuard(Path: String; var Board: IPCB_Board): String;
+var Doc: IServerDocument;
+begin
+    Result := PcbPrimitiveProcessGuard(0); if Result <> '' then Exit;
+    if not FileExists(Path) then begin Result := 'PCB missing'; Exit; end;
+    if Client.CurrentView = nil then begin Result := 'no current view'; Exit; end;
+    Doc := Client.CurrentView.OwnerDocument;
+    if Doc = nil then begin Result := 'no current document'; Exit; end;
+    if not SameText(Doc.Kind, 'PCB') or not SameText(Doc.FileName,Path) then
+    begin Result := 'current document differs from exact PCB target'; Exit; end;
+    Board := GetBoardSafe(0);
+    if Board = nil then begin Result := 'no board'; Exit; end;
+    if not SameText(Board.FileName,Path) then Result := 'current board differs from exact PCB target';
+end;
+
+function InspectComponentModelsReport(Path: String): String;
+var Board: IPCB_Board; It: IPCB_BoardIterator; Body: IPCB_ComponentBody;
+    Items: TStringList; R: TCoordRect; Error, Ref: String; N: Integer;
+begin
+    Error := ModelBoardGuard(Path,Board);
+    if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+    Items := TStringList.Create; N := 0;
+    It := Board.BoardIterator_Create; It.AddFilter_ObjectSet(MkSet(eComponentBodyObject));
+    It.AddFilter_LayerSet(AllLayers); It.AddFilter_Method(eProcessAll);
+    Body := It.FirstPCBObject;
+    while Body <> nil do begin
+        Ref := ''; if Body.Component <> nil then Ref := Body.Component.Name.Text;
+        R := Body.BoundingRectangle;
+        Items.Add('{"designator":'+JSONStr(Ref)+',"name":'+JSONStr(Body.Name)+
+          ',"model_name":'+JSONStr(Body.Model.Name)+',"embedded":'+JSONBool(Body.Model.Embed)+
+          ',"data_size":'+IntToStr(Body.Model.DataSize)+',"side":'+IntToStr(Body.BodyProjection)+
+          ',"bounds_xy_mm":['+PcbDocNum('0.000000',(R.Left-Board.XOrigin)/393700.7874015748)+','+
+          PcbDocNum('0.000000',(R.Bottom-Board.YOrigin)/393700.7874015748)+','+
+          PcbDocNum('0.000000',(R.Right-Board.XOrigin)/393700.7874015748)+','+
+          PcbDocNum('0.000000',(R.Top-Board.YOrigin)/393700.7874015748)+']}');
+        N := N + 1; Body := It.NextPCBObject;
+    end;
+    Board.BoardIterator_Destroy(It);
+    Result := '{"success":true,"count":'+IntToStr(N)+','+BuildJSONArray(Items,'models')+'}';
+    Items.Free;
+end;
+
+function SetComponentModelsReport(SpecPath: String): String;
+var Board: IPCB_Board; Comps: array[0..127] of IPCB_Component;
+    Bodies: array[0..127] of IPCB_ComponentBody;
+    Spec,Trace: TStringList; Path,Error,Line,Ref,FileName,TracePath,Side: String;
+    I,J,N,Added: Integer; R: TCoordRect; X,Y,Rot: Double; Saved,Verified: Boolean;
+    It: IPCB_BoardIterator; TestComp: IPCB_Component; Matches: Integer;
+begin
+    Spec := TStringList.Create; Trace := TStringList.Create;
+    TracePath := SpecPath+'.trace.txt'; Added := 0; Saved := False;
+    try
+        Spec.LoadFromFile(SpecPath); Path := GetFieldFromPipeString(Spec[0],1);
+        Error := ModelBoardGuard(Path,Board);
+        if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+        N := Spec.Count-1;
+        if (N<1) or (N>128) then begin Result := PcbDocError('invalid model count'); Exit; end;
+        Trace.Add('preflight'); Trace.SaveToFile(TracePath);
+        // Whole batch identity preflight before import or transaction.
+        for I := 0 to N-1 do begin
+            Line := Spec[I+1]; Ref := GetFieldFromPipeString(Line,1);
+            if GetFieldFromPipeString(Line,0)<>'MODEL' then Error := 'invalid record';
+            for J := 0 to I-1 do if SameText(Ref,GetFieldFromPipeString(Spec[J+1],1)) then Error := 'duplicate designator';
+            Comps[I] := nil; Matches := 0;
+            It := Board.BoardIterator_Create; It.AddFilter_ObjectSet(MkSet(eComponentObject));
+            It.AddFilter_LayerSet(AllLayers); It.AddFilter_Method(eProcessAll); TestComp := It.FirstPCBObject;
+            while TestComp <> nil do begin
+                if SameText(TestComp.Name.Text,Ref) then begin Comps[I] := TestComp; Matches := Matches+1; end;
+                TestComp := It.NextPCBObject;
+            end;
+            Board.BoardIterator_Destroy(It);
+            if Matches<>1 then Error := 'component missing or ambiguous: '+Ref;
+            if Error = '' then begin
+                X := SafeStrToFloat(GetFieldFromPipeString(Line,4)); Y := SafeStrToFloat(GetFieldFromPipeString(Line,5));
+                Rot := SafeStrToFloat(GetFieldFromPipeString(Line,6)); Side := GetFieldFromPipeString(Line,7);
+                if (Abs(Comps[I].X-Board.XOrigin-MMsToCoord(X))>10) or
+                   (Abs(Comps[I].Y-Board.YOrigin-MMsToCoord(Y))>10) or
+                   (Abs(Comps[I].Rotation-Rot)>0.00001) then Error := 'placement mismatch: '+Ref;
+                if Comps[I].Pattern <> GetFieldFromPipeString(Line,8) then Error := 'footprint mismatch: '+Ref;
+                if ((Side='top') and (Comps[I].Layer<>eTopLayer)) or
+                   ((Side='bottom') and (Comps[I].Layer<>eBottomLayer)) then Error := 'side mismatch: '+Ref;
+                if ComponentModelCount(Comps[I])<>0 then Error := 'existing model refused: '+Ref;
+                if not FileExists(GetFieldFromPipeString(Line,2)) then Error := 'STEP missing: '+Ref;
+            end;
+            if Error<>'' then begin Result := PcbDocError(Error); Exit; end;
+        end;
+        // Import every model off-board, validate data and exact XY before mutation.
+        for I := 0 to N-1 do begin
+            Line := Spec[I+1]; Ref := GetFieldFromPipeString(Line,1);
+            Trace.Add('import '+Ref); Trace.SaveToFile(TracePath);
+            Bodies[I] := PCBServer.PCBObjectFactory(eComponentBodyObject,eNoDimension,eCreate_Default);
+            Bodies[I].LoadGenericModelFromFile(GetFieldFromPipeString(Line,2),True);
+            Bodies[I].Layer := eMechanical13;
+            Bodies[I].Name := 'VYBRO3D_'+Ref+'_'+Copy(GetFieldFromPipeString(Line,3),1,12);
+            if GetFieldFromPipeString(Line,7)='bottom' then Bodies[I].BodyProjection := eBoardSide_Bottom
+            else Bodies[I].BodyProjection := eBoardSide_Top;
+            Bodies[I].Model.SetState(0,0,0,0);
+            Bodies[I].OverrideColor := True;
+            Bodies[I].BodyColor3D := StrToInt(GetFieldFromPipeString(Line,13));
+            Bodies[I].BodyOpacity3D := 1.0;
+            Bodies[I].MoveByXY(Comps[I].X,Comps[I].Y);
+            R := Bodies[I].BoundingRectangle;
+            if (Bodies[I].Model.DataSize<=0) or not Bodies[I].Model.Embed then Error := 'empty or unembedded model: '+Ref;
+            if (Abs(R.Left-Comps[I].X-MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Line,9))))>MMsToCoord(0.005)) or
+               (Abs(R.Bottom-Comps[I].Y-MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Line,10))))>MMsToCoord(0.005)) or
+               (Abs(R.Right-Comps[I].X-MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Line,11))))>MMsToCoord(0.005)) or
+               (Abs(R.Top-Comps[I].Y-MMsToCoord(SafeStrToFloat(GetFieldFromPipeString(Line,12))))>MMsToCoord(0.005)) then Error := 'model bounds mismatch: '+Ref;
+            if Error<>'' then begin Result := PcbDocError(Error); Exit; end;
+        end;
+        Trace.Add('preprocess'); Trace.SaveToFile(TracePath); PCBServer.PreProcess;
+        try
+            for I := 0 to N-1 do begin
+                Trace.Add('add '+Comps[I].Name.Text); Trace.SaveToFile(TracePath);
+                Board.AddPCBObject(Bodies[I]);
+                Comps[I].AddPCBObject(Bodies[I]);
+                PCBServer.SendMessageToRobots(Board.I_ObjectAddress,c_Broadcast,PCBM_BoardRegisteration,Bodies[I].I_ObjectAddress);
+                Added := Added+1; Trace.Add('registered '+Comps[I].Name.Text); Trace.SaveToFile(TracePath);
+            end;
+        finally PCBServer.PostProcess; end;
+        Verified := True;
+        for I := 0 to N-1 do begin
+            if ComponentModelCount(Comps[I])<>1 then Verified := False;
+            if Bodies[I].Component=nil then Verified := False
+            else if Bodies[I].Component.Name.Text<>Comps[I].Name.Text then Verified := False;
+        end;
+        Board.GraphicallyInvalidate; Board.ViewManager_FullUpdate;
+        if Verified then Saved := SaveBoardDocument(Path);
+        Trace.Add('completed saved='+JSONBool(Saved)); Trace.SaveToFile(TracePath);
+        Result := '{"success":'+JSONBool(Saved and Verified)+',"saved":'+JSONBool(Saved)+
+          ',"verified":'+JSONBool(Verified)+',"added":'+IntToStr(Added)+',"inventory":'+InspectComponentModelsReport(Path)+'}';
+    finally Spec.Free;Trace.Free; end;
+end;
+
+function Snapshot3DViewReport(Path: String): String;
+var Board: IPCB_Board; Error: String; Saved: Boolean;
+begin
+    Error := ModelBoardGuard(Path,Board);
+    if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
+    Saved := SaveBoardDocument(Path);
+    Result := '{"success":'+JSONBool(Saved)+',"snapshot_saved":'+JSONBool(Saved)+'}';
+end;
+
+function Set3DSilkscreenReport(SpecPath: String): String;
+var Board: IPCB_Board; Error,Path: String; Spec: TStringList;
+    Applied,Saved: Boolean; Expected: Double;
+begin
+    Spec := TStringList.Create;
+    try
+        Spec.LoadFromFile(SpecPath);
+        if Spec.Count<>4 then begin Result := PcbDocError('invalid 3D silk spec'); Exit; end;
+        Path := Spec[0]; Error := ModelBoardGuard(Path,Board);
+        if Error<>'' then begin Result := PcbDocError(Error); Exit; end;
+        if Spec[1]<>'.config_3d' then begin Result := PcbDocError('unsupported config kind'); Exit; end;
+        Expected := SafeStrToFloat(Spec[3]);
+        Applied := Board.SetState_ViewConfigFromString_ForceRebuild(Spec[1],Spec[2]);
+        if not Applied then begin Result := PcbDocError('native configuration was refused'); Exit; end;
+        if (Abs(Board.GetState_ViewConfigOpacity3D(eTopOverlay)-Expected)>0.00001) or
+           (Abs(Board.GetState_ViewConfigOpacity3D(eBottomOverlay)-Expected)>0.00001) then
+        begin Result := PcbDocError('native 3D silk readback differs'); Exit; end;
+        Board.GraphicallyInvalidate; Board.ViewManager_FullUpdate;
+        Saved := SaveBoardDocument(Path);
+        Result := '{"success":'+JSONBool(Saved)+',"saved":'+JSONBool(Saved)+
+          ',"top_opacity":'+PcbDocNum('0.000000',Board.GetState_ViewConfigOpacity3D(eTopOverlay))+
+          ',"bottom_opacity":'+PcbDocNum('0.000000',Board.GetState_ViewConfigOpacity3D(eBottomOverlay))+'}';
+    finally Spec.Free; end;
+end;
