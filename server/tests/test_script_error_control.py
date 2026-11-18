@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import script_error_control as control
 import situs_setup_control
 
-TITLE = "Sandbox.PrjScr - Altium Designer (26.9.1) - Trial"
+TITLE = "Sandbox.PrjScr - Altium Designer (26.9.1)"
 TEXT = "Undeclared identifier: GetState_DesignRuleCheckerOptions"
 
 

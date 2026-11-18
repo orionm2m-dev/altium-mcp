@@ -1,6 +1,7 @@
 """Pure candidate/parser tests; no Altium, UI, or native dispatch."""
 import json
 import hashlib
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -41,7 +42,7 @@ class NativeTests(unittest.TestCase):
         source=native.build_partial_program(self.request,r'C:\receipts\native.json')
         self.assertIn(self.request['pcb_path'],source)
         self.assertIn('C:\\receipts\\native.json',source)
-        self.assertNotIn('vybro',source.lower())
+        self.assertEqual(set(re.findall(r"'([A-Za-z]:\\[^']*)'",source)),{self.request['pcb_path'],'C:\\receipts\\native.json'})
         self.assertIn("Module := Client.ServerModuleByName('PCB');",source)
         self.assertIn('(not P.InComponent) and not P.InPolygon',source)
         self.assertEqual(source.count("RunProcess('PCB:Autoroute');"),1)

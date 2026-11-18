@@ -1,6 +1,7 @@
 """Pure native settings program/receipt tests; never execute Altium."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -54,8 +55,8 @@ class BuilderTests(unittest.TestCase):
         marker = source[source.index("if not SettingsReceipt('before_setter'"):source.index("Options.LockPreRoutes :=")]
         self.assertIn("then Exit;", marker)
         self.assertNotIn("__RECEIPT", source)
-        # No hardcoded project or exchange paths belong to the fixed source.
-        self.assertNotIn("C:\\projects", source)
+        # Only the bound PCB and receipt paths may appear in the fixed source.
+        self.assertEqual(set(re.findall(r"[A-Za-z]:\\\w+", source)), {"C:\\boards", "C:\\receipts"})
         self.assertNotIn("Users\\Public", source)
 
     def test_immutable_program_passes_existing_static_preflight(self):
