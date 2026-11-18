@@ -73,7 +73,7 @@ var Board: IPCB_Board; First, Second, ErrorCode, Payload: String;
     CompleteFirst, CompleteSecond, Complete: Boolean; Lines: TStringList;
 begin
     // Per-request file must not exist. The host serializes and pins exact process.
-    if FileExists('C:\Users\Denis Fedorov\tools\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json') then Exit;
+    if FileExists('C:\work\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json') then Exit;
     Complete := False; ErrorCode := ''; Payload := '[]';
     try
         if PCBServer = nil then ErrorCode := 'pcb_server_missing'
@@ -99,6 +99,6 @@ begin
             ',"pcb_path":' + InvQuote('C:\qualification\sample.PcbDoc') + ',"current_pcb_preserved":' + InvBool(Complete) +
             ',"document_save_requested":false,"document_close_requested":false,"pid_verified_by_native":false,' +
             '"scope":"loaded_server_document_containers","error":' + InvQuote(ErrorCode) + ',"modules":' + Payload + '}';
-        if not FileExists('C:\Users\Denis Fedorov\tools\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json') then Lines.SaveToFile('C:\Users\Denis Fedorov\tools\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json');
+        if not FileExists('C:\work\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json') then Lines.SaveToFile('C:\work\altium-mcp\dev\probes\open_documents\static_fixture\f41a2b2b68f44ac8b85e8fd88ee88cab.json');
     finally Lines.Free; end;
 end;

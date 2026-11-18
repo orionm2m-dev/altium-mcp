@@ -271,7 +271,7 @@
       "code": "unverified_member",
       "source": "declarations",
       "line": 102,
-      "column": 160,
+      "column": 139,
       "message": "Member availability is not verified by the compatibility catalog.",
       "receiver": "Lines",
       "receiver_type": "tstringlist",
@@ -303,7 +303,7 @@
   "catalog_version": "2026-10-21.1",
   "inputs_sha256": {
     "script": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "declarations": "3a39a5280aef46a363b642344cd5d2f6e5674b212caa97f3db3ee3b1cbd30f7c"
+    "declarations": "6d522cef57985f480eb683a6b2e59ca90f6740dae055fb833bf1850902231179"
   },
   "limitations": [
     "Not a DelphiScript compiler; syntax and runtime success are not certified.",
