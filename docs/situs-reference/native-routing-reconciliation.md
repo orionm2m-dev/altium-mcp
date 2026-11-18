@@ -29,9 +29,10 @@ after confirming the abandoned PCB depth was exactly 1 and client depth 0.
 Runtime recovery used one Stop, one probe and read-only reconciliation of its
 late result. No repeated Stop, manual-Stop assertion, GUI input, process kill,
 mutation replay or implicit save occurred. The original modal Error still
-required the owner's OK; this change does not add native dialog dismissal.
+had to be acknowledged manually; this change does not add native dialog
+dismissal.
 
 Offline: 129 recovery/guard tests passed on a diagnostic rerun; two initial
 legacy-test failures did not reproduce individually or on that rerun. Their
 cause remains unestablished. The routing/primitive contract suite passed 35
-tests. Runtime evidence is retained with the project ECAD checkpoint.
+tests. Runtime evidence is kept outside the repository.

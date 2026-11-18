@@ -204,11 +204,9 @@ Standard checkbox behavior remains supported. DRC custom checkbox inspection
 likewise reports an unqualified raw reply and blocks limit/OK operations that
 claim verification of every checkbox.
 
-Evidence retained in the VYBRO project under
-`Info/Research/Situs_qualification_2026-10-21/`:
-`rules_setup_capture/01_get_screenshot.1.png` (before) and
-`rules_route_all_started/00_get_screenshot.1.png` (checked after the single
-gesture). These are external qualification artifacts, not API documentation.
+The before screenshot and the screenshot showing the option checked after the
+single gesture are kept with the external qualification records, outside this
+repository. They are qualification artifacts, not API documentation.
 The DRC numeric limit had separately been verified as 5000 after reopening;
 that numeric result does not imply that custom checkbox state was machine-read.
 

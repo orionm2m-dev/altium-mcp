@@ -6,4 +6,4 @@ The native helper now canonicalizes paths, enumerates loaded PCB documents, refu
 
 Verified 2026-11-10 through public MCP: the pre-existing duplicate pair is refused; a fresh file opened first through forward slashes then backslashes returns was_open=false followed by was_open=true with one canonical path. Duplicate save is refused (not_saved). These checks do not yet qualify outline persistence. Existing duplicate views are not automatically closed or discarded.
 
-Evidence: VYBRO Info/Research/PCB_D44_ECAD_20261110/document_alias_fix/. No Windows UI/focus handling. Prior files are retained.
+Qualification evidence is kept outside the repository. No Windows UI/focus handling. Prior files are retained.

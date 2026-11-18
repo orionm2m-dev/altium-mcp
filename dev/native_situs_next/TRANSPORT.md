@@ -12,6 +12,6 @@ Only the winner of the exclusive `attempt.json` creation may publish `response.j
 
 `success=true` at the envelope means the native handler returned; the action result is in `data`. Consumers must check nested `success`, `readback_verified`, and `outcome_unknown`. Completion does not prove save/persistence or global routing qualification. The native handler never saves documents.
 
-The current build is compile-only. `transport_qualification.json` records exact artifacts and qualification boundaries. Root owns installation, restart and the first harmless read request. The bootstrap/INS/RCS shapes follow the previously qualified separate read-only bundle; this new bundle has not been loaded by the implementation agent.
+The current build is compile-only. `transport_qualification.json` records exact artifacts and qualification boundaries. Installation, Altium restart and the first harmless read request are separate manual steps. The bootstrap/INS/RCS shapes follow the previously qualified separate read-only bundle; this new bundle has not yet been loaded in Altium.
 
 References: [official process parameter documentation](https://www.altium.com/documentation/altium-designer/scripting/running-scripts), [official system API](https://www.altium.com/documentation/altium-dxp-developer/system-api). These establish the process/parameter model, not a new promise about arbitrary command-line dispatch. The local bridge already uses `-R...(...)`; this new process remains to be qualified.
