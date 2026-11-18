@@ -36,9 +36,9 @@ Inspect saved physical cutouts, tracks, arcs, vias, pads and actual poured coppe
 
 Offline topology based on clipped old pours is insufficient. After a native repour one iteration split the ground net into three islands and lost hundreds of formerly connected pad pairs; the next iteration still left two islands. Both intermediate results were kept as failed checkpoints. The final local repair combined a 0.15 mm component move, a local via/track adjustment and two ground vias with a real copper bridge; after an actual repour every baseline pad pair and every ground pad was connected. Verify each repair after an actual repour; an offline plan that looked correct is not evidence.
 
-Preserve baseline connected pairs as a set (net, pad A, pad B); new intended connections may increase its size. Counts alone can hide loss elsewhere. Check geometric clearances and exact mechanical constraints separately from connectivity. Pad/body/courtyard constraints all matter, particularly around MEMS components.
+Preserve baseline connected pairs as a set (net, pad A, pad B); new intended connections may increase its size. Counts alone can hide loss elsewhere. Check geometric clearances and exact mechanical constraints separately from connectivity. Pad/body/courtyard constraints all matter.
 
-Native coordinate unit is 2.54e-6 mm. A board origin need not be a round number of millimetres (one observed origin was 100.00000066 mm). Placement and routing tools may accept different units (placement mils, routing/keepouts mm relative to origin); read each current schema and verify a native readback. Never assume absolute model coordinates and board-relative editor coordinates are interchangeable.
+Native coordinate unit is 2.54e-6 mm. A board origin need not be a round number of millimetres. Placement and routing tools may accept different units (placement mils, routing/keepouts mm relative to origin); read each current schema and verify a native readback. Never assume absolute model coordinates and board-relative editor coordinates are interchangeable.
 
 ## DRC and remaining qualification
 
@@ -46,7 +46,7 @@ A fresh, completed native report whose findings the collector returned in full, 
 
 `saved_drc_options.py` can read saved settings, but is not proof of the live DRC configuration. Qualify exact enabled batch/online checks and stop-after-N through the supported native interface before claiming a full check. Do not waive or weaken rules merely to report green.
 
-A native 3D view rebuild/save changed the same 24 bytes within the 65..109 block of every `Texts6` record, while text strings and other bytes remained unchanged. The original strict byte audit remains a historical FAIL; the serialization meaning and manufacturing impact are still unqualified. Keep that limitation in any qualification record.
+A native 3D view rebuild/save changed the same 24 bytes within the 65..109 block of the `Texts6` records, while text strings and other bytes remained unchanged. The original strict byte audit remains a historical FAIL; the serialization meaning and manufacturing impact are still unqualified. Keep that limitation in any qualification record.
 
 ## Prototype Situs modules
 
