@@ -3634,6 +3634,8 @@ async def set_pcb_component_models(ctx: Context, pcb_path: str, models: list, ti
     relative to that component origin. Top through-hole models may have negative
     Z tails. PCB positions are mm relative to board origin. color is a native
     TColor integer (0xBBGGRR). Models become component-owned on Mechanical13.
+    Bodies are named <prefix><designator>_<first 12 sha256 chars>; the prefix
+    is MCP3D_ unless ALTIUM_MCP_MODEL_BODY_PREFIX sets another one.
     Whole batch identity/file/hash/import/bounds checked before mutation.
     Existing bodies, ambiguous components or changed placements are refused.
     Never moves components/pads/copper. Saves after ownership/readback check.

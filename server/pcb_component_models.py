@@ -1,6 +1,9 @@
 """Hash-pinned add-only STEP attachment specifications. No UI automation."""
 from pathlib import Path,PureWindowsPath
-import hashlib,math,re
+import hashlib,math,os,re
+
+DEFAULT_BODY_PREFIX='MCP3D_'
+BODY_PREFIX_ENV='ALTIUM_MCP_MODEL_BODY_PREFIX'
 
 def text(v,name):
     if not isinstance(v,str) or not v or any(c in v for c in '|\r\n\0'):raise ValueError(name+' must be nonempty delimiter-free text')
@@ -16,8 +19,15 @@ def path(v,suffixes):
     if not Path(v).is_file():raise ValueError('file does not exist: '+v)
     return v
 
-def build_models_spec(pcb_path,models):
-    lines=['PCB|'+path(pcb_path,{'.pcbdoc'})];seen=set()
+def body_prefix(v=None):
+    """Name prefix for new 3D bodies: argument, else environment, else default."""
+    if v is None:v=os.environ.get(BODY_PREFIX_ENV) or DEFAULT_BODY_PREFIX
+    if not isinstance(v,str) or not re.fullmatch('[A-Za-z][A-Za-z0-9_]{0,23}',v):
+        raise ValueError('body name prefix must be 1..24 ASCII letters, digits or underscores, starting with a letter')
+    return v
+
+def build_models_spec(pcb_path,models,body_name_prefix=None):
+    lines=['PCB|'+path(pcb_path,{'.pcbdoc'})+'|'+body_prefix(body_name_prefix)];seen=set()
     if not isinstance(models,list) or not 1<=len(models)<=128:raise ValueError('models must contain 1..128 records')
     fields={'designator','model_path','sha256','x_mm','y_mm','rotation_deg','side','footprint','bounds_xy_mm','color'}
     for m in models:

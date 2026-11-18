@@ -1785,7 +1785,7 @@ end;
 function SetComponentModelsReport(SpecPath: String): String;
 var Board: IPCB_Board; Comps: array[0..127] of IPCB_Component;
     Bodies: array[0..127] of IPCB_ComponentBody;
-    Spec,Trace: TStringList; Path,Error,Line,Ref,FileName,TracePath,Side: String;
+    Spec,Trace: TStringList; Path,Error,Line,Ref,FileName,TracePath,Side,Prefix: String;
     I,J,N,Added: Integer; R: TCoordRect; X,Y,Rot: Double; Saved,Verified: Boolean;
     It: IPCB_BoardIterator; TestComp: IPCB_Component; Matches: Integer;
 begin
@@ -1793,6 +1793,8 @@ begin
     TracePath := SpecPath+'.trace.txt'; Added := 0; Saved := False;
     try
         Spec.LoadFromFile(SpecPath); Path := GetFieldFromPipeString(Spec[0],1);
+        Prefix := GetFieldFromPipeString(Spec[0],2);
+        if Prefix = '' then Prefix := 'MCP3D_';
         Error := ModelBoardGuard(Path,Board);
         if Error <> '' then begin Result := PcbDocError(Error); Exit; end;
         N := Spec.Count-1;
@@ -1833,7 +1835,7 @@ begin
             Bodies[I] := PCBServer.PCBObjectFactory(eComponentBodyObject,eNoDimension,eCreate_Default);
             Bodies[I].LoadGenericModelFromFile(GetFieldFromPipeString(Line,2),True);
             Bodies[I].Layer := eMechanical13;
-            Bodies[I].Name := 'VYBRO3D_'+Ref+'_'+Copy(GetFieldFromPipeString(Line,3),1,12);
+            Bodies[I].Name := Prefix+Ref+'_'+Copy(GetFieldFromPipeString(Line,3),1,12);
             if GetFieldFromPipeString(Line,7)='bottom' then Bodies[I].BodyProjection := eBoardSide_Bottom
             else Bodies[I].BodyProjection := eBoardSide_Top;
             Bodies[I].Model.SetState(0,0,0,0);
