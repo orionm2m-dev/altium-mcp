@@ -10,6 +10,7 @@ dist/
 wheels/
 *.egg-info
 *.log
+*.stackdump
 *.json
 !server/resources/**/*.json
 !docs/altium-api-reference/*.json
